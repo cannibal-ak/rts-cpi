@@ -1,17 +1,82 @@
-"""Shared FastAPI dependencies — tenant context, RBAC, filter hardening."""
+"""Shared FastAPI dependencies — JWT auth, tenant context, RBAC, filter hardening."""
 
 import re
-from fastapi import Depends, Header, HTTPException
+from fastapi import Depends, Header, HTTPException, Request
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
+
 from app.core.config import settings
 from app.core.database import get_db, get_db_rls, set_tenant_context
+from app.models.user import AppUser, RoleBinding
+from app.services.auth_service import decode_token, TokenError, TokenExpiredError
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
+
+# Paths that bypass the forced-password-change gate
+PASSWORD_CHANGE_EXEMPT_PATHS = {
+    "/api/v1/auth/change-password",
+    "/api/v1/auth/me",
+    "/api/v1/auth/logout",
+    "/api/v1/auth/refresh",
+}
+
+
+# ── JWT-based current user ───────────────────────
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Decode JWT, verify user exists and is active.
+    Returns the decoded token payload augmented with must_change_password.
+    """
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    try:
+        payload = decode_token(token)
+    except TokenExpiredError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except TokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    if payload.get("token_type") != "access":
+        raise HTTPException(status_code=401, detail="Not an access token")
+
+    user = db.query(AppUser).filter(AppUser.id == payload["sub"]).first()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=401, detail="User not found or inactive")
+
+    payload["must_change_password"] = user.must_change_password
+    return payload
+
+
+# ── Forced password change middleware ─────────────
+
+def enforce_password_change(request: Request, current_user: dict = Depends(get_current_user)) -> dict:
+    """Blocks all endpoints except auth paths when must_change_password is True."""
+    if current_user.get("must_change_password") and request.url.path not in PASSWORD_CHANGE_EXEMPT_PATHS:
+        raise HTTPException(
+            status_code=403,
+            detail={"message": "Password change required", "code": "PASSWORD_CHANGE_REQUIRED"},
+        )
+    return current_user
 
 
 # ── Tenant context ─────────────────────────────
 
-def get_tenant_id(x_tenant_id: str = Header(default=None)) -> str:
-    """Extract tenant ID from header, fallback to default for local dev."""
-    return x_tenant_id or settings.default_tenant_id
+def get_tenant_id(
+    current_user: dict = Depends(get_current_user),
+    x_tenant_id: str = Header(default=None),
+) -> str:
+    """Extract tenant_id from JWT. Falls back to X-Tenant-ID header only
+    when legacy header auth is enabled via feature flag."""
+    tenant_id = current_user.get("tenant_id")
+    if tenant_id:
+        return tenant_id
+    if settings.allow_legacy_header_auth and x_tenant_id:
+        return x_tenant_id
+    return settings.default_tenant_id
 
 
 def get_tenant_db(
@@ -28,21 +93,18 @@ def get_tenant_db(
 VALID_ROLES = {"TENANT_ADMIN", "DATA_ENGINEER", "ANALYST", "REVENUE_MANAGER", "AUDITOR", "AIRLINE_USER", "CRUISE_USER"}
 
 
-def get_user_roles(x_user_roles: str = Header(default="ANALYST")) -> list[str]:
-    """Extract user roles from X-User-Roles header (comma-separated).
-    In production this would come from JWT/session; header is for dev/demo.
-    """
-    roles = [r.strip().upper() for r in x_user_roles.split(",") if r.strip()]
+def get_user_roles(current_user: dict = Depends(get_current_user)) -> list[str]:
+    """Extract user roles from JWT payload."""
+    roles = current_user.get("roles", [])
     return [r for r in roles if r in VALID_ROLES] or ["ANALYST"]
 
 
-def get_user_identity(x_user_identity: str = Header(default="SHARED")) -> str:
-    """Extract user identity from X-User-Identity header.
-    Maps "Airline_JY" -> "JY", "Airline_PW" -> "PW", etc.
-    """
-    if "_" in x_user_identity:
-        return x_user_identity.split("_")[1].upper()
-    return x_user_identity.upper()
+def get_user_identity(current_user: dict = Depends(get_current_user)) -> str:
+    """Extract user identity from JWT. Maps tenant_slug to identity."""
+    tenant_slug = current_user.get("tenant_slug", "")
+    if tenant_slug:
+        return tenant_slug.upper()
+    return "SHARED"
 
 
 class RequireRoles:

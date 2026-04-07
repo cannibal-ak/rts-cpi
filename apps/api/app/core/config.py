@@ -20,6 +20,17 @@ class Settings(BaseSettings):
     superset_admin_user: str = os.environ.get("SUPERSET_ADMIN_USER", "admin")
     superset_admin_pass: str = os.environ.get("SUPERSET_ADMIN_PASS", "admin")
     
+    # Authentication — JWT + Bcrypt (Phase 2)
+    jwt_secret_key: str = os.environ.get("JWT_SECRET_KEY", "CHANGE-ME-IN-PRODUCTION")
+    jwt_algorithm: str = os.environ.get("JWT_ALGORITHM", "HS256")
+    jwt_access_token_expire_minutes: int = int(os.environ.get("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+    jwt_refresh_token_expire_days: int = int(os.environ.get("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+    password_min_length: int = int(os.environ.get("PASSWORD_MIN_LENGTH", "12"))
+    bcrypt_rounds: int = int(os.environ.get("BCRYPT_ROUNDS", "12"))
+
+    # Feature flags
+    allow_legacy_header_auth: bool = os.environ.get("ALLOW_LEGACY_HEADER_AUTH", "false").lower() == "true"
+
     # CORS
     cors_origins: list[str] = [
         "http://localhost:5173",
