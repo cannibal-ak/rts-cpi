@@ -1,6 +1,6 @@
 /**
  * HTTP-based API client — talks to the real FastAPI backend.
- * Activated when VITE_API_BASE_URL is set.
+ * Uses JWT Bearer tokens for authentication (Phase 2).
  */
 import type { CpiApiClient, SnapshotQuery, JobQuery } from './client';
 import type {
@@ -10,57 +10,95 @@ import type {
 } from '../types';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const TENANT_ID = import.meta.env.VITE_TENANT_ID || '';
-const USER_ROLES = import.meta.env.VITE_USER_ROLES || 'TENANT_ADMIN,DATA_ENGINEER,ANALYST,AUDITOR';
+const REFRESH_KEY = 'rts_cpi_refresh_token';
+
+// Access token is stored here and managed by AuthContext
+let _accessToken: string | null = null;
+
+export function setHttpClientAccessToken(token: string | null) {
+  _accessToken = token;
+}
+
+export function getHttpClientAccessToken(): string | null {
+  return _accessToken;
+}
 
 function headers(): Record<string, string> {
   const h: Record<string, string> = { 'Content-Type': 'application/json' };
-  
-  try {
-    const stored = localStorage.getItem('rts_cpi_auth');
-    if (stored) {
-      const payload = JSON.parse(atob(stored));
-      if (payload.tenantId) h['X-Tenant-ID'] = payload.tenantId;
-      else if (TENANT_ID) h['X-Tenant-ID'] = TENANT_ID;
-
-      if (payload.name) {
-        h['X-User-Identity'] = payload.name;
-        
-        // Map names to roles for demo RBAC enforcement
-        if (payload.name === 'Alex Rivera' || payload.name === 'Tenant Admin') {
-          h['X-User-Roles'] = 'TENANT_ADMIN';
-        } else if (payload.name.includes('Airline')) {
-          h['X-User-Roles'] = 'ANALYST,AIRLINE_USER';
-        } else if (payload.name.includes('Cruise')) {
-          h['X-User-Roles'] = 'ANALYST,CRUISE_USER';
-        } else {
-          h['X-User-Roles'] = 'ANALYST';
-        }
-      }
-    } else if (TENANT_ID) {
-      h['X-Tenant-ID'] = TENANT_ID;
-      if (USER_ROLES) h['X-User-Roles'] = USER_ROLES;
-    }
-  } catch (e) {
-    if (TENANT_ID) h['X-Tenant-ID'] = TENANT_ID;
-    if (USER_ROLES) h['X-User-Roles'] = USER_ROLES;
+  if (_accessToken) {
+    h['Authorization'] = `Bearer ${_accessToken}`;
   }
-  
   return h;
+}
+
+async function attemptRefresh(): Promise<boolean> {
+  const refreshToken = localStorage.getItem(REFRESH_KEY);
+  if (!refreshToken) return false;
+
+  try {
+    const res = await fetch(`${BASE}/api/v1/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      _accessToken = data.access_token;
+      return true;
+    }
+  } catch {
+    // Refresh failed
+  }
+  return false;
 }
 
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = '';
+    let code = '';
     try {
       const errorData = await res.json();
-      detail = errorData.detail?.message || errorData.detail || JSON.stringify(errorData);
+      if (typeof errorData.detail === 'object') {
+        detail = errorData.detail.message || JSON.stringify(errorData.detail);
+        code = errorData.detail.code || '';
+      } else {
+        detail = errorData.detail || JSON.stringify(errorData);
+      }
     } catch {
       detail = res.statusText;
     }
+
+    // Handle forced password change
+    if (res.status === 403 && code === 'PASSWORD_CHANGE_REQUIRED') {
+      window.location.href = '/change-password';
+      throw new Error('Password change required');
+    }
+
     throw new Error(`API ${res.status}: ${detail}`);
   }
   return res.json();
+}
+
+async function fetchWithAuth<T>(url: string, init: RequestInit): Promise<T> {
+  let res = await fetch(url, init);
+
+  // On 401, attempt a single refresh then retry
+  if (res.status === 401) {
+    const refreshed = await attemptRefresh();
+    if (refreshed) {
+      // Update headers with new token
+      const newInit = { ...init, headers: { ...headers() } };
+      res = await fetch(url, newInit);
+    } else {
+      // Refresh failed — force logout by clearing state and redirecting
+      localStorage.removeItem(REFRESH_KEY);
+      _accessToken = null;
+      window.location.href = '/login';
+      throw new Error('Session expired');
+    }
+  }
+
+  return handleResponse<T>(res);
 }
 
 async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
@@ -71,47 +109,41 @@ async function get<T>(path: string, params?: Record<string, string | number | un
     });
   }
   try {
-    const res = await fetch(url.toString(), { headers: headers() });
-    return handleResponse<T>(res);
+    return await fetchWithAuth<T>(url.toString(), { headers: headers() });
   } catch (err: any) {
-    if (err.message.startsWith('API ')) throw err;
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
     throw new Error(`Network Error: ${err.message}. Is the backend at ${BASE} reachable?`);
   }
 }
 
 async function post<T>(path: string, body: unknown): Promise<T> {
   try {
-    const res = await fetch(`${BASE}${path}`, {
+    return await fetchWithAuth<T>(`${BASE}${path}`, {
       method: 'POST',
       headers: headers(),
       body: JSON.stringify(body),
     });
-    return handleResponse<T>(res);
   } catch (err: any) {
-    if (err.message.startsWith('API ')) throw err;
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
     throw new Error(`Network Error: ${err.message}`);
   }
 }
 
 
 async function put<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  return fetchWithAuth<T>(`${BASE}${path}`, {
     method: 'PUT',
     headers: headers(),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
-  return res.json();
 }
 
 async function patch<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  return fetchWithAuth<T>(`${BASE}${path}`, {
     method: 'PATCH',
     headers: headers(),
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`API ${res.status}: ${res.statusText}`);
-  return res.json();
 }
 
 async function download(path: string, params?: Record<string, string | number | undefined>): Promise<void> {
@@ -122,8 +154,23 @@ async function download(path: string, params?: Record<string, string | number | 
     });
   }
   const res = await fetch(url.toString(), { headers: headers() });
-  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
 
+  if (res.status === 401) {
+    const refreshed = await attemptRefresh();
+    if (refreshed) {
+      const retryRes = await fetch(url.toString(), { headers: headers() });
+      if (!retryRes.ok) throw new Error(`Download failed: ${retryRes.status}`);
+      return processDownload(retryRes);
+    }
+    window.location.href = '/login';
+    throw new Error('Session expired');
+  }
+
+  if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+  return processDownload(res);
+}
+
+async function processDownload(res: Response): Promise<void> {
   const blob = await res.blob();
   const disposition = res.headers.get('Content-Disposition');
   let filename = 'export.xlsx';
@@ -174,9 +221,7 @@ export const httpClient: CpiApiClient = {
       if (tenant) params.set('tenant', tenant);
       if (force) params.set('force', 'true');
       const qs = params.toString();
-      const url = `${BASE}/api/v1/ingestion/ingest${qs ? '?' + qs : ''}`;
-      const res = await fetch(url, { method: 'POST', headers: headers() });
-      return handleResponse<{ message: string; results: any[] }>(res);
+      return post<{ message: string; results: any[] }>(`/api/v1/ingestion/ingest${qs ? '?' + qs : ''}`, {});
     },
   },
   alerts: {
