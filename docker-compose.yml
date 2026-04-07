@@ -1,0 +1,185 @@
+# ───────────────────────────────────────────────
+# RTS CPI — Full-Stack Docker Compose
+# ───────────────────────────────────────────────
+# Quick start:
+#   docker compose up -d postgres redis rabbitmq
+#   docker compose up api
+#   docker compose --profile dev up web-dev
+#
+# Run migrations manually:
+#   docker compose exec api alembic upgrade head
+#
+# Validate RLS:
+#   docker compose exec postgres psql -U cpi -d cpi_db -f /scripts/check_rls.sql
+#   OR: ./scripts/check_rls.sh
+#
+# With Superset:
+#   docker compose --profile superset up -d superset
+# ───────────────────────────────────────────────
+
+services:
+
+  # ════════════════════════════════════════════
+  # INFRASTRUCTURE
+  # ════════════════════════════════════════════
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cpi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cpi_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-cpi_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./scripts:/scripts:ro
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cpi}" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "-q", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ════════════════════════════════════════════
+  # BACKEND — FastAPI
+  # ════════════════════════════════════════════
+
+  api:
+    build:
+      context: ./apps/api
+      target: dev
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./apps/api:/app
+      - ./:/sample_data:ro
+    environment:
+      CPI_DATABASE_URL: ${CPI_DATABASE_URL:-postgresql://cpi:cpi_secret@postgres:5432/cpi_db}
+      CPI_DATABASE_URL_RLS: ${CPI_DATABASE_URL_RLS:-postgresql://cpi_app:cpi_app_secret@postgres:5432/cpi_db}
+      CPI_DEFAULT_TENANT_ID: ${CPI_DEFAULT_TENANT_ID:-a0000000-0000-0000-0000-000000000001}
+      CPI_RABBITMQ_URL: ${CPI_RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
+      CPI_REDIS_URL: ${CPI_REDIS_URL:-redis://redis:6379/0}
+      CPI_DEBUG: "true"
+      # Superset Connection for Dynamic Resolution
+      SUPERSET_URL: ${SUPERSET_URL:-http://superset:8088}
+      SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:-admin}
+      SUPERSET_ADMIN_PASS: ${SUPERSET_ADMIN_PASS:-admin}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    entrypoint: [ "/bin/bash", "-c" ]
+    command:
+      - |
+        echo "Running Alembic migrations..."
+        alembic upgrade head
+        echo "Starting uvicorn..."
+        uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ════════════════════════════════════════════
+  # FRONTEND — Vite dev / Nginx prod
+  # ════════════════════════════════════════════
+
+  web:
+    build:
+      context: ./apps/web
+      target: dev
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+        VITE_TENANT_ID: ${VITE_TENANT_ID:-a0000000-0000-0000-0000-000000000001}
+    restart: unless-stopped
+    ports:
+      - "9090:5173"
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+      VITE_TENANT_ID: ${VITE_TENANT_ID:-a0000000-0000-0000-0000-000000000001}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost/" ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+
+  # ════════════════════════════════════════════
+  # BI — Apache Superset
+  # ════════════════════════════════════════════
+
+  superset:
+    image: apache/superset:3.1.0
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-rts-cpi-local-dev-key-change-in-prod}
+      SUPERSET_CONFIG_PATH: /app/superset_config.py
+      DATABASE_URL: postgresql://${POSTGRES_USER:-cpi}:${POSTGRES_PASSWORD:-cpi_secret}@postgres:5432/${POSTGRES_DB:-cpi_db}
+    volumes:
+      - ./infra/superset_config.py:/app/superset_config.py:ro
+      - superset_home:/app/superset_home
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: [ "/bin/bash", "-c" ]
+    command:
+      - |
+        pip install psycopg2-binary 2>/dev/null
+        superset db upgrade
+        superset fab create-admin \
+          --username $${SUPERSET_ADMIN_USER:-admin} \
+          --firstname Admin \
+          --lastname User \
+          --email admin@rts.local \
+          --password $${SUPERSET_ADMIN_PASS:-admin} 2>/dev/null || true
+        superset init
+        superset run -h 0.0.0.0 -p 8088 --with-threads
+    profiles:
+      - superset
+
+volumes:
+  pgdata:
+  superset_home:

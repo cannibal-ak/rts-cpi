@@ -1,0 +1,82 @@
+{
+  "jobs": [
+    {
+      "id": "a8c7c77e-3f90-4081-a2d4-d22baa96aec1",
+      "tenant_id": "a0000000-0000-0000-0000-000000000001",
+      "domain": "airline",
+      "status": "committed",
+      "source": "daily-ingest:JY/Airline_CPI_JY_2026-02-20.csv",
+      "started_at": "2026-03-19 09:54:59.887930+00:00"
+    },
+    {
+      "id": "1021f1d7-715b-49ab-b75b-9b8497e9afc0",
+      "tenant_id": "a0000000-0000-0000-0000-000000000001",
+      "domain": "airline",
+      "status": "committed",
+      "source": "daily-ingest:JY/Airline_CPI_JY_2026-02-20.csv",
+      "started_at": "2026-03-19 09:48:05.711157+00:00"
+    },
+    {
+      "id": "379a1b5e-92ec-4cdf-837f-5eeba7a0559f",
+      "tenant_id": "a0000000-0000-0000-0000-000000000001",
+      "domain": "airline",
+      "status": "committed",
+      "source": "Local: JY/JY_200226.csv",
+      "started_at": "2026-03-17 13:10:03.606652+00:00"
+    },
+    {
+      "id": "f4ea8cf3-09a1-4e67-a1e6-32686253e37c",
+      "tenant_id": "a0000000-0000-0000-0000-000000000001",
+      "domain": "airline",
+      "status": "committed",
+      "source": "Local: PW/PW_210226.csv",
+      "started_at": "2026-03-17 13:10:03.606652+00:00"
+    },
+    {
+      "id": "428636c2-8fd2-46a1-96d0-627d96edd234",
+      "tenant_id": "a0000000-0000-0000-0000-000000000001",
+      "domain": "cfl",
+      "status": "committed",
+      "source": "Local: FJL/FJL_210226.csv",
+      "started_at": "2026-03-17 13:10:03.606652+00:00"
+    }
+  ],
+  "tenants": [
+    {
+      "id": "a0000000-0000-0000-0000-000000000001",
+      "slug": "acme-airways",
+      "name": "Acme Airways"
+    },
+    {
+      "id": "b0000000-0000-0000-0000-000000000002",
+      "slug": "baltic-ferries",
+      "name": "Baltic Ferries"
+    },
+    {
+      "id": "bb000000-0000-0000-0000-000000000001",
+      "slug": "pw",
+      "name": "Skybound - PW"
+    },
+    {
+      "id": "cc000000-0000-0000-0000-000000000001",
+      "slug": "fjl",
+      "name": "Baltic Ferries - FJL"
+    }
+  ],
+  "airline_cpi_snapshot": [
+    {
+      "tenant_id": "bb000000-0000-0000-0000-000000000001",
+      "tenant_code": "PW"
+    },
+    {
+      "tenant_id": "a0000000-0000-0000-0000-000000000001",
+      "tenant_code": "JY"
+    }
+  ],
+  "cfl_cpi_snapshot": [
+    {
+      "tenant_id": "cc000000-0000-0000-0000-000000000001",
+      "tenant_code": "FJL"
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+# =============================================================================
+# RTS CPI — .gitignore
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.cover
+
+# ---------------------------------------------------------------------------
+# Node / Frontend
+# ---------------------------------------------------------------------------
+node_modules/
+apps/web/dist/
+.vite/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---------------------------------------------------------------------------
+# Environment & Secrets (NEVER commit)
+# ---------------------------------------------------------------------------
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+secrets/
+credentials.json
+
+# ---------------------------------------------------------------------------
+# Claude Code
+# ---------------------------------------------------------------------------
+.claude/
+
+# ---------------------------------------------------------------------------
+# IDE & OS
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# Docker
+# ---------------------------------------------------------------------------
+docker-compose.override.yml
+
+# ---------------------------------------------------------------------------
+# Project-specific: debug artifacts & temp files
+# ---------------------------------------------------------------------------
+tmp/
+*.bak
+*.tmp
+
+# Data files (keep folder structure via .gitkeep)
+apps/api/data/**/*.csv
+apps/api/data/**/*.xlsx
+apps/api/data/**/*.json
+!apps/api/data/.gitkeep
+
+# Loose debug/log files in project root
+alembic_error*.txt
+api-logs*.txt
+api_logs*.txt
+error*.txt
+error_log.txt
+seed_error.txt
+seed_log.txt
+containers.txt
+tables.txt
+temp_logs.txt
+superset_dashboards.txt
+superset_ids.txt
+superset_logs.txt
+fjl_headers_list.txt
+jy_header*.txt
+jy_headers_list.txt
+jy_row_*.txt
+debug_layout.js
+
+# ---------------------------------------------------------------------------
+# Logs
+# ---------------------------------------------------------------------------
+logs/
+
+# ---------------------------------------------------------------------------
+# Database dumps & backups
+# ---------------------------------------------------------------------------
+*.sql.gz
+*.dump
+backups/

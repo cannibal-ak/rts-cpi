@@ -1,0 +1,489 @@
+
+================================================================
+   COMPLETE MIGRATION GUIDE - CPI App to Remote Server
+================================================================
+
+YOUR SETUP:
+  - Local Machine  : Your Windows PC (where Docker Desktop runs)
+  - Remote Server   : 192.168.101.10
+  - SSH User        : ankitprajapati
+  - SSH Auth        : Password based
+  - Project Folder  : C:\Users\Ankit.Prajapati\Desktop\CPI\CPI
+
+YOUR 6 SERVICES:
+  1. postgres      (image: postgres:16-alpine)       - Database
+  2. redis         (image: redis:7-alpine)            - Cache
+  3. rabbitmq      (image: rabbitmq:3.13-mgmt-alpine) - Message queue
+  4. api           (image: cpi-api, custom built)     - Backend (FastAPI)
+  5. web           (image: cpi-web, custom built)     - Frontend (Vite)
+  6. superset      (image: apache/superset:3.1.0)     - BI Dashboards
+
+
+================================================================
+PHASE 1: PREPARE ON YOUR LOCAL MACHINE
+================================================================
+Open PowerShell (or CMD) on your Windows PC.
+Right-click Start menu > "Windows PowerShell"
+
+--------
+STEP 1: Go to your project folder
+--------
+COMMAND:
+  cd C:\Users\Ankit.Prajapati\Desktop\CPI\CPI
+
+WHY: All commands need to run from your project folder.
+
+HOW TO CHECK:
+  dir
+  You should see: docker-compose.yml, .env, apps\, infra\, etc.
+
+
+--------
+STEP 2: Make sure all containers are running
+--------
+COMMAND:
+  docker ps
+
+WHY: We need all services running before we can backup data.
+
+HOW TO CHECK:
+  You should see 6 containers listed:
+    cpi-postgres-1    - Status: Up (healthy)
+    cpi-redis-1       - Status: Up (healthy)
+    cpi-rabbitmq-1    - Status: Up (healthy)
+    cpi-api-1         - Status: Up
+    cpi-web-1         - Status: Up
+    cpi-superset-1    - Status: Up (healthy)
+
+IF CONTAINERS ARE NOT RUNNING:
+  docker compose --profile superset up -d
+  Wait 1-2 minutes, then run "docker ps" again.
+
+
+--------
+STEP 3: Backup your PostgreSQL database
+--------
+COMMAND:
+  docker exec cpi-postgres-1 pg_dumpall -U cpi > pg_backup.sql
+
+WHAT THIS DOES:
+  - Goes inside the postgres container
+  - Dumps ALL your data (tables, users, permissions)
+  - Saves it as a file called "pg_backup.sql" in your project folder
+
+HOW TO CHECK:
+  dir pg_backup.sql
+  - File should exist
+  - File size should be > 0 bytes (probably several KB or MB)
+  - You can open it in Notepad to see SQL commands inside
+
+
+--------
+STEP 4: Backup Superset dashboards (if you have any)
+--------
+COMMAND:
+  docker run --rm -v cpi_superset_home:/data -v %cd%\tmp:/backup alpine tar czf /backup/superset_home.tar.gz -C /data .
+
+WHAT THIS DOES:
+  - Creates a temporary tiny Linux container
+  - Copies everything from Superset's data folder
+  - Compresses it into tmp\superset_home.tar.gz
+
+HOW TO CHECK:
+  dir tmp\superset_home.tar.gz
+  - File should exist and have some size
+
+NOTE: If you get "volume not found", try this first:
+  docker volume ls
+  Look for the exact superset volume name (might be "cpi_superset_home"
+  or "cpi-superset_home") and replace it in the command above.
+
+
+================================================================
+PHASE 2: TRANSFER FILES TO REMOTE SERVER
+================================================================
+
+--------
+STEP 5: Test that you can connect to the remote server
+--------
+COMMAND:
+  ssh ankitprajapati@192.168.101.10
+
+WHAT THIS DOES:
+  - Connects to the remote server via SSH
+  - It will ask: "Are you sure you want to continue connecting?" -> Type: yes
+  - Then it will ask for password -> Type your password
+
+HOW TO CHECK:
+  - You should see a Linux terminal prompt like:
+    ankitprajapati@server:~$
+  - Type "exit" to come back to your local machine
+
+IF IT FAILS:
+  - "Connection refused" -> SSH not installed on remote server
+  - "Connection timed out" -> Wrong IP or firewall blocking
+  - "Permission denied" -> Wrong password
+
+
+--------
+STEP 6: Create a folder on the remote server
+--------
+COMMAND:
+  ssh ankitprajapati@192.168.101.10 "mkdir -p ~/CPI"
+
+WHAT THIS DOES:
+  - Runs a command on the remote server (without fully logging in)
+  - Creates a folder /home/ankitprajapati/CPI
+
+HOW TO CHECK:
+  ssh ankitprajapati@192.168.101.10 "ls -la ~/"
+  You should see a "CPI" folder in the list.
+
+
+--------
+STEP 7: Copy ALL project files to remote server
+--------
+COMMAND:
+  scp -r C:\Users\Ankit.Prajapati\Desktop\CPI\CPI\* ankitprajapati@192.168.101.10:~/CPI/
+
+WHAT THIS DOES:
+  - scp = Secure Copy (copies files over SSH)
+  - -r = Recursive (copies folders and everything inside)
+  - Copies everything from your project to the remote server
+
+HOW TO CHECK:
+  ssh ankitprajapati@192.168.101.10 "ls -la ~/CPI/"
+  You should see: docker-compose.yml, .env, apps/, infra/, pg_backup.sql, etc.
+
+NOTE: This might take several minutes depending on your network speed.
+      It will ask for password each time (or you can set up SSH keys later).
+
+IF SCP IS NOT AVAILABLE, use this alternative:
+  - Install WinSCP (free) from https://winscp.net
+  - Connect to 192.168.101.10 with your credentials
+  - Drag and drop the CPI folder
+
+
+================================================================
+PHASE 3: SET UP ON REMOTE SERVER
+================================================================
+Now we work entirely on the remote server.
+
+--------
+STEP 8: Login to the remote server
+--------
+COMMAND:
+  ssh ankitprajapati@192.168.101.10
+
+Enter your password when asked.
+
+
+--------
+STEP 9: Check Docker is installed on remote server
+--------
+COMMANDS:
+  docker --version
+  docker compose version
+
+EXPECTED OUTPUT:
+  Docker version 24.x.x (or newer)
+  Docker Compose version v2.x.x (or newer)
+
+IF DOCKER IS NOT INSTALLED:
+  For Ubuntu/Debian:
+    sudo apt update
+    sudo apt install -y docker.io docker-compose-v2
+    sudo usermod -aG docker $USER
+    (Log out and log back in after this)
+
+  For CentOS/RHEL:
+    sudo yum install -y docker docker-compose-plugin
+    sudo systemctl start docker
+    sudo usermod -aG docker $USER
+    (Log out and log back in after this)
+
+HOW TO VERIFY DOCKER WORKS:
+  docker run hello-world
+  Should print "Hello from Docker!"
+
+
+--------
+STEP 10: Go to the project folder
+--------
+COMMAND:
+  cd ~/CPI
+
+HOW TO CHECK:
+  ls -la
+  You should see all your files: docker-compose.yml, .env, apps/, etc.
+
+
+--------
+STEP 11: Update the .env file for the remote server
+--------
+COMMAND:
+  nano .env
+
+WHAT TO CHANGE:
+  Find this line:
+    VITE_API_BASE_URL=http://localhost:8000
+
+  Change it to:
+    VITE_API_BASE_URL=http://192.168.101.10:8000
+
+WHY: The frontend needs to know the API is now on this server,
+     not on "localhost" anymore.
+
+HOW TO SAVE IN NANO:
+  1. Make the change
+  2. Press Ctrl+O (letter O, not zero) to save
+  3. Press Enter to confirm
+  4. Press Ctrl+X to exit
+
+HOW TO CHECK:
+  cat .env
+  Verify VITE_API_BASE_URL shows the new IP.
+
+  If you are not comfortable with nano, you can also do:
+    sed -i 's|VITE_API_BASE_URL=http://localhost:8000|VITE_API_BASE_URL=http://192.168.101.10:8000|' .env
+
+
+--------
+STEP 12: Build and start ALL services
+--------
+COMMAND:
+  docker compose --profile superset up -d --build
+
+WHAT THIS DOES:
+  - Downloads public images from Docker Hub:
+      postgres:16-alpine
+      redis:7-alpine
+      rabbitmq:3.13-management-alpine
+      apache/superset:3.1.0
+  - Builds custom images from source code:
+      cpi-api (from apps/api/Dockerfile)
+      cpi-web (from apps/web/Dockerfile)
+  - --profile superset = also starts Superset
+  - -d = runs in background (detached)
+  - --build = forces building the custom images
+
+THIS WILL TAKE 5-15 MINUTES (first time, downloading + building)
+
+HOW TO CHECK PROGRESS:
+  docker compose logs -f
+  (Press Ctrl+C to stop watching logs)
+
+HOW TO CHECK FINAL STATUS:
+  docker compose --profile superset ps
+
+EXPECTED OUTPUT (all should show "Up"):
+  cpi-postgres-1    Up (healthy)
+  cpi-redis-1       Up (healthy)
+  cpi-rabbitmq-1    Up (healthy)
+  cpi-api-1         Up (healthy)
+  cpi-web-1         Up
+  cpi-superset-1    Up (healthy)
+
+IF A CONTAINER SHOWS "Exit" or "Restarting":
+  docker compose logs <service-name> --tail 100
+  Example: docker compose logs api --tail 100
+  This shows what went wrong.
+
+
+--------
+STEP 13: Wait for PostgreSQL to be healthy
+--------
+COMMAND:
+  docker compose ps postgres
+
+Wait until STATUS shows "Up (healthy)".
+Usually takes 10-30 seconds.
+
+You can also watch it live:
+  watch docker compose ps postgres
+  (Press Ctrl+C when it shows healthy)
+
+
+--------
+STEP 14: Restore your database backup
+--------
+COMMAND:
+  docker exec -i cpi-postgres-1 psql -U cpi -d cpi_db < pg_backup.sql
+
+WHAT THIS DOES:
+  - Feeds your backup SQL file into the PostgreSQL container
+  - Recreates all your tables, data, users, and permissions
+
+EXPECTED OUTPUT:
+  - You will see many lines like:
+      CREATE ROLE
+      CREATE DATABASE
+      CREATE TABLE
+      INSERT 0 1
+      etc.
+  - Some "already exists" warnings are NORMAL (not errors)
+
+ACTUAL ERRORS TO WORRY ABOUT:
+  - "FATAL: ..." = serious problem
+  - "connection refused" = postgres not running yet
+
+HOW TO CHECK DATA WAS RESTORED:
+  docker exec cpi-postgres-1 psql -U cpi -d cpi_db -c "\dt"
+
+  This lists all tables. You should see your application tables.
+
+
+--------
+STEP 15: Restore Superset dashboards
+--------
+COMMANDS:
+  docker compose --profile superset stop superset
+  docker run --rm -v cpi_superset_home:/data -v $(pwd)/tmp:/backup alpine sh -c "cd /data && tar xzf /backup/superset_home.tar.gz"
+  docker compose --profile superset up -d superset
+
+WHAT THIS DOES:
+  1. Stops Superset temporarily
+  2. Extracts your dashboard backup into Superset's volume
+  3. Restarts Superset with the restored data
+
+HOW TO CHECK:
+  docker compose --profile superset ps superset
+  Should show "Up (healthy)" after a minute or two.
+
+
+--------
+STEP 16: Restart the API to ensure clean connection
+--------
+COMMAND:
+  docker compose restart api
+
+WHY: Ensures the API reconnects to the restored database cleanly.
+
+HOW TO CHECK:
+  docker compose logs api --tail 20
+  Should show "Starting uvicorn..." without errors.
+
+
+================================================================
+PHASE 4: VERIFY EVERYTHING WORKS
+================================================================
+
+--------
+STEP 17: Check all containers are running
+--------
+COMMAND:
+  docker compose --profile superset ps
+
+ALL 6 SERVICES SHOULD SHOW "Up":
+  cpi-postgres-1    -> Up (healthy)
+  cpi-redis-1       -> Up (healthy)
+  cpi-rabbitmq-1    -> Up (healthy)
+  cpi-api-1         -> Up (healthy)
+  cpi-web-1         -> Up
+  cpi-superset-1    -> Up (healthy)
+
+
+--------
+STEP 18: Test each service from the server
+--------
+COMMANDS:
+  curl http://localhost:8000/          # Test API
+  curl http://localhost:8080/          # Test Frontend
+  docker exec cpi-redis-1 redis-cli ping   # Test Redis (expect: PONG)
+
+EXPECTED:
+  - API: Returns JSON or HTML response (not "connection refused")
+  - Frontend: Returns HTML content
+  - Redis: Returns "PONG"
+
+
+--------
+STEP 19: Test from your browser (on your local PC)
+--------
+Open these URLs in Chrome/Firefox on your local machine:
+
+  Frontend:  http://192.168.101.10:8080
+  API:       http://192.168.101.10:8000
+  RabbitMQ:  http://192.168.101.10:15672  (login: guest / guest)
+  Superset:  http://192.168.101.10:8088   (login: admin / admin)
+
+IF PAGES DON'T LOAD:
+  The remote server firewall might be blocking ports.
+  On the remote server, run:
+
+  For Ubuntu/Debian (ufw):
+    sudo ufw allow 8080/tcp
+    sudo ufw allow 8000/tcp
+    sudo ufw allow 8088/tcp
+    sudo ufw allow 15672/tcp
+
+  For CentOS/RHEL (firewalld):
+    sudo firewall-cmd --permanent --add-port=8080/tcp
+    sudo firewall-cmd --permanent --add-port=8000/tcp
+    sudo firewall-cmd --permanent --add-port=8088/tcp
+    sudo firewall-cmd --permanent --add-port=15672/tcp
+    sudo firewall-cmd --reload
+
+
+================================================================
+TROUBLESHOOTING CHEAT SHEET
+================================================================
+
+PROBLEM: Container keeps restarting
+  docker compose logs <service-name> --tail 100
+
+PROBLEM: "port already in use"
+  sudo lsof -i :<port-number>
+  sudo kill <PID>
+
+PROBLEM: "permission denied" on Docker
+  sudo usermod -aG docker $USER
+  Then log out and log back in.
+
+PROBLEM: Build fails for api or web
+  Check Dockerfiles exist:
+    ls apps/api/Dockerfile
+    ls apps/web/Dockerfile
+
+PROBLEM: Database connection error in API
+  docker compose logs api --tail 50
+  Make sure postgres is healthy:
+    docker compose ps postgres
+
+PROBLEM: Frontend shows blank page or API errors
+  Check VITE_API_BASE_URL in .env is set to:
+    http://192.168.101.10:8000
+  Then rebuild: docker compose up -d --build web
+
+
+================================================================
+QUICK REFERENCE - ALL COMMANDS IN ORDER
+================================================================
+
+--- ON LOCAL MACHINE (PowerShell) ---
+cd C:\Users\Ankit.Prajapati\Desktop\CPI\CPI
+docker ps
+docker exec cpi-postgres-1 pg_dumpall -U cpi > pg_backup.sql
+docker run --rm -v cpi_superset_home:/data -v %cd%\tmp:/backup alpine tar czf /backup/superset_home.tar.gz -C /data .
+ssh ankitprajapati@192.168.101.10 "mkdir -p ~/CPI"
+scp -r C:\Users\Ankit.Prajapati\Desktop\CPI\CPI\* ankitprajapati@192.168.101.10:~/CPI/
+
+--- ON REMOTE SERVER (SSH) ---
+ssh ankitprajapati@192.168.101.10
+docker --version
+docker compose version
+cd ~/CPI
+sed -i 's|VITE_API_BASE_URL=http://localhost:8000|VITE_API_BASE_URL=http://192.168.101.10:8000|' .env
+docker compose --profile superset up -d --build
+docker compose ps postgres
+docker exec -i cpi-postgres-1 psql -U cpi -d cpi_db < pg_backup.sql
+docker compose --profile superset stop superset
+docker run --rm -v cpi_superset_home:/data -v $(pwd)/tmp:/backup alpine sh -c "cd /data && tar xzf /backup/superset_home.tar.gz"
+docker compose --profile superset up -d superset
+docker compose restart api
+docker compose --profile superset ps
+curl http://localhost:8000/
+curl http://localhost:8080/
+docker exec cpi-redis-1 redis-cli ping
+
+================================================================
