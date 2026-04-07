@@ -5,12 +5,12 @@ Runs Alembic migrations on startup for dev convenience.
 """
 
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.routers import health, airline, cfl, alerts, audit, admin, tenant, stats, superset, ingestion
-
+from app.core.deps import enforce_password_change
+from app.routers import health, auth, airline, cfl, alerts, audit, admin, tenant, stats, superset, ingestion
 
 
 @asynccontextmanager
@@ -35,16 +35,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Public routers (no auth required)
 app.include_router(health.router)
-app.include_router(airline.router)
-app.include_router(cfl.router)
-app.include_router(alerts.router)
-app.include_router(audit.router)
-app.include_router(admin.router)
-app.include_router(tenant.router)
-app.include_router(stats.router)
-app.include_router(superset.router)
-app.include_router(ingestion.router)
+
+# Auth router (handles its own auth)
+app.include_router(auth.router)
+
+# Protected routers — JWT + forced password change enforced
+_protected = [Depends(enforce_password_change)]
+app.include_router(airline.router, dependencies=_protected)
+app.include_router(cfl.router, dependencies=_protected)
+app.include_router(alerts.router, dependencies=_protected)
+app.include_router(audit.router, dependencies=_protected)
+app.include_router(admin.router, dependencies=_protected)
+app.include_router(tenant.router, dependencies=_protected)
+app.include_router(stats.router, dependencies=_protected)
+app.include_router(superset.router, dependencies=_protected)
+app.include_router(ingestion.router, dependencies=_protected)
 
 
 @app.get("/")
@@ -53,9 +60,5 @@ def root():
         "service": settings.app_name,
         "version": "0.2.0",
         "docs": "/docs",
-        "tenant_header": "X-Tenant-ID",
-        "demo_tenants": {
-            "acme_airways": "a0000000-0000-0000-0000-000000000001",
-            "baltic_ferries": "b0000000-0000-0000-0000-000000000002",
-        },
+        "auth": "/api/v1/auth/login",
     }
