@@ -8,9 +8,10 @@ import { useSession } from '../../context/SessionContext';
  * AuthGuard wraps all protected routes.
  * - While checking auth state it shows a loading spinner.
  * - If not authenticated it redirects to /login, preserving the intended URL.
+ * - If must_change_password is true, redirects to /change-password.
  */
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
-    const { isAuthenticated, isLoading } = useAuth();
+    const { isAuthenticated, isLoading, mustChangePassword } = useAuth();
     const { isSyncing } = useSession();
     const location = useLocation();
 
@@ -26,8 +27,12 @@ export default function AuthGuard({ children }: { children: React.ReactNode }) {
     }
 
     if (!isAuthenticated) {
-        // Save the path user was trying to visit so we can redirect after login
         return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+    }
+
+    // Forced password change — only allow /change-password
+    if (mustChangePassword && location.pathname !== '/change-password') {
+        return <Navigate to="/change-password" replace />;
     }
 
     return <>{children}</>;
