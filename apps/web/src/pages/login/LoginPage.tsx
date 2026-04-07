@@ -7,30 +7,38 @@ import {
     Typography,
     Alert,
     CircularProgress,
-    FormControlLabel,
-    Checkbox,
     InputAdornment,
     IconButton,
+    MenuItem,
 } from '@mui/material';
 import { Visibility, VisibilityOff, LockOutlined } from '@mui/icons-material';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useSession } from '../../context/SessionContext';
 
+const TENANT_OPTIONS = [
+    { slug: 'jy', label: 'JY Airways' },
+    { slug: 'pw', label: 'PW Airlines' },
+    { slug: 'fjl', label: 'FJL Cruise' },
+    { slug: 'skywave', label: 'Skywave (Admin)' },
+];
+
 export default function LoginPage() {
-    const { login, isAuthenticated } = useAuth();
+    const { login, isAuthenticated, mustChangePassword } = useAuth();
     const { session, isSyncing } = useSession();
+    const navigate = useNavigate();
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [tenantSlug, setTenantSlug] = useState('skywave');
     const [showPassword, setShowPassword] = useState(false);
-    const [remember, setRemember] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
-    // If already logged in, redirect to appropriate landing page
+    // If already logged in, redirect appropriately
     if (isAuthenticated) {
-        // Wait for session to sync with current auth user to prevent landing on wrong user's page
+        if (mustChangePassword) return <Navigate to="/change-password" replace />;
+
         if (isSyncing) {
             return (
                 <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -40,8 +48,6 @@ export default function LoginPage() {
         }
 
         if (session.user.roles.includes('TENANT_ADMIN')) return <Navigate to="/" replace />;
-        
-        // All other tenant users land on the Dashboards listing page by default
         return <Navigate to="/dashboards" replace />;
     }
 
@@ -59,12 +65,13 @@ export default function LoginPage() {
         }
 
         setLoading(true);
-        const result = await login(email, password);
+        const result = await login(email, password, tenantSlug);
         setLoading(false);
 
         if (!result.success) {
             setError(result.error || 'Login failed');
         }
+        // On success, AuthContext updates state → re-render → Navigate triggers above
     };
 
     return (
@@ -125,13 +132,29 @@ export default function LoginPage() {
                 {/* Form */}
                 <Box component="form" onSubmit={handleSubmit} noValidate>
                     <TextField
+                        id="login-tenant"
+                        select
+                        label="Tenant"
+                        fullWidth
+                        value={tenantSlug}
+                        onChange={(e) => setTenantSlug(e.target.value)}
+                        sx={{ mb: 2 }}
+                    >
+                        {TENANT_OPTIONS.map((t) => (
+                            <MenuItem key={t.slug} value={t.slug}>
+                                {t.label}
+                            </MenuItem>
+                        ))}
+                    </TextField>
+
+                    <TextField
                         id="login-email"
                         label="Email Address"
                         type="email"
                         fullWidth
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
-                        placeholder="admin@skywave.com"
+                        placeholder="user@example.com"
                         autoComplete="email"
                         autoFocus
                         sx={{ mb: 2 }}
@@ -146,7 +169,7 @@ export default function LoginPage() {
                         onChange={(e) => setPassword(e.target.value)}
                         placeholder="Enter password"
                         autoComplete="current-password"
-                        sx={{ mb: 1 }}
+                        sx={{ mb: 2.5 }}
                         InputProps={{
                             endAdornment: (
                                 <InputAdornment position="end">
@@ -162,20 +185,6 @@ export default function LoginPage() {
                             ),
                         }}
                     />
-
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2.5 }}>
-                        <FormControlLabel
-                            control={
-                                <Checkbox
-                                    checked={remember}
-                                    onChange={(e) => setRemember(e.target.checked)}
-                                    size="small"
-                                    color="primary"
-                                />
-                            }
-                            label={<Typography variant="body2">Remember me</Typography>}
-                        />
-                    </Box>
 
                     <Button
                         id="login-submit"
@@ -193,13 +202,13 @@ export default function LoginPage() {
                             borderRadius: 2,
                         }}
                     >
-                        {loading ? 'Signing in…' : 'Sign In'}
+                        {loading ? 'Signing in...' : 'Sign In'}
                     </Button>
                 </Box>
 
-                {/* Footer hint */}
+                {/* Footer */}
                 <Typography variant="caption" color="text.disabled" sx={{ mt: 3, display: 'block' }}>
-                    Demo: admin@skywave.com / admin123
+                    Initial passwords are generated by the seed script and must be changed on first login.
                 </Typography>
             </Paper>
         </Box>

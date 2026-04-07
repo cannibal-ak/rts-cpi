@@ -17,6 +17,7 @@ import SupersetPage from './pages/superset/SupersetPage';
 import DashboardViewerPage from './pages/superset/DashboardViewerPage';
 import NotAuthorizedPage from './pages/NotAuthorizedPage';
 import NotFoundPage from './pages/NotFoundPage';
+import ChangePasswordPage from './pages/auth/ChangePasswordPage';
 
 /**
  * RootRoute handles the logic for the base path "/".
@@ -41,6 +42,13 @@ export default function App() {
             <Routes>
               {/* Public route — login page */}
               <Route path="/login" element={<LoginPage />} />
+
+              {/* Change password — accessible when authenticated, bypasses AuthGuard's password check */}
+              <Route path="/change-password" element={
+                <AuthGuard>
+                  <ChangePasswordPage />
+                </AuthGuard>
+              } />
 
               {/* Protected routes — all wrapped in AuthGuard + MainLayout */}
               <Route
