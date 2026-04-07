@@ -31,6 +31,7 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 | `CPI_REDIS_URL` | `openssl rand -hex 16` if Redis AUTH is enabled | Default local dev uses no password |
 | `SUPERSET_SECRET_KEY` | `openssl rand -hex 32` | Flask session signing key — must be stable across restarts |
 | `SUPERSET_ADMIN_PASS` | `openssl rand -hex 16` | Change from default immediately in non-dev environments |
+| `JWT_SECRET_KEY` | `openssl rand -hex 32` | 64-char hex, used for signing JWTs — see rotation procedure below |
 
 ---
 
@@ -102,6 +103,18 @@ echo "your-strong-password" | docker secret create postgres_password -
 | Local dev | Never (disposable) | Rebuild from `.env.example` |
 | Staging | Every 90 days | Manual or Vault dynamic secrets |
 | Production | Every 30 days | Automated rotation (Vault / AWS / Azure) |
+
+### JWT Secret Rotation Procedure
+
+1. Generate a new `JWT_SECRET_KEY`: `openssl rand -hex 32`
+2. Update the secret in your secrets store (`.env` for dev, Vault/AWS/Azure for prod).
+3. Restart the API service. All existing access tokens become invalid immediately.
+4. Users with valid refresh tokens will get new access tokens signed with the new key
+   on their next refresh attempt — their refresh tokens are also invalidated, forcing re-login.
+5. Communicate the rotation window to the team; users will need to log in again.
+
+> **Note:** In Phase 7, a dual-key verification window will be implemented to allow
+> graceful rotation without forcing all users to re-login simultaneously.
 
 ### Rotation Checklist
 
