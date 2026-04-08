@@ -1,7 +1,11 @@
-"""Seed temporary passwords for existing demo users.
+"""Verify canonical demo user passwords are seeded.
 
-Idempotent: skips users that already have a password_hash set.
-Prints a summary table with temporary passwords for first-time login.
+Migration 016 creates the 4 canonical users with bcrypt-hashed temporary
+passwords directly. This script is now an IDEMPOTENT VERIFICATION TOOL:
+
+  - Checks that each canonical user has a password_hash set
+  - As a safety net, seeds the hash if somehow missing
+  - Prints a summary table
 
 Usage:
     docker compose exec api python scripts/seed_auth_passwords.py
@@ -9,78 +13,77 @@ Usage:
 
 import os
 import sys
-import secrets
-import string
 
-# Ensure app package is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-
+from sqlalchemy import create_engine, text
 from app.core.config import settings
-from app.models.user import AppUser
-from app.models.tenant import Tenant
-from app.services.auth_service import hash_password
 
-# Connect using superuser engine (not RLS)
+CANONICAL_USERS = [
+    ("admin@skywave.com",  "admin123",   "skywave"),
+    ("jy@airline.com",     "airline123", "jy"),
+    ("pw@airline.com",     "airline123", "pw"),
+    ("fjl@cruise.com",     "cruise123",  "fjl"),
+]
+
 engine = create_engine(settings.database_url, pool_pre_ping=True)
-Session = sessionmaker(bind=engine)
-
-
-def generate_temp_password(length: int = 16) -> str:
-    """Generate a strong temporary password meeting all complexity rules."""
-    alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
-    while True:
-        pwd = "".join(secrets.choice(alphabet) for _ in range(length))
-        # Ensure it meets all rules
-        if (any(c.isupper() for c in pwd) and
-            any(c.islower() for c in pwd) and
-            any(c.isdigit() for c in pwd) and
-            any(c in "!@#$%^&*" for c in pwd)):
-            return pwd
 
 
 def main():
-    db = Session()
-    try:
-        users = db.query(AppUser).all()
-        if not users:
-            print("No users found in app_user table.")
-            return
+    from passlib.context import CryptContext
+    pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-        results = []
+    results = []
+    patched = 0
 
-        for user in users:
-            tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
-            tenant_slug = tenant.slug if tenant else "unknown"
+    with engine.connect() as conn:
+        for email, temp_pw, expected_slug in CANONICAL_USERS:
+            row = conn.execute(text(
+                "SELECT u.id, u.password_hash, u.must_change_password, t.slug "
+                "FROM app_user u JOIN tenant t ON t.id = u.tenant_id "
+                "WHERE u.email = :email"
+            ), {"email": email}).fetchone()
 
-            if user.password_hash:
-                results.append((user.email, tenant_slug, "<already set>", user.must_change_password))
+            if row is None:
+                results.append((email, expected_slug, "MISSING USER", "N/A"))
                 continue
 
-            temp_password = generate_temp_password()
-            user.password_hash = hash_password(temp_password)
-            user.must_change_password = True
+            uid, pw_hash, must_change, slug = row
 
-            results.append((user.email, tenant_slug, temp_password, True))
+            if pw_hash:
+                results.append((email, slug, "YES", str(must_change)))
+                print(f"SKIP {email} — already seeded")
+            else:
+                # Safety net: seed if migration 016 somehow didn't set it
+                h = pwd_ctx.hash(temp_pw)
+                conn.execute(text(
+                    "UPDATE app_user SET password_hash = :h, must_change_password = true "
+                    "WHERE id = :uid"
+                ), {"h": h, "uid": uid})
+                results.append((email, slug, "SET (safety net)", "true"))
+                patched += 1
+                print(f"SET  {email} — password seeded (safety net)")
 
-        db.commit()
+        if patched > 0:
+            conn.commit()
 
-        # Print summary table
-        print("\n" + "=" * 80)
-        print("SEED AUTH PASSWORDS — Summary")
-        print("=" * 80)
-        print(f"{'Email':<30} {'Tenant':<10} {'Temp Password':<20} {'Must Change'}")
-        print("-" * 80)
-        for email, tenant_slug, pwd, must_change in results:
-            print(f"{email:<30} {tenant_slug:<10} {pwd:<20} {must_change}")
-        print("=" * 80)
-        print(f"\nTotal users processed: {len(results)}")
-        print("All users must change their password on first login.\n")
+    # Summary table
+    print("\n" + "=" * 78)
+    print("SEED AUTH PASSWORDS — Verification Summary")
+    print("=" * 78)
+    print(f"{'Email':<25} {'Tenant':<10} {'Hash Set':<20} {'Must Change'}")
+    print("-" * 78)
+    for email, slug, hash_status, must_change in results:
+        print(f"{email:<25} {slug:<10} {hash_status:<20} {must_change}")
+    print("=" * 78)
+    print(f"Total: {len(results)} users checked, {patched} patched\n")
 
-    finally:
-        db.close()
+    # Exit code
+    missing = sum(1 for r in results if r[2] == "MISSING USER")
+    if missing:
+        print(f"ERROR: {missing} canonical user(s) not found in database!")
+        sys.exit(1)
+    sys.exit(0)
 
 
 if __name__ == "__main__":
