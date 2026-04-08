@@ -146,5 +146,43 @@ feature flag.
 docker compose exec api python scripts/seed_auth_passwords.py
 ```
 
-This generates random temporary passwords for all existing users and prints
-them to stdout. All users are marked with `must_change_password = TRUE`.
+Migration 016 creates all canonical users with bcrypt-hashed temporary
+passwords. The seed script is now an idempotent verification tool that
+confirms each user has a `password_hash` set.
+
+---
+
+## Canonical Demo Users
+
+> **Added by migration 016.** The original acme-airways / baltic-ferries
+> users from migration 004 were superseded. Migration 016 deletes those
+> users, renames tenant acme-airways to skywave, and inserts the canonical
+> identity model below.
+
+| Email | Tenant Slug | Display Name | Role | Temp Password |
+|---|---|---|---|---|
+| `admin@skywave.com` | `skywave` | Alex Rivera | TENANT_ADMIN | `admin123` |
+| `jy@airline.com` | `jy` | JY Airline Admin | TENANT_ADMIN | `airline123` |
+| `pw@airline.com` | `pw` | PW Airline Admin | TENANT_ADMIN | `airline123` |
+| `fjl@cruise.com` | `fjl` | FJL Cruise Admin | TENANT_ADMIN | `cruise123` |
+
+### Tenant Mapping
+
+| Tenant UUID | Slug | Display Name |
+|---|---|---|
+| `a0000000-0000-0000-0000-000000000001` | `skywave` | Skywave Platform Admin |
+| `dd000000-0000-0000-0000-000000000001` | `jy` | Skywave - JY |
+| `bb000000-0000-0000-0000-000000000001` | `pw` | Skybound - PW |
+| `cc000000-0000-0000-0000-000000000001` | `fjl` | Baltic Ferries - FJL |
+
+### Important Notes
+
+- **All temporary passwords are forced-change on first login.**
+  `must_change_password = TRUE` means the user cannot access any endpoint
+  (except auth paths) until they set a new password meeting the 12+ character
+  complexity requirements.
+- Each user is scoped to their own tenant via RLS. There is no cross-tenant
+  access — each TENANT_ADMIN manages only their own tenant's data and settings.
+- The temporary passwords (`admin123`, `airline123`, `cruise123`) are weak by
+  design — they exist solely to bootstrap the first login. The forced change
+  flow ensures they are replaced immediately.
