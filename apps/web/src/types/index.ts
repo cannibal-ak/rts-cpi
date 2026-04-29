@@ -25,6 +25,7 @@ export interface NavItem {
 // ──────── Data freshness ────────
 export interface DataFreshness {
   domain: string;
+  report_date: string | null;
   last_capture_at: string;
   last_import_at: string;
   record_count: number;

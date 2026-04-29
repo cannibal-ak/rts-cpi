@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from app.core.deps import get_tenant_db, get_tenant_id, RequireRoles
+from app.core.deps import get_tenant_db, get_tenant_id, RequireRoles, RequirePlatformAdmin
 from app.models.admin import ProviderContract
 from app.models.tenant_feature import TenantFeature
 from app.schemas.admin import (
@@ -16,7 +16,7 @@ from app.schemas.admin import (
 router = APIRouter(
     prefix="/api/v1/admin",
     tags=["admin"],
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN", "DATA_ENGINEER", "ANALYST", "REVENUE_MANAGER", "AUDITOR"))]
+    dependencies=[Depends(RequirePlatformAdmin())]
 )
 
 

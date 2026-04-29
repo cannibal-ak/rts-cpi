@@ -21,7 +21,7 @@ interface AuthContextType {
     isAuthenticated: boolean;
     isLoading: boolean;
     mustChangePassword: boolean;
-    login: (email: string, password: string, tenantSlug: string) => Promise<{ success: boolean; error?: string }>;
+    login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
     logout: () => void;
     changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
 }
@@ -142,12 +142,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
     }, [scheduleRefresh]);
 
-    const login = useCallback(async (email: string, password: string, tenantSlug: string) => {
+    const login = useCallback(async (email: string, password: string) => {
         try {
             const res = await fetch(`${BASE}/api/v1/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email: email.trim().toLowerCase(), password, tenant_slug: tenantSlug }),
+                body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
             });
 
             if (!res.ok) {

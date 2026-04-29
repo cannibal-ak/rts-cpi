@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, desc
 
-from app.core.deps import get_tenant_db, get_tenant_id, RequireRoles
+from app.core.deps import get_tenant_db, get_tenant_id, RequireRoles, RequirePlatformAdmin
 from app.models.ingestion import ImportJob, ImportBatch
 from app.schemas.ingestion import (
     IngestionJobOut, ImportBatchOut, 
@@ -97,7 +97,7 @@ def list_job_batches(
     return db.scalars(select(ImportBatch).where(ImportBatch.import_job_id == job_id)).all()
 
 
-@router.post("/ingest")
+@router.post("/ingest", dependencies=[Depends(RequirePlatformAdmin())])
 def trigger_ingest_process(
     tenant: Optional[str] = None,
     force: bool = False,

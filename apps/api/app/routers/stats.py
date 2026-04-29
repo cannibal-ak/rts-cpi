@@ -22,6 +22,7 @@ router = APIRouter(
 
 class DataFreshnessOut(BaseModel):
     domain: str
+    report_date: str | None
     last_capture_at: str | None
     last_import_at: str | None
     record_count: int
@@ -41,13 +42,16 @@ def get_data_freshness(
     def get_module_stats(model, tenant_code, domain_name):
         q_count = select(func.count(model.id)).where(model.tenant_code == tenant_code)
         count = db.scalar(q_count) or 0
-        
+
         q_import = select(func.max(model.loaded_at)).where(model.tenant_code == tenant_code)
         last_import = db.scalar(q_import)
-        
+
+        q_report = select(func.max(model.report_date)).where(model.tenant_code == tenant_code)
+        report_date_val = db.scalar(q_report)
+
         q_capture = select(model.cap_date, model.cap_time).where(model.tenant_code == tenant_code).order_by(desc(model.cap_date), desc(model.cap_time)).limit(1)
         last_capture = db.execute(q_capture).first()
-        
+
         cap_str = None
         if last_capture:
             dt = datetime.combine(last_capture[0], last_capture[1])
@@ -61,6 +65,7 @@ def get_data_freshness(
 
         return DataFreshnessOut(
             domain=domain_name,
+            report_date=report_date_val.isoformat() if report_date_val else None,
             last_capture_at=cap_str,
             last_import_at=last_import.isoformat() + "Z" if last_import else None,
             record_count=count,

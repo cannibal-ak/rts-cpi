@@ -8,7 +8,7 @@ import io
 from openpyxl import Workbook
 from fastapi.responses import StreamingResponse
 
-from app.core.deps import get_tenant_db, sanitize_filter, sanitize_date, RequireRoles, get_user_roles, get_user_identity
+from app.core.deps import get_tenant_db, sanitize_filter, sanitize_date, RequireRoles, get_user_roles, get_user_identity, is_platform_admin
 from app.models.airline import AirlineCpiSnapshot
 from app.schemas.common import PaginatedResponse, PageInfo
 from app.schemas.airline import AirlineSnapshotOut
@@ -32,19 +32,18 @@ def list_snapshots(
     file_date: str | None = None,
     airline: str | None = None,
 ):
-    # Authorization: Block direct URL access to unauthorized tenant
-    if "TENANT_ADMIN" not in user_roles and tenant and tenant != user_identity:
-        raise HTTPException(status_code=403, detail="Not Authorized")
-
-    # Determine view name - the old combined view is being removed
-    if tenant == "JY":
-        view_name = "vw_airline_cpi_jy_snapshot"
-    elif tenant == "PW":
-        view_name = "vw_airline_cpi_pw_snapshot"
+    # Enforce tenant scoping — non-platform users are locked to their own airline
+    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot"}
+    if is_platform_admin(user_identity, user_roles):
+        effective_tenant = tenant or "JY"  # platform admin can pick, defaults to JY
     else:
-        # Require explicit tenant or default to one if appropriate
-        # For this refactor, we require tenant or return JY as default for backward compat with simple requests
-        view_name = "vw_airline_cpi_jy_snapshot" 
+        if user_identity not in AIRLINE_VIEW_MAP:
+            raise HTTPException(status_code=403, detail="Not Authorized")
+        effective_tenant = user_identity  # locked to own tenant, ignore ?tenant param
+
+    if effective_tenant not in AIRLINE_VIEW_MAP:
+        raise HTTPException(status_code=400, detail="Invalid tenant for airline module")
+    view_name = AIRLINE_VIEW_MAP[effective_tenant]
 
     # Sanitize filters
     file_date = sanitize_date(file_date, "file_date")
@@ -85,9 +84,14 @@ def get_filter_metadata(
     user_identity: str = Depends(get_user_identity),
     tenant: str | None = Query(None),
 ):
-    # Authorization: Block if tenant requested and user doesn't have access
-    if "TENANT_ADMIN" not in user_roles and tenant and tenant != user_identity:
-        raise HTTPException(status_code=403, detail="Not Authorized")
+    # Enforce tenant scoping — non-platform users locked to own airline
+    AIRLINE_TENANTS = {"JY", "PW"}
+    if is_platform_admin(user_identity, user_roles):
+        effective_tenant = tenant  # platform admin can pick or see all
+    else:
+        if user_identity not in AIRLINE_TENANTS:
+            raise HTTPException(status_code=403, detail="Not Authorized")
+        effective_tenant = user_identity  # locked to own tenant
 
     from app.core.file_dates import get_available_file_dates
 
@@ -99,16 +103,16 @@ def get_filter_metadata(
 
     result = []
     
-    # Dates from filenames - filter by tenant if provided
-    search_tenants = [tenant] if tenant else ["JY", "PW"]
+    # Dates from filenames - filter by resolved tenant
+    search_tenants = [effective_tenant] if effective_tenant else ["JY", "PW"]
     file_dates = get_available_file_dates(data_path, search_tenants)
     if file_dates == ["No file dates available"]:
         file_dates = []
 
     # Dates from database
     db_dates_query = select(distinct(AirlineCpiSnapshot.report_date)).where(AirlineCpiSnapshot.report_date != None)
-    if tenant:
-        db_dates_query = db_dates_query.where(AirlineCpiSnapshot.tenant_code == tenant)
+    if effective_tenant:
+        db_dates_query = db_dates_query.where(AirlineCpiSnapshot.tenant_code == effective_tenant)
     else:
         db_dates_query = db_dates_query.where(AirlineCpiSnapshot.tenant_code.in_(["JY", "PW"]))
     
@@ -121,15 +125,11 @@ def get_filter_metadata(
         
     result.append({"field": "file_date", "label": "File Date", "values": all_dates})
 
-    # Airline filter - JY, PW or specific tenant
-    if tenant:
-        vals = [tenant]
+    # Airline filter — scoped to resolved tenant
+    if effective_tenant:
+        vals = [effective_tenant]
     else:
-        vals = ["JY", "PW"]
-    
-    # If user is JY or PW and no specific tenant override, they should only see their own
-    if "TENANT_ADMIN" not in user_roles and not tenant and user_identity in ("JY", "PW"):
-        vals = [user_identity]
+        vals = ["JY", "PW"]  # only reachable by platform admin with no tenant param
         
     result.append({"field": "airline", "label": "Airline", "values": vals})
 
@@ -145,17 +145,18 @@ def export_snapshots(
     file_date: str | None = None,
     airline: str | None = None,
 ):
-    # Authorization check
-    if "TENANT_ADMIN" not in user_roles and tenant and tenant != user_identity:
-        raise HTTPException(status_code=403, detail="Not Authorized")
-
-    # Determine view - legacy view is being dropped
-    if tenant == "JY":
-        view_name = "vw_airline_cpi_jy_snapshot"
-    elif tenant == "PW":
-        view_name = "vw_airline_cpi_pw_snapshot"
+    # Enforce tenant scoping — non-platform users locked to own airline
+    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot"}
+    if is_platform_admin(user_identity, user_roles):
+        effective_tenant = tenant or "JY"
     else:
-        view_name = "vw_airline_cpi_jy_snapshot"
+        if user_identity not in AIRLINE_VIEW_MAP:
+            raise HTTPException(status_code=403, detail="Not Authorized")
+        effective_tenant = user_identity
+
+    if effective_tenant not in AIRLINE_VIEW_MAP:
+        raise HTTPException(status_code=400, detail="Invalid tenant for airline module")
+    view_name = AIRLINE_VIEW_MAP[effective_tenant]
 
     # Sanitize filters
     file_date = sanitize_date(file_date, "file_date")

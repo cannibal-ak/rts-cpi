@@ -9,19 +9,13 @@ import {
     CircularProgress,
     InputAdornment,
     IconButton,
-    MenuItem,
 } from '@mui/material';
 import { Visibility, VisibilityOff, LockOutlined } from '@mui/icons-material';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useSession } from '../../context/SessionContext';
 
-const TENANT_OPTIONS = [
-    { slug: 'jy', label: 'JY Airways' },
-    { slug: 'pw', label: 'PW Airlines' },
-    { slug: 'fjl', label: 'FJL Cruise' },
-    { slug: 'skywave', label: 'Skywave (Admin)' },
-];
+
 
 export default function LoginPage() {
     const { login, isAuthenticated, mustChangePassword } = useAuth();
@@ -30,7 +24,7 @@ export default function LoginPage() {
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-    const [tenantSlug, setTenantSlug] = useState('skywave');
+
     const [showPassword, setShowPassword] = useState(false);
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
@@ -65,7 +59,7 @@ export default function LoginPage() {
         }
 
         setLoading(true);
-        const result = await login(email, password, tenantSlug);
+        const result = await login(email, password);
         setLoading(false);
 
         if (!result.success) {
@@ -131,21 +125,7 @@ export default function LoginPage() {
 
                 {/* Form */}
                 <Box component="form" onSubmit={handleSubmit} noValidate>
-                    <TextField
-                        id="login-tenant"
-                        select
-                        label="Tenant"
-                        fullWidth
-                        value={tenantSlug}
-                        onChange={(e) => setTenantSlug(e.target.value)}
-                        sx={{ mb: 2 }}
-                    >
-                        {TENANT_OPTIONS.map((t) => (
-                            <MenuItem key={t.slug} value={t.slug}>
-                                {t.label}
-                            </MenuItem>
-                        ))}
-                    </TextField>
+
 
                     <TextField
                         id="login-email"

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Box, Paper, IconButton, Typography, Fade } from '@mui/material';
-import { ArrowBack, Flight, DirectionsBoat } from '@mui/icons-material';
+import { Box, Paper, IconButton, Typography, Fade, Chip } from '@mui/material';
+import { ArrowBack, Flight, DirectionsBoat, CalendarMonth } from '@mui/icons-material';
 import { keyframes } from '@mui/system';
 import { api } from '../../api';
 import { useSession } from '../../context/SessionContext';
@@ -14,10 +14,10 @@ import { useSession } from '../../context/SessionContext';
 const SUPERSET_URL = 'http://192.168.101.10:8088';
 
 // Dashboard metadata (must match backend DASHBOARDS registry)
-const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline: boolean }> = {
-  '1': { title: 'Airline CPI JY Dashboard', tenant: 'JY', isAirline: true },
-  '2': { title: 'Airline CPI PW Dashboard', tenant: 'PW', isAirline: true },
-  '3': { title: 'Cruise/Ferry CPI Dashboard', tenant: 'FJL', isAirline: false },
+const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline: boolean; freshnessDomain: string }> = {
+  '1': { title: 'Airline CPI JY Dashboard', tenant: 'JY', isAirline: true, freshnessDomain: 'Airline CPI \u2013 JY' },
+  '2': { title: 'Airline CPI PW Dashboard', tenant: 'PW', isAirline: true, freshnessDomain: 'Airline CPI \u2013 PW' },
+  '3': { title: 'Cruise/Ferry CPI Dashboard', tenant: 'FJL', isAirline: false, freshnessDomain: 'Cruise/Ferry CPI \u2013 FJL' },
 };
 
 // Superset Embedded SDK type (UMD bundle loaded via CDN in index.html)
@@ -53,6 +53,7 @@ export default function DashboardViewerPage() {
   const mountRef = useRef<HTMLDivElement>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [dataDate, setDataDate] = useState<string | null>(null);
 
   const meta = id ? DASHBOARD_META[id] : undefined;
   const isAdmin = session.user.roles.includes('TENANT_ADMIN');
@@ -90,6 +91,17 @@ export default function DashboardViewerPage() {
         setIsLoading(true);
         const metadata = await api.superset.getGuestToken(id);
 
+        // ── 3b. Fetch data freshness to get the report date ──
+        try {
+          const freshness = await api.stats.getFreshnessMetrics();
+          const match = freshness.find(f => f.domain === meta.freshnessDomain);
+          if (match?.report_date) {
+            setDataDate(match.report_date);
+          }
+        } catch {
+          // Non-critical — dashboard still works without the date
+        }
+
         // ── 4. Embed the dashboard ──
         //   SDK creates an iframe to: {SUPERSET_URL}/embedded/{embedded_uuid}
         //   which is Superset's canvas-only view (no global nav, no chrome).
@@ -103,12 +115,12 @@ export default function DashboardViewerPage() {
             return token;
           },
           dashboardUiConfig: {
-            hideTitle: false,
-            hideChartControls: false,
+            hideTitle: true,           // hide Superset's title bar (we show our own + data date)
+            hideChartControls: true,   // hide chart-level three-dot menus
             hideTab: false,
             filters: {
               visible: true,
-              expanded: false,  // collapse the native filter sidebar by default
+              expanded: true,   // start with filters visible (restyled as horizontal bar via dashboard CSS)
             },
           },
         });
@@ -134,6 +146,13 @@ export default function DashboardViewerPage() {
   const LoadingIcon = meta?.isAirline ? Flight : DirectionsBoat;
   const loadingLabel = meta?.isAirline ? 'Loading Airline Analytics...' : 'Preparing Maritime Insights...';
 
+  // Format the data date for display
+  const formattedDate = dataDate
+    ? new Date(dataDate + 'T00:00:00').toLocaleDateString('en-GB', {
+        day: '2-digit', month: 'short', year: 'numeric',
+      })
+    : null;
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header bar */}
@@ -144,6 +163,16 @@ export default function DashboardViewerPage() {
         <Typography variant="h5" component="h1" fontWeight={600}>
           {meta?.title ?? 'Dashboard'}
         </Typography>
+        {formattedDate && (
+          <Chip
+            icon={<CalendarMonth sx={{ fontSize: 16 }} />}
+            label={`Data as of ${formattedDate}`}
+            size="small"
+            variant="outlined"
+            color="primary"
+            sx={{ ml: 2, fontWeight: 500 }}
+          />
+        )}
       </Box>
 
       {/* Dashboard container */}

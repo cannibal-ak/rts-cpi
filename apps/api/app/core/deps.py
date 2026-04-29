@@ -107,6 +107,16 @@ def get_user_identity(current_user: dict = Depends(get_current_user)) -> str:
     return "SHARED"
 
 
+# ── Platform admin detection ──────────────────
+
+PLATFORM_TENANT_SLUG = "SKYWAVE"
+
+
+def is_platform_admin(user_identity: str, user_roles: list[str]) -> bool:
+    """True if user belongs to Skywave platform tenant AND has TENANT_ADMIN role."""
+    return user_identity == PLATFORM_TENANT_SLUG and "TENANT_ADMIN" in user_roles
+
+
 class RequireRoles:
     """FastAPI dependency that enforces role-based access.
 
@@ -121,6 +131,26 @@ class RequireRoles:
             raise HTTPException(
                 status_code=403,
                 detail=f"Forbidden: requires one of {sorted(self.allowed)}",
+            )
+        return user_roles
+
+
+class RequirePlatformAdmin:
+    """Restricts access to Skywave platform administrators only.
+
+    Checks that the user has TENANT_ADMIN role AND belongs to the
+    Skywave platform tenant (slug='skywave').
+    """
+
+    def __call__(
+        self,
+        user_roles: list[str] = Depends(get_user_roles),
+        user_identity: str = Depends(get_user_identity),
+    ):
+        if not is_platform_admin(user_identity, user_roles):
+            raise HTTPException(
+                status_code=403,
+                detail="Forbidden: platform administrator access required",
             )
         return user_roles
 

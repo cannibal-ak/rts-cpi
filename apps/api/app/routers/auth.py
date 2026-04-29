@@ -38,7 +38,6 @@ MAX_FAILED_ATTEMPTS = 5
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-    tenant_slug: str
 
 
 class TokenResponse(BaseModel):
@@ -87,18 +86,18 @@ def _user_dict(user: AppUser, tenant_slug: str, roles: list[str]) -> dict:
 
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)):
-    # Resolve tenant
-    tenant = db.query(Tenant).filter(Tenant.slug == body.tenant_slug, Tenant.is_active == True).first()
-    if not tenant:
-        raise HTTPException(status_code=401, detail="Invalid tenant or credentials")
-
-    # Find user within tenant
+    # Find user by email
     user = db.query(AppUser).filter(
-        AppUser.tenant_id == tenant.id,
         AppUser.email == body.email.lower(),
+        AppUser.is_active == True,
     ).first()
 
-    if not user or not user.is_active:
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    # Resolve tenant
+    tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id, Tenant.is_active == True).first()
+    if not tenant:
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
     # Check lockout
@@ -114,7 +113,7 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
         user.failed_login_count = (user.failed_login_count or 0) + 1
         if user.failed_login_count >= MAX_FAILED_ATTEMPTS:
             user.locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTES)
-            logger.warning("Account locked: %s (tenant: %s)", user.email, body.tenant_slug)
+            logger.warning("Account locked: %s (tenant: %s)", user.email, tenant.slug)
         db.commit()
         raise HTTPException(status_code=401, detail="Invalid email or password")
 

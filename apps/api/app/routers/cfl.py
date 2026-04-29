@@ -8,7 +8,7 @@ import io
 from openpyxl import Workbook
 from fastapi.responses import StreamingResponse
 
-from app.core.deps import get_tenant_db, sanitize_filter, sanitize_date, RequireRoles, get_user_roles, get_user_identity
+from app.core.deps import get_tenant_db, sanitize_filter, sanitize_date, RequireRoles, get_user_roles, get_user_identity, is_platform_admin
 from app.models.cfl import CflCpiSnapshot
 from app.schemas.common import PaginatedResponse, PageInfo
 from app.schemas.cfl import CflSnapshotOut
@@ -32,14 +32,13 @@ def list_snapshots(
     file_date: str | None = None,
     operator: str | None = None,
 ):
-    # Authorization check
-    if "TENANT_ADMIN" not in user_roles and tenant and tenant != user_identity:
-        raise HTTPException(status_code=403, detail="Not Authorized")
-
-    # Determine view name - legacy view is being dropped
-    view_name = "vw_cfl_cpi_fjl_snapshot"
+    # Enforce tenant scoping — only FJL users and platform admins may access CFL data
+    if not is_platform_admin(user_identity, user_roles):
+        if user_identity != "FJL":
+            raise HTTPException(status_code=403, detail="Not Authorized")
     if tenant and tenant != "FJL":
         raise HTTPException(status_code=400, detail="Invalid tenant for CFL module")
+    view_name = "vw_cfl_cpi_fjl_snapshot"
 
     file_date = sanitize_date(file_date, "file_date")
     operator = sanitize_filter(operator, "operator")
@@ -78,9 +77,10 @@ def get_filter_metadata(
     user_identity: str = Depends(get_user_identity),
     tenant: str | None = Query(None),
 ):
-    # Authorization check
-    if "TENANT_ADMIN" not in user_roles and tenant and tenant != user_identity:
-        raise HTTPException(status_code=403, detail="Not Authorized")
+    # Enforce tenant scoping — only FJL users and platform admins may access CFL metadata
+    if not is_platform_admin(user_identity, user_roles):
+        if user_identity != "FJL":
+            raise HTTPException(status_code=403, detail="Not Authorized")
 
     from app.core.file_dates import get_available_file_dates
     import os
@@ -113,14 +113,8 @@ def get_filter_metadata(
         
     result.append({"field": "file_date", "label": "File Date", "values": all_dates})
 
-    # Operator filter - specific tenant or all
-    if tenant:
-        vals = [tenant]
-    else:
-        vals = ["FJL"]
-    
-    if "TENANT_ADMIN" not in user_roles and not tenant and user_identity == "FJL":
-        vals = ["FJL"]
+    # Operator filter — always scoped to FJL for CFL module
+    vals = ["FJL"]
         
     result.append({"field": "operator", "label": "Airline / Operator", "values": vals})
 
@@ -136,14 +130,13 @@ def export_snapshots(
     file_date: str | None = None,
     operator: str | None = None,
 ):
-    # Authorization check
-    if "TENANT_ADMIN" not in user_roles and tenant and tenant != user_identity:
-        raise HTTPException(status_code=403, detail="Not Authorized")
-
-    # Determine view name - legacy view is being dropped
-    view_name = "vw_cfl_cpi_fjl_snapshot"
+    # Enforce tenant scoping — only FJL users and platform admins may export CFL data
+    if not is_platform_admin(user_identity, user_roles):
+        if user_identity != "FJL":
+            raise HTTPException(status_code=403, detail="Not Authorized")
     if tenant and tenant != "FJL":
         raise HTTPException(status_code=400, detail="Invalid tenant for CFL module")
+    view_name = "vw_cfl_cpi_fjl_snapshot"
 
     # Sanitize filters
     file_date = sanitize_date(file_date, "file_date")
