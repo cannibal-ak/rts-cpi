@@ -27,6 +27,7 @@ interface FilterField {
   options?: { value: string; label: string }[];
   placeholder?: string;
   disabled?: boolean;
+  required?: boolean;
 }
 
 interface FilterPanelProps {
@@ -120,7 +121,7 @@ export default function FilterPanel({ title, fields, open, onToggle, onApply, va
                       onChange={e => handleChange(field.key, e.target.value as string)}
                       disabled={field.disabled}
                     >
-                      <MenuItem value=""><em>All</em></MenuItem>
+                      {!field.required && <MenuItem value=""><em>All</em></MenuItem>}
                       {field.options?.map(opt => (
                         <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
                       ))}

@@ -108,6 +108,10 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
     };
   });
 
+  const displayedFields = allFields
+    .filter(f => f.key === 'file_date')
+    .map(f => ({ ...f, required: true }));
+
   return (
     <>
       <ActionBar onExport={() => api.airline.exportSnapshots({ ...filters, tenant: tenantCode })} />
@@ -115,7 +119,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
       <Box sx={{ display: 'flex', height: 'calc(100vh - 280px)' }}>
         <FilterPanel
           title={`${tenantCode} Filters`}
-          fields={allFields}
+          fields={displayedFields}
           open={filterOpen}
           onToggle={() => setFilterOpen(!filterOpen)}
           values={filters}

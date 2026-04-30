@@ -108,6 +108,10 @@ export default function AirlineCpiVelocityTab({ filters, onFiltersChange }: Airl
     };
   });
 
+  const displayedFields = allFields
+    .filter(f => f.key === 'file_date')
+    .map(f => ({ ...f, required: true }));
+
   return (
     <>
       <ActionBar onExport={() => api.airline.velocity.exportSnapshots({ ...filters, tenant: TENANT })} />
@@ -115,7 +119,7 @@ export default function AirlineCpiVelocityTab({ filters, onFiltersChange }: Airl
       <Box sx={{ display: 'flex', height: 'calc(100vh - 280px)' }}>
         <FilterPanel
           title="JY Velocity Filters"
-          fields={allFields}
+          fields={displayedFields}
           open={filterOpen}
           onToggle={() => setFilterOpen(!filterOpen)}
           values={filters}

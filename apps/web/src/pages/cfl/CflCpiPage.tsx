@@ -110,6 +110,10 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
     };
   });
 
+  const displayedFields = allFields
+    .filter(f => f.key === 'file_date')
+    .map(f => ({ ...f, required: true }));
+
   return (
     <Box>
       <PageHeader
@@ -122,9 +126,9 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
       <ActionBar onExport={() => api.cfl.exportSnapshots({ ...filters, tenant: tenantCode })} />
 
       <Box sx={{ display: 'flex', height: 'calc(100vh - 220px)' }}>
-        <FilterPanel 
-          title={`${tenantCode} Filters`} 
-          fields={allFields} 
+        <FilterPanel
+          title={`${tenantCode} Filters`}
+          fields={displayedFields}
           open={filterOpen} 
           onToggle={() => setFilterOpen(!filterOpen)} 
           values={filters}
