@@ -3,7 +3,7 @@
  * Every method returns a Promise; the mock implementation resolves in-memory.
  */
 import type {
-  Paginated, AirlineSnapshot, CflSnapshot, FilterMetadata,
+  Paginated, AirlineSnapshot, JyVelocitySnapshot, CflSnapshot, FilterMetadata,
   IngestionJob, ImportBatch,
   AlertRule, AlertEvent,
   TenantFeature, DataFreshness,
@@ -35,6 +35,11 @@ export interface CpiApiClient {
     listSnapshots(q?: SnapshotQuery): Promise<Paginated<AirlineSnapshot>>;
     getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
     exportSnapshots(q?: Record<string, string>): Promise<void>;
+    velocity: {
+      listSnapshots(q?: SnapshotQuery): Promise<Paginated<JyVelocitySnapshot>>;
+      getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
+      exportSnapshots(q?: Record<string, string>): Promise<void>;
+    };
   };
   // CFL (tenant-aware: pass tenant='FJL')
   cfl: {

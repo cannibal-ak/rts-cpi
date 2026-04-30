@@ -33,6 +33,12 @@ export const mockClient: CpiApiClient = {
       delay(paginate(mockAirlineSnapshots, q?.page as number, q?.page_size as number)),
     getFilterMetadata: (_tenant?: string) => delay(mockFilterMetadata.airline),
     exportSnapshots: (_q?: Record<string, string>) => delay(undefined),
+    velocity: {
+      listSnapshots: (q?: SnapshotQuery) =>
+        delay(paginate([], q?.page as number, q?.page_size as number)),
+      getFilterMetadata: (_tenant?: string) => delay([]),
+      exportSnapshots: (_q?: Record<string, string>) => delay(undefined),
+    },
   },
   cfl: {
     listSnapshots: (q?: SnapshotQuery) =>

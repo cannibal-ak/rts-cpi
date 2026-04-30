@@ -74,6 +74,37 @@ export interface AirlineSnapshot {
   fare_delta_pct?: number;
 }
 
+// ──────── JY velocity snapshot ────────
+export interface JyVelocitySnapshot {
+  id: string;
+  tenant_id: string;
+  dep_date: string;
+  dep_time: string;
+  dep_code: string;
+  city_pair: string;
+  origin: string;
+  destination: string;
+  eqp: string;
+  legseg_type: string;
+  leg_seg_order: number;
+  days_left: number;
+  compartment: string;
+  current_booking: number;
+  capacity: number;
+  actual_seat_factor: number;
+  forecasted_seat_factor: number;
+  seats_available: number;
+  booking_pct: number;
+  data_owner?: string;
+  tenant_code?: string;
+  business_type?: string;
+  report_date?: string;
+  file_date?: string;
+  source_file?: string;
+  loaded_at?: string;
+  ingested_at?: string;
+}
+
 // ──────── CFL snapshot ────────
 export interface CflSnapshot {
   id: string;

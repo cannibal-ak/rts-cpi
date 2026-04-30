@@ -4,7 +4,7 @@
  */
 import type { CpiApiClient, SnapshotQuery, JobQuery } from './client';
 import type {
-  Paginated, AirlineSnapshot, CflSnapshot, FilterMetadata,
+  Paginated, AirlineSnapshot, JyVelocitySnapshot, CflSnapshot, FilterMetadata,
   IngestionJob, ImportBatch, AlertRule, AlertEvent,
   TenantFeature, DataFreshness,
 } from '../types';
@@ -200,6 +200,14 @@ export const httpClient: CpiApiClient = {
       get<FilterMetadata[]>('/api/v1/airline/filter-metadata', tenant ? { tenant } : undefined),
     exportSnapshots: (q?: Record<string, string>) =>
       download('/api/v1/airline/export', q),
+    velocity: {
+      listSnapshots: (q?: SnapshotQuery) =>
+        get<Paginated<JyVelocitySnapshot>>('/api/v1/airline/velocity/snapshots', q as Record<string, string | number | undefined>),
+      getFilterMetadata: (tenant?: string) =>
+        get<FilterMetadata[]>('/api/v1/airline/velocity/filter-metadata', tenant ? { tenant } : undefined),
+      exportSnapshots: (q?: Record<string, string>) =>
+        download('/api/v1/airline/velocity/export', q),
+    },
   },
   cfl: {
     listSnapshots: (q?: SnapshotQuery) =>
