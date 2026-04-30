@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.deps import enforce_password_change
 from app.routers import health, auth, airline, cfl, alerts, audit, admin, tenant, stats, superset, ingestion
+from app.api.v1 import ingestion as ingestion_v2
 
 
 @asynccontextmanager
@@ -51,7 +52,14 @@ app.include_router(admin.router, dependencies=_protected)
 app.include_router(tenant.router, dependencies=_protected)
 app.include_router(stats.router, dependencies=_protected)
 app.include_router(superset.router, dependencies=_protected)
-app.include_router(ingestion.router, dependencies=_protected)
+
+# New ingestion router (Phase A overhaul) — JWT-required.
+app.include_router(ingestion_v2.router, dependencies=_protected)
+# Legacy router now contains only the 410 Gone stub for /ingest. We do
+# NOT put it behind the protected dependency group so unauthenticated
+# callers also get the 410 (matches "endpoint is retired" semantics
+# better than a 401 "log in first").
+app.include_router(ingestion.router)
 
 
 @app.get("/")
