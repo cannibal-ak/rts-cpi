@@ -5,6 +5,7 @@ import { ArrowBack, Flight, DirectionsBoat, CalendarMonth } from '@mui/icons-mat
 import { keyframes } from '@mui/system';
 import { api } from '../../api';
 import { useSession } from '../../context/SessionContext';
+import { canAccessDashboard } from './dashboardAccess';
 
 /**
  * Superset base URL — used by the Embedded SDK to construct the iframe src.
@@ -56,7 +57,6 @@ export default function DashboardViewerPage() {
   const [dataDate, setDataDate] = useState<string | null>(null);
 
   const meta = id ? DASHBOARD_META[id] : undefined;
-  const isAdmin = session.user.roles.includes('TENANT_ADMIN');
 
   useEffect(() => {
     if (!id || !mountRef.current || !meta) return;
@@ -66,12 +66,7 @@ export default function DashboardViewerPage() {
     const embed = async () => {
       try {
         // ── 1. Frontend access guard ──
-        const name = session.user.name || '';
-        const userCode = name.includes('_')
-          ? name.split('_')[1].toUpperCase()
-          : name.toUpperCase();
-
-        if (!isAdmin && userCode !== meta.tenant) {
+        if (!canAccessDashboard(session, id)) {
           setError('Access Denied: You do not have permission to view this dashboard.');
           setIsLoading(false);
           return;

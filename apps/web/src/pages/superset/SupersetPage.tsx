@@ -7,42 +7,31 @@ import { OpenInNew, Flight, DirectionsBoat } from '@mui/icons-material';
 import PageHeader from '../../components/common/PageHeader';
 import { useSession } from '../../context/SessionContext';
 import { DASHBOARD_LAUNCH_LABEL } from '../../constants/ui';
+import { canAccessDashboard } from './dashboardAccess';
 
 const dashboardPacks = [
   {
     title: 'Airline CPI – JY',
     id: '1',
     icon: <Flight />,
-    tenant: 'JY',
   },
   {
     title: 'Airline CPI – PW',
     id: '2',
     icon: <Flight />,
-    tenant: 'PW',
   },
   {
     title: 'Cruise/Ferry CPI – FJL',
     id: '3',
     icon: <DirectionsBoat />,
-    tenant: 'FJL',
   },
 ];
 
 export default function SupersetPage() {
   const navigate = useNavigate();
   const { session } = useSession();
-  const isAdmin = session.user.roles.includes('TENANT_ADMIN');
 
-  const filteredPacks = dashboardPacks.filter(pack => {
-    if (isAdmin) return true;
-    
-    // User identifier derived from name (e.g., 'Airline_JY' -> 'JY')
-    const name = session.user.name || '';
-    const userIdentifier = name.includes('_') ? name.split('_')[1].toUpperCase() : name.toUpperCase();
-    
-    return pack.tenant === userIdentifier;
-  });
+  const filteredPacks = dashboardPacks.filter(pack => canAccessDashboard(session, pack.id));
 
   return (
     <Box>
