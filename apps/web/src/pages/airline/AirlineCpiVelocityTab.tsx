@@ -6,8 +6,6 @@ import {
 import { Flight, ArrowForward } from '@mui/icons-material';
 import FilterPanel from '../../components/filters/FilterPanel';
 import ActionBar from '../../components/filters/ActionBar';
-import KpiTiles from '../../components/common/KpiTiles';
-import type { KpiTile } from '../../components/common/KpiTiles';
 import EmptyState from '../../components/common/EmptyState';
 import { api } from '../../api';
 import type { JyVelocitySnapshot, FilterMetadata, Paginated } from '../../types';
@@ -97,21 +95,6 @@ export default function AirlineCpiVelocityTab({ filters, onFiltersChange }: Airl
     fetchData(filters, p);
   };
 
-  // KPIs (computed from current page rows; page_info.total is total flights)
-  const kpis: KpiTile[] = data && data.items.length > 0 ? (() => {
-    const items = data.items;
-    const avgCap = items.reduce((s, r) => s + r.capacity, 0) / items.length;
-    const avgBook = items.reduce((s, r) => s + Number(r.booking_pct || 0), 0) / items.length;
-    const avgFcst = items.reduce((s, r) => s + r.forecasted_seat_factor, 0) / items.length;
-    const trend: 'up' | 'down' | 'flat' = avgBook >= 75 ? 'up' : avgBook < 65 ? 'down' : 'flat';
-    return [
-      { label: 'Total Flights', value: data.page_info.total, sub: `Page ${data.page_info.page} of ${Math.ceil(data.page_info.total / rowsPerPage)}` },
-      { label: 'Avg Capacity', value: Math.round(avgCap), sub: 'seats per flight' },
-      { label: 'Avg Booking %', value: `${avgBook.toFixed(1)}%`, trend, sub: 'benchmark 70%', color: pctColor(avgBook) },
-      { label: 'Avg Forecasted SF %', value: `${avgFcst.toFixed(1)}%`, sub: 'forecast load factor', color: pctColor(avgFcst) },
-    ];
-  })() : [];
-
   // Filter fields from metadata
   const allFields = meta.map(m => {
     const isNoDates = m.field === 'file_date' && m.values[0] === 'No file dates available';
@@ -148,7 +131,6 @@ export default function AirlineCpiVelocityTab({ filters, onFiltersChange }: Airl
             <EmptyState icon={<Flight sx={{ fontSize: 64 }} />} title="No JY Velocity Data" description="Apply filters to search JY velocity snapshots." actionLabel="Load All" onAction={() => fetchData({}, 0)} />
           ) : (
             <>
-              <KpiTiles tiles={kpis} />
               <TableContainer component={Paper} variant="outlined">
                 <Table size="small" stickyHeader aria-label="JY velocity snapshots">
                   <TableHead>

@@ -6,8 +6,6 @@ import {
 import { Flight } from '@mui/icons-material';
 import FilterPanel from '../../components/filters/FilterPanel';
 import ActionBar from '../../components/filters/ActionBar';
-import KpiTiles from '../../components/common/KpiTiles';
-import type { KpiTile } from '../../components/common/KpiTiles';
 import EmptyState from '../../components/common/EmptyState';
 import { api } from '../../api';
 import { formatCurrency } from '../../utils/format';
@@ -97,21 +95,6 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
     fetchData(filters, p);
   };
 
-  const kpis: KpiTile[] = data && data.items.length > 0 ? (() => {
-    const items = data.items;
-    const refFares = items.map(i => i.ref_tot_fare);
-    const compFares = items.map(i => i.comp_tot_fare);
-    const avgRef = refFares.reduce((a, b) => a + b, 0) / refFares.length;
-    const avgComp = compFares.reduce((a, b) => a + b, 0) / compFares.length;
-    const diff = ((avgComp - avgRef) / avgRef) * 100;
-    return [
-      { label: 'Results', value: data.page_info.total, sub: `Page ${data.page_info.page} of ${Math.ceil(data.page_info.total / rowsPerPage)}` },
-      { label: 'Avg Ref Fare', value: formatCurrency(avgRef), sub: `Min ${formatCurrency(Math.min(...refFares))} / Max ${formatCurrency(Math.max(...refFares))}` },
-      { label: 'Avg Comp Fare', value: formatCurrency(avgComp), sub: `Min ${formatCurrency(Math.min(...compFares))} / Max ${formatCurrency(Math.max(...compFares))}`, color: avgComp < avgRef ? 'success.main' : avgComp > avgRef ? 'error.main' : undefined },
-      { label: 'Comp vs Ref', value: `${diff > 0 ? '+' : ''}${diff.toFixed(1)}%`, trend: diff > 1 ? 'up' : diff < -1 ? 'down' : 'flat', sub: avgComp < avgRef ? 'Competitor undercuts' : 'Competitor premium' },
-    ];
-  })() : [];
-
   const allFields = meta.map(m => {
     const isRestricted = m.field === 'airline' && m.values.length === 1;
     const isNoDates = m.field === 'file_date' && m.values[0] === 'No file dates available';
@@ -148,7 +131,6 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
             <EmptyState icon={<Flight sx={{ fontSize: 64 }} />} title={`No ${tenantCode} Data`} description={`Apply filters to search ${tenantCode} airline CPI snapshots.`} actionLabel="Load All" onAction={() => fetchData({}, 0)} />
           ) : (
             <>
-              <KpiTiles tiles={kpis} />
               <TableContainer component={Paper} variant="outlined">
                 <Table size="small" stickyHeader aria-label={`${tenantCode} Airline CPI snapshots`}>
                   <TableHead>

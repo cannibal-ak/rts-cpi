@@ -8,8 +8,6 @@ import PageHeader from '../../components/common/PageHeader';
 import DataFreshnessIndicator from '../../components/common/DataFreshnessIndicator';
 import FilterPanel from '../../components/filters/FilterPanel';
 import ActionBar from '../../components/filters/ActionBar';
-import KpiTiles from '../../components/common/KpiTiles';
-import type { KpiTile } from '../../components/common/KpiTiles';
 import EmptyState from '../../components/common/EmptyState';
 import { api } from '../../api';
 import { formatCurrency } from '../../utils/format';
@@ -98,20 +96,6 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
   }, [meta, fetchData, filters]);
   const handlePageChange = (_: unknown, p: number) => { setPage(p); fetchData(filters, p); };
 
-  const kpis: KpiTile[] = data && data.items.length > 0 ? (() => {
-    const items = data.items;
-    const fares = items.map(i => i.total_fare);
-    const pax = items.map(i => i.out_per_pax_fare);
-    const veh = items.filter(i => i.out_veh_fare > 0).map(i => i.out_veh_fare);
-    const avg = fares.reduce((a, b) => a + b, 0) / fares.length;
-    return [
-      { label: 'Results', value: data.page_info.total, sub: `Page ${data.page_info.page} of ${Math.ceil(data.page_info.total / rowsPerPage)}` },
-      { label: 'Avg Total Fare', value: formatCurrency(avg), sub: `Min ${formatCurrency(Math.min(...fares))} / Max ${formatCurrency(Math.max(...fares))}` },
-      { label: 'Avg Per-Pax Fare', value: formatCurrency(pax.reduce((a, b) => a + b, 0) / pax.length), sub: `${items.reduce((a, b) => a + b.out_num_pax, 0)} total pax` },
-      { label: 'Avg Vehicle Fare', value: veh.length > 0 ? formatCurrency(veh.reduce((a, b) => a + b, 0) / veh.length) : 'N/A', sub: `${veh.length} with vehicles` },
-    ];
-  })() : [];
-
   const allFields = meta.map(m => {
     const isRestricted = m.field === 'operator' && m.values.length === 1;
     const isNoDates = m.field === 'file_date' && m.values[0] === 'No file dates available';
@@ -156,7 +140,6 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
             <EmptyState icon={<DirectionsBoat sx={{ fontSize: 64 }} />} title="No CFL Data" description="Apply filters to search cruise/ferry snapshots." actionLabel="Load All" onAction={() => fetchData({}, 0)} />
           ) : (
             <>
-              <KpiTiles tiles={kpis} />
               <TableContainer component={Paper} variant="outlined">
                 <Table size="small" stickyHeader aria-label="CFL CPI snapshots">
                   <TableHead>
