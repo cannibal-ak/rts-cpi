@@ -113,10 +113,10 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
     .map(f => ({ ...f, required: true }));
 
   return (
-    <>
+    <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <ActionBar onExport={() => api.airline.exportSnapshots({ ...filters, tenant: tenantCode })} />
 
-      <Box sx={{ display: 'flex', height: 'calc(100vh - 280px)' }}>
+      <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <FilterPanel
           title={`${tenantCode} Filters`}
           fields={displayedFields}
@@ -128,14 +128,16 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
           onReset={handleReset}
         />
 
-        <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, p: 2 }}>
           {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
+            <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}><CircularProgress /></Box>
           ) : !data || data.items.length === 0 ? (
-            <EmptyState icon={<Flight sx={{ fontSize: 64 }} />} title={`No ${tenantCode} Data`} description={`Apply filters to search ${tenantCode} airline CPI snapshots.`} actionLabel="Load All" onAction={() => fetchData({}, 0)} />
+            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <EmptyState icon={<Flight sx={{ fontSize: 64 }} />} title={`No ${tenantCode} Data`} description={`Apply filters to search ${tenantCode} airline CPI snapshots.`} actionLabel="Load All" onAction={() => fetchData({}, 0)} />
+            </Box>
           ) : (
             <>
-              <TableContainer component={Paper} variant="outlined">
+              <TableContainer component={Paper} variant="outlined" sx={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
                 <Table size="small" stickyHeader aria-label={`${tenantCode} Airline CPI snapshots`}>
                   <TableHead>
                     <TableRow>
@@ -196,11 +198,12 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
                 rowsPerPage={rowsPerPage}
                 onRowsPerPageChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRowsPerPage(parseInt(e.target.value)); setPage(0); fetchData(filters, 0); }}
                 rowsPerPageOptions={[10, 20, 50]}
+                sx={{ flexShrink: 0 }}
               />
             </>
           )}
         </Box>
       </Box>
-    </>
+    </Box>
   );
 }

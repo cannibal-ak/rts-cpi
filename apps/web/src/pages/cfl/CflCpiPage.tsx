@@ -115,7 +115,7 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
     .map(f => ({ ...f, required: true }));
 
   return (
-    <Box>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <PageHeader
         title={pageTitle}
         subtitle={`Competitive pricing across ${tenantCode} cruise and ferry routes`}
@@ -125,26 +125,28 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
 
       <ActionBar onExport={() => api.cfl.exportSnapshots({ ...filters, tenant: tenantCode })} />
 
-      <Box sx={{ display: 'flex', height: 'calc(100vh - 220px)' }}>
+      <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <FilterPanel
           title={`${tenantCode} Filters`}
           fields={displayedFields}
-          open={filterOpen} 
-          onToggle={() => setFilterOpen(!filterOpen)} 
+          open={filterOpen}
+          onToggle={() => setFilterOpen(!filterOpen)}
           values={filters}
           onValuesChange={setFilters}
           onApply={handleApply}
           onReset={handleReset}
         />
 
-        <Box sx={{ flex: 1, overflow: 'auto', p: 2 }}>
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, p: 2 }}>
           {loading ? (
-            <Box sx={{ display: 'flex', justifyContent: 'center', py: 8 }}><CircularProgress /></Box>
+            <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}><CircularProgress /></Box>
           ) : !data || data.items.length === 0 ? (
-            <EmptyState icon={<DirectionsBoat sx={{ fontSize: 64 }} />} title="No CFL Data" description="Apply filters to search cruise/ferry snapshots." actionLabel="Load All" onAction={() => fetchData({}, 0)} />
+            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <EmptyState icon={<DirectionsBoat sx={{ fontSize: 64 }} />} title="No CFL Data" description="Apply filters to search cruise/ferry snapshots." actionLabel="Load All" onAction={() => fetchData({}, 0)} />
+            </Box>
           ) : (
             <>
-              <TableContainer component={Paper} variant="outlined">
+              <TableContainer component={Paper} variant="outlined" sx={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
                 <Table size="small" stickyHeader aria-label="CFL CPI snapshots">
                   <TableHead>
                     <TableRow>
@@ -193,6 +195,7 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
                 rowsPerPage={rowsPerPage}
                 onRowsPerPageChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRowsPerPage(parseInt(e.target.value)); setPage(0); fetchData(filters, 0); }}
                 rowsPerPageOptions={[10, 20, 50]}
+                sx={{ flexShrink: 0 }}
               />
             </>
           )}

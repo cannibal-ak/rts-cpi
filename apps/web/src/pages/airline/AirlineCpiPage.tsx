@@ -44,7 +44,7 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   }, [tenantCode]);
 
   return (
-    <Box>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <PageHeader
         title={pageTitle}
         subtitle={`Competitive pricing intelligence for ${tenantCode} airline routes`}
