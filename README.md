@@ -83,7 +83,10 @@ Default Superset credentials: `admin` / (set in `.env`).
 | Airline JY/PW | `apps/api/app/routers/` | JY and PW airline cost modules |
 | CFL FJL | `apps/api/app/routers/` | CFL freight journal line ingestion |
 | Frontend | `apps/web/src/` | React SPA (pages, components, hooks) |
-| Data ingestion | `apps/api/data/` | CSV/XLSX staging area (git-ignored) |
+| Ingestion service | `apps/api/app/ingestion/` | Filename parser, two-stage upload service (Phase A overhaul) |
+| Ingestion API | `apps/api/app/api/v1/ingestion.py` | `/api/v1/ingestion/*` upload → validate → commit endpoints |
+| Ingestion staging | `apps/api/data/staging/{job_id}/` | Per-job staged uploads (git-ignored) |
+| Legacy data archive | `apps/api/data/legacy-folder-watch-archive/` | Pre-overhaul folder-watch CSVs preserved for rollback |
 | Infrastructure | `infra/` | DB init scripts, Superset config |
 | Migrations | `apps/api/alembic/` | Alembic database migrations |
 | Scripts | `scripts/` | Utility and seed scripts |
@@ -93,6 +96,8 @@ Default Superset credentials: `admin` / (set in `.env`).
 - [MIGRATION_GUIDE.txt](MIGRATION_GUIDE.txt) — Database migration guide
 - [docs/AUTH.md](docs/AUTH.md) — Authentication flow, JWT, lockout, password policy
 - [docs/SECRETS.md](docs/SECRETS.md) — Secrets management and rotation
+- [docs/ingestion-uuid-discovery.md](docs/ingestion-uuid-discovery.md) — Phase A: ingestion overhaul UUID-bug findings + fix
+- [docs/phase-a-schema-verification.txt](docs/phase-a-schema-verification.txt) — Phase A: alembic 018 schema verification snapshot
 - [CONTRIBUTING.md](CONTRIBUTING.md) — Contribution guidelines
 
 ## Project Status
