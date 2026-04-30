@@ -10,7 +10,6 @@ import {
   Button,
   IconButton,
   Stack,
-  Chip,
   Divider,
   Tooltip,
 } from '@mui/material';
@@ -42,8 +41,6 @@ interface FilterPanelProps {
 }
 
 export default function FilterPanel({ title, fields, open, onToggle, onApply, values, onValuesChange, onReset }: FilterPanelProps) {
-  const activeCount = Object.values(values).filter(v => v && v.length > 0).length;
-
   const handleChange = (key: string, value: string) => {
     onValuesChange({ ...values, [key]: value });
   };
@@ -72,7 +69,7 @@ export default function FilterPanel({ title, fields, open, onToggle, onApply, va
             size="small"
             aria-label="Open filter panel"
           >
-            Filters{activeCount > 0 ? ` (${activeCount})` : ''}
+            Filters
           </Button>
         </Tooltip>
       )}
@@ -99,7 +96,6 @@ export default function FilterPanel({ title, fields, open, onToggle, onApply, va
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <FilterList fontSize="small" />
               <Typography variant="subtitle1" fontWeight={600}>{title}</Typography>
-              {activeCount > 0 && <Chip label={activeCount} size="small" color="primary" />}
             </Box>
             <IconButton size="small" onClick={onToggle} aria-label="Close filter panel">
               <Close fontSize="small" />
