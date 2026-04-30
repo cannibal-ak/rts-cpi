@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, func, desc
 
 from app.core.database import get_db
-from app.core.deps import RequireRoles, get_user_roles, get_user_identity
+from app.core.deps import get_user_roles, get_user_identity, is_platform_admin
 from app.models.airline import AirlineCpiSnapshot
 from app.models.cfl import CflCpiSnapshot
 from app.models.ingestion import ImportJob
@@ -17,7 +17,6 @@ from typing import List
 router = APIRouter(
     prefix="/api/v1/stats",
     tags=["stats"],
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN", "DATA_ENGINEER", "ANALYST", "REVENUE_MANAGER", "AUDITOR"))]
 )
 
 class DataFreshnessOut(BaseModel):
@@ -72,16 +71,18 @@ def get_data_freshness(
             status=status
         )
 
+    is_admin = is_platform_admin(user_identity, user_roles)
+
     # 1. Airline CPI – JY
-    if "TENANT_ADMIN" in user_roles or user_identity == "JY":
+    if is_admin or user_identity == "JY":
         results.append(get_module_stats(AirlineCpiSnapshot, "JY", "Airline CPI – JY"))
-    
+
     # 2. Airline CPI – PW
-    if "TENANT_ADMIN" in user_roles or user_identity == "PW":
+    if is_admin or user_identity == "PW":
         results.append(get_module_stats(AirlineCpiSnapshot, "PW", "Airline CPI – PW"))
-        
+
     # 3. Cruise/Ferry CPI – FJL
-    if "TENANT_ADMIN" in user_roles or user_identity == "FJL":
+    if is_admin or user_identity == "FJL":
         results.append(get_module_stats(CflCpiSnapshot, "FJL", "Cruise/Ferry CPI – FJL"))
 
     return results

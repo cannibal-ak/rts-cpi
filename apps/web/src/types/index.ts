@@ -1,5 +1,5 @@
 // ──────── User & Session ────────
-export type UserRole = 'TENANT_ADMIN' | 'AIRLINE_USER' | 'CRUISE_USER';
+export type UserRole = 'TENANT_ADMIN';
 export type ModuleCode = 'airline_jy' | 'airline_pw' | 'cfl_fjl';
 export type Capability = 'alerts' | 'exports' | 'saved_views';
 

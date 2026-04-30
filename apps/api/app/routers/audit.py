@@ -4,7 +4,7 @@ from fastapi import APIRouter, Query, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 
-from app.core.deps import get_tenant_db, sanitize_filter, RequireRoles
+from app.core.deps import get_tenant_db, sanitize_filter
 from app.models.audit import AuditEvent
 from app.schemas.common import PaginatedResponse, PageInfo
 from app.schemas.audit import AuditEventOut
@@ -12,7 +12,6 @@ from app.schemas.audit import AuditEventOut
 router = APIRouter(
     prefix="/api/v1/audit",
     tags=["audit"],
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN", "AUDITOR"))],
 )
 
 

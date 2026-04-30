@@ -8,7 +8,7 @@ import io
 from openpyxl import Workbook
 from fastapi.responses import StreamingResponse
 
-from app.core.deps import get_tenant_db, sanitize_filter, sanitize_date, RequireRoles, get_user_roles, get_user_identity, is_platform_admin
+from app.core.deps import get_tenant_db, sanitize_filter, sanitize_date, get_user_roles, get_user_identity, is_platform_admin
 from app.models.cfl import CflCpiSnapshot
 from app.schemas.common import PaginatedResponse, PageInfo
 from app.schemas.cfl import CflSnapshotOut
@@ -17,7 +17,6 @@ from app.schemas.filters import FilterMetadataOut
 router = APIRouter(
     prefix="/api/v1/cfl",
     tags=["cfl"],
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN", "DATA_ENGINEER", "ANALYST", "REVENUE_MANAGER", "AUDITOR", "CRUISE_USER"))]
 )
 
 

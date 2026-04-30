@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func, desc
 
-from app.core.deps import get_tenant_db, get_tenant_id, RequireRoles, RequirePlatformAdmin
+from app.core.deps import get_tenant_db, get_tenant_id, RequirePlatformAdmin
 from app.models.ingestion import ImportJob, ImportBatch
 from app.schemas.ingestion import (
     IngestionJobOut, ImportBatchOut, 
@@ -17,7 +17,6 @@ from app.schemas.ingestion import (
 router = APIRouter(
     prefix="/api/v1/ingestion",
     tags=["ingestion"],
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN", "DATA_ENGINEER", "ANALYST"))]
 )
 
 

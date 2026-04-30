@@ -15,7 +15,7 @@ export const navigationItems: NavItem[] = [
     path: '/cpi/airline/jy',
     icon: 'Flight',
     requiredModules: ['airline_jy'],
-    requiredRoles: ['TENANT_ADMIN', 'AIRLINE_USER'],
+    requiredRoles: ['TENANT_ADMIN'],
     category: 'Modules',
   },
   {
@@ -23,7 +23,7 @@ export const navigationItems: NavItem[] = [
     path: '/cpi/airline/pw',
     icon: 'Flight',
     requiredModules: ['airline_pw'],
-    requiredRoles: ['TENANT_ADMIN', 'AIRLINE_USER'],
+    requiredRoles: ['TENANT_ADMIN'],
     category: 'Modules',
   },
   {
@@ -31,7 +31,7 @@ export const navigationItems: NavItem[] = [
     path: '/cpi/cruise/fjl',
     icon: 'DirectionsBoat',
     requiredModules: ['cfl_fjl'],
-    requiredRoles: ['TENANT_ADMIN', 'CRUISE_USER'],
+    requiredRoles: ['TENANT_ADMIN'],
     category: 'Modules',
   },
 
@@ -41,13 +41,13 @@ export const navigationItems: NavItem[] = [
     path: '/dashboards',
     icon: 'Dashboard',
     category: 'Analytics',
-    requiredRoles: ['TENANT_ADMIN', 'AIRLINE_USER', 'CRUISE_USER'],
+    requiredRoles: ['TENANT_ADMIN'],
   },
   {
     label: 'Ingestion Jobs',
     path: '/ingestion',
     icon: 'CloudUpload',
-    requiredRoles: ['TENANT_ADMIN', 'DATA_ENGINEER', 'ANALYST'],
+    requiredRoles: ['TENANT_ADMIN'],
     category: 'Data Ops',
   },
 ];

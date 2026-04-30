@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, delete
 
 from app.core.config import settings
-from app.core.deps import get_tenant_db, get_tenant_id, RequireRoles
+from app.core.deps import get_tenant_db, get_tenant_id
 from app.models.user import AppUser, RoleBinding
 from pydantic import BaseModel
 from typing import List
@@ -15,7 +15,6 @@ from typing import List
 router = APIRouter(
     prefix="/api/v1/tenant",
     tags=["tenant"],
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN", "DATA_ENGINEER", "ANALYST", "REVENUE_MANAGER", "AUDITOR"))]
 )
 
 class RolesUpdate(BaseModel):
@@ -100,7 +99,7 @@ def update_user_roles(
         db.execute(delete(RoleBinding).where(RoleBinding.user_id == user.id, RoleBinding.tenant_id == tenant_uuid))
         
         # Insert requested roles
-        valid_roles = {"TENANT_ADMIN", "DATA_ENGINEER", "ANALYST", "REVENUE_MANAGER", "AUDITOR"}
+        valid_roles = {"TENANT_ADMIN"}
         added_roles = []
         for role_name in body.roles:
             role_upper = role_name.upper().strip()

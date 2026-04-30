@@ -4,14 +4,13 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from app.core.deps import get_tenant_db, get_tenant_id, RequireRoles
+from app.core.deps import get_tenant_db, get_tenant_id
 from app.models.alerts import AlertRule, AlertEvent
 from app.schemas.alerts import AlertRuleOut, AlertRuleCreate, AlertEventOut
 
 router = APIRouter(
     prefix="/api/v1/alerts",
     tags=["alerts"],
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN", "DATA_ENGINEER", "ANALYST", "REVENUE_MANAGER", "AUDITOR"))]
 )
 
 
@@ -24,7 +23,6 @@ def list_rules(db: Session = Depends(get_tenant_db)):
     "/rules",
     response_model=AlertRuleOut,
     status_code=201,
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN", "DATA_ENGINEER", "ANALYST"))],
 )
 def create_rule(
     body: AlertRuleCreate,

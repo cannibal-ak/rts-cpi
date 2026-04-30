@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
-from app.core.deps import get_tenant_db, get_tenant_id, RequireRoles, RequirePlatformAdmin
+from app.core.deps import get_tenant_db, get_tenant_id, RequirePlatformAdmin
 from app.models.admin import ProviderContract
 from app.models.tenant_feature import TenantFeature
 from app.schemas.admin import (
@@ -24,7 +24,6 @@ router = APIRouter(
 @router.get(
     "/tenant/features",
     response_model=list[TenantFeatureOut],
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN"))],
 )
 def get_tenant_features(db: Session = Depends(get_tenant_db)):
     return db.scalars(select(TenantFeature)).all()
@@ -33,7 +32,6 @@ def get_tenant_features(db: Session = Depends(get_tenant_db)):
 @router.patch(
     "/tenant/features/{code}",
     response_model=TenantFeatureOut,
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN"))],
 )
 def set_tenant_feature(code: str, body: TenantFeatureUpdate, db: Session = Depends(get_tenant_db)):
     feat = db.scalars(select(TenantFeature).where(TenantFeature.code == code)).first()
@@ -55,7 +53,6 @@ def list_contracts(db: Session = Depends(get_tenant_db)):
     "/contracts",
     response_model=ProviderContractOut,
     status_code=201,
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN"))],
 )
 def create_contract(
     body: ProviderContractCreate,
@@ -79,7 +76,6 @@ def create_contract(
 @router.put(
     "/contracts/{contract_id}",
     response_model=ProviderContractOut,
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN"))],
 )
 def update_contract(contract_id: str, body: ProviderContractCreate, db: Session = Depends(get_tenant_db)):
     c = db.get(ProviderContract, contract_id)
@@ -101,7 +97,6 @@ def update_contract(contract_id: str, body: ProviderContractCreate, db: Session 
 @router.post(
     "/contracts/{contract_id}/activate",
     response_model=ProviderContractOut,
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN"))],
 )
 def activate_contract(contract_id: str, db: Session = Depends(get_tenant_db)):
     c = db.get(ProviderContract, contract_id)
@@ -119,7 +114,6 @@ def activate_contract(contract_id: str, db: Session = Depends(get_tenant_db)):
 @router.post(
     "/contracts/{contract_id}/deprecate",
     response_model=ProviderContractOut,
-    dependencies=[Depends(RequireRoles("TENANT_ADMIN"))],
 )
 def deprecate_contract(contract_id: str, db: Session = Depends(get_tenant_db)):
     c = db.get(ProviderContract, contract_id)

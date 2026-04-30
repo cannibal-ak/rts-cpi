@@ -63,19 +63,19 @@ export default function App() {
 
                 {/* Modules */}
                 <Route path="/cpi/airline/jy" element={
-                  <ProtectedRoute requiredModules={['airline_jy']} requiredRoles={['TENANT_ADMIN', 'AIRLINE_USER']}>
+                  <ProtectedRoute requiredModules={['airline_jy']} requiredRoles={['TENANT_ADMIN']}>
                     <AirlineCpiPage tenantCode="JY" />
                   </ProtectedRoute>
                 } />
 
                 <Route path="/cpi/airline/pw" element={
-                  <ProtectedRoute requiredModules={['airline_pw']} requiredRoles={['TENANT_ADMIN', 'AIRLINE_USER']}>
+                  <ProtectedRoute requiredModules={['airline_pw']} requiredRoles={['TENANT_ADMIN']}>
                     <AirlineCpiPage tenantCode="PW" />
                   </ProtectedRoute>
                 } />
 
                 <Route path="/cpi/cruise/fjl" element={
-                  <ProtectedRoute requiredModules={['cfl_fjl']} requiredRoles={['TENANT_ADMIN', 'CRUISE_USER']}>
+                  <ProtectedRoute requiredModules={['cfl_fjl']} requiredRoles={['TENANT_ADMIN']}>
                     <CflCpiPage tenantCode="FJL" />
                   </ProtectedRoute>
                 } />
@@ -86,7 +86,7 @@ export default function App() {
 
 
                 <Route path="/ingestion" element={
-                  <ProtectedRoute requiredRoles={['TENANT_ADMIN', 'DATA_ENGINEER', 'ANALYST']}>
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']}>
                     <IngestionJobsPage />
                   </ProtectedRoute>
                 } />
