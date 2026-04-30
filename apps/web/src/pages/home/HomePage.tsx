@@ -70,9 +70,6 @@ export default function HomePage() {
           </Grid>
         )}
       </Box>
-
-
-
     </Box>
   );
 }
