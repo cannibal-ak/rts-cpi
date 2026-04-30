@@ -48,6 +48,7 @@ export const navigationItems: NavItem[] = [
     path: '/ingestion',
     icon: 'CloudUpload',
     requiredRoles: ['TENANT_ADMIN'],
+    requireSuperAdmin: true,
     category: 'Data Ops',
   },
 ];

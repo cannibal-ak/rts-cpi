@@ -18,6 +18,8 @@ export interface NavItem {
   requiredModules?: ModuleCode[];
   requiredCapabilities?: Capability[];
   requiredRoles?: UserRole[];
+  // When true, only the Skywave super-admin sees this item, regardless of role list.
+  requireSuperAdmin?: boolean;
   children?: NavItem[];
   category?: string;
 }

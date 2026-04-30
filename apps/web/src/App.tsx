@@ -86,7 +86,7 @@ export default function App() {
 
 
                 <Route path="/ingestion" element={
-                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']}>
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
                     <IngestionJobsPage />
                   </ProtectedRoute>
                 } />

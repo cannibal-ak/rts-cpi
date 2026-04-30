@@ -20,6 +20,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useSession } from '../../context/SessionContext';
 import { navigationItems } from '../../mock/navigation';
 import { NavItem } from '../../types';
+import { isSuperAdmin } from '../../utils/access';
 
 const DRAWER_WIDTH = 260;
 const MINI_DRAWER_WIDTH = 68;
@@ -41,15 +42,16 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const navigate = useNavigate();
   const location = useLocation();
-  const { hasAccess } = useSession();
+  const { hasAccess, session } = useSession();
 
-  const filteredItems = navigationItems.filter(item =>
-    hasAccess({
+  const filteredItems = navigationItems.filter(item => {
+    if (item.requireSuperAdmin && !isSuperAdmin(session)) return false;
+    return hasAccess({
       roles: item.requiredRoles,
       modules: item.requiredModules,
       capabilities: item.requiredCapabilities,
-    })
-  );
+    });
+  });
 
   const categories = Array.from(new Set(filteredItems.map(i => i.category || 'Other')));
 
