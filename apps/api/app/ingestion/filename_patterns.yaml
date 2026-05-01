@@ -1,0 +1,45 @@
+# Filename patterns for the ingestion overhaul.
+#
+# Each entry recognises a single (tenant_code, domain) combination based on
+# a filename regex. The first regex capture group MUST be the date portion;
+# date_format names a key in SUPPORTED_DATE_FORMATS in filename_parser.py.
+#
+# To add a new tenant/domain combination, append a new entry here and set the
+# regex/date_format/example fields. No code change is needed unless the
+# date format is not already supported.
+
+patterns:
+  - regex: "^JY_(\\d{6})\\.xlsx$"
+    tenant_code: JY
+    domain: AIRLINE
+    date_format: DDMMYY
+    case_insensitive: true
+    example: "JY_010426.xlsx"
+
+  - regex: "^JYVelocityData_(\\d{2}\\.\\d{2}\\.\\d{4})\\.csv$"
+    tenant_code: JY
+    domain: VELOCITY
+    date_format: DD.MM.YYYY
+    case_insensitive: true
+    example: "JYVelocityData_01.04.2026.csv"
+
+  - regex: "^PW_(\\d{6})\\.csv$"
+    tenant_code: PW
+    domain: AIRLINE
+    date_format: DDMMYY
+    case_insensitive: true
+    example: "PW_010426.csv"
+
+  - regex: "^PWVelocityData_(\\d{2}\\.\\d{2}\\.\\d{4})\\.csv$"
+    tenant_code: PW
+    domain: VELOCITY
+    date_format: DD.MM.YYYY
+    case_insensitive: true
+    example: "PWVelocityData_01.04.2026.csv"
+
+  - regex: "^FJL_(\\d{6})\\.csv$"
+    tenant_code: FJL
+    domain: CFL
+    date_format: DDMMYY
+    case_insensitive: true
+    example: "FJL_010426.csv"
