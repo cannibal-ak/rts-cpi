@@ -1,0 +1,126 @@
+=== Migration head ===
+ version_num 
+-------------
+ 018
+(1 row)
+
+=== ingestion_jobs schema ===
+                                      Table "public.ingestion_jobs"
+       Column        |           Type           | Collation | Nullable |             Default             
+---------------------+--------------------------+-----------+----------+---------------------------------
+ id                  | uuid                     |           | not null | gen_random_uuid()
+ tenant_id           | uuid                     |           | not null | 
+ tenant_code         | character varying(16)    |           | not null | 
+ domain              | ingestion_domain_enum    |           | not null | 
+ filename            | text                     |           | not null | 
+ file_hash           | character varying(64)    |           | not null | 
+ file_size_bytes     | bigint                   |           | not null | 
+ file_date           | date                     |           | not null | 
+ status              | ingestion_status_enum    |           | not null | 'STAGED'::ingestion_status_enum
+ mode                | ingestion_mode_enum      |           | not null | 'STRICT'::ingestion_mode_enum
+ row_count_total     | integer                  |           |          | 
+ row_count_valid     | integer                  |           |          | 
+ row_count_rejected  | integer                  |           |          | 
+ validation_summary  | jsonb                    |           |          | 
+ uploaded_by_user_id | uuid                     |           | not null | 
+ uploaded_at         | timestamp with time zone |           | not null | now()
+ validated_at        | timestamp with time zone |           |          | 
+ committed_at        | timestamp with time zone |           |          | 
+ replaced_by_job_id  | uuid                     |           |          | 
+ error_message       | text                     |           |          | 
+Indexes:
+    "ingestion_jobs_pkey" PRIMARY KEY, btree (id)
+    "ix_ingestion_jobs_file_hash" btree (file_hash)
+    "ix_ingestion_jobs_status_uploaded_at" btree (status, uploaded_at DESC)
+    "ix_ingestion_jobs_tenant_code_file_date" btree (tenant_id, tenant_code, file_date)
+Foreign-key constraints:
+    "ingestion_jobs_replaced_by_job_id_fkey" FOREIGN KEY (replaced_by_job_id) REFERENCES ingestion_jobs(id) ON DELETE SET NULL
+    "ingestion_jobs_tenant_id_fkey" FOREIGN KEY (tenant_id) REFERENCES tenant(id) ON DELETE CASCADE
+    "ingestion_jobs_uploaded_by_user_id_fkey" FOREIGN KEY (uploaded_by_user_id) REFERENCES app_user(id)
+Referenced by:
+    TABLE "ingestion_audit_log" CONSTRAINT "ingestion_audit_log_job_id_fkey" FOREIGN KEY (job_id) REFERENCES ingestion_jobs(id) ON DELETE CASCADE
+    TABLE "ingestion_jobs" CONSTRAINT "ingestion_jobs_replaced_by_job_id_fkey" FOREIGN KEY (replaced_by_job_id) REFERENCES ingestion_jobs(id) ON DELETE SET NULL
+Policies (forced row security enabled):
+    POLICY "rls_ingestion_jobs_superuser_bypass"
+      TO cpi
+      USING (true)
+      WITH CHECK (true)
+    POLICY "rls_ingestion_jobs_tenant_isolation"
+      USING (((tenant_id)::text = COALESCE(NULLIF(current_setting('app.current_tenant'::text, true), ''::text), '00000000-0000-0000-0000-000000000000'::text)))
+      WITH CHECK (((tenant_id)::text = COALESCE(NULLIF(current_setting('app.current_tenant'::text, true), ''::text), '00000000-0000-0000-0000-000000000000'::text)))
+
+=== ingestion_audit_log schema ===
+                           Table "public.ingestion_audit_log"
+    Column     |            Type             | Collation | Nullable |      Default      
+---------------+-----------------------------+-----------+----------+-------------------
+ id            | uuid                        |           | not null | gen_random_uuid()
+ job_id        | uuid                        |           | not null | 
+ actor_user_id | uuid                        |           | not null | 
+ action        | ingestion_audit_action_enum |           | not null | 
+ actor_ip      | inet                        |           |          | 
+ timestamp     | timestamp with time zone    |           | not null | now()
+ details       | jsonb                       |           |          | 
+Indexes:
+    "ingestion_audit_log_pkey" PRIMARY KEY, btree (id)
+    "ix_ingestion_audit_log_job_id_timestamp" btree (job_id, "timestamp" DESC)
+Foreign-key constraints:
+    "ingestion_audit_log_actor_user_id_fkey" FOREIGN KEY (actor_user_id) REFERENCES app_user(id)
+    "ingestion_audit_log_job_id_fkey" FOREIGN KEY (job_id) REFERENCES ingestion_jobs(id) ON DELETE CASCADE
+Policies (forced row security enabled):
+    POLICY "rls_ingestion_audit_log_superuser_bypass"
+      TO cpi
+      USING (true)
+      WITH CHECK (true)
+    POLICY "rls_ingestion_audit_log_via_job"
+      USING ((EXISTS ( SELECT 1
+   FROM ingestion_jobs j
+  WHERE ((j.id = ingestion_audit_log.job_id) AND ((j.tenant_id)::text = COALESCE(NULLIF(current_setting('app.current_tenant'::text, true), ''::text), '00000000-0000-0000-0000-000000000000'::text))))))
+
+=== RLS policies on new tables ===
+      tablename      |                policyname                |  roles   | cmd |                                                                                                  qual                                                                                                   
+---------------------+------------------------------------------+----------+-----+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ ingestion_audit_log | rls_ingestion_audit_log_superuser_bypass | {cpi}    | ALL | true
+ ingestion_audit_log | rls_ingestion_audit_log_via_job          | {public} | ALL | (EXISTS ( SELECT 1                                                                                                                                                                                     +
+                     |                                          |          |     |    FROM ingestion_jobs j                                                                                                                                                                               +
+                     |                                          |          |     |   WHERE ((j.id = ingestion_audit_log.job_id) AND ((j.tenant_id)::text = COALESCE(NULLIF(current_setting('app.current_tenant'::text, true), ''::text), '00000000-0000-0000-0000-000000000000'::text)))))
+ ingestion_jobs      | rls_ingestion_jobs_superuser_bypass      | {cpi}    | ALL | true
+ ingestion_jobs      | rls_ingestion_jobs_tenant_isolation      | {public} | ALL | ((tenant_id)::text = COALESCE(NULLIF(current_setting('app.current_tenant'::text, true), ''::text), '00000000-0000-0000-0000-000000000000'::text))
+(4 rows)
+
+=== ENUM type values ===
+           typname           |                                      values                                      
+-----------------------------+----------------------------------------------------------------------------------
+ ingestion_audit_action_enum | UPLOADED, VALIDATED, COMMITTED, REJECTED, REPLACED, CANCELLED, DELETED
+ ingestion_domain_enum       | AIRLINE, VELOCITY, CFL
+ ingestion_mode_enum         | STRICT, LENIENT
+ ingestion_status_enum       | STAGED, VALIDATING, VALIDATED, COMMITTING, COMMITTED, REJECTED, REPLACED, FAILED
+(4 rows)
+
+=== FKs from new tables ===
+     table_name      |                 conname                 |                               pg_get_constraintdef                                
+---------------------+-----------------------------------------+-----------------------------------------------------------------------------------
+ ingestion_audit_log | ingestion_audit_log_actor_user_id_fkey  | FOREIGN KEY (actor_user_id) REFERENCES app_user(id)
+ ingestion_audit_log | ingestion_audit_log_job_id_fkey         | FOREIGN KEY (job_id) REFERENCES ingestion_jobs(id) ON DELETE CASCADE
+ ingestion_jobs      | ingestion_jobs_replaced_by_job_id_fkey  | FOREIGN KEY (replaced_by_job_id) REFERENCES ingestion_jobs(id) ON DELETE SET NULL
+ ingestion_jobs      | ingestion_jobs_tenant_id_fkey           | FOREIGN KEY (tenant_id) REFERENCES tenant(id) ON DELETE CASCADE
+ ingestion_jobs      | ingestion_jobs_uploaded_by_user_id_fkey | FOREIGN KEY (uploaded_by_user_id) REFERENCES app_user(id)
+(5 rows)
+
+=== Indexes on new tables ===
+      tablename      |                indexname                |                                                           indexdef                                                            
+---------------------+-----------------------------------------+-------------------------------------------------------------------------------------------------------------------------------
+ ingestion_audit_log | ingestion_audit_log_pkey                | CREATE UNIQUE INDEX ingestion_audit_log_pkey ON public.ingestion_audit_log USING btree (id)
+ ingestion_audit_log | ix_ingestion_audit_log_job_id_timestamp | CREATE INDEX ix_ingestion_audit_log_job_id_timestamp ON public.ingestion_audit_log USING btree (job_id, "timestamp" DESC)
+ ingestion_jobs      | ingestion_jobs_pkey                     | CREATE UNIQUE INDEX ingestion_jobs_pkey ON public.ingestion_jobs USING btree (id)
+ ingestion_jobs      | ix_ingestion_jobs_file_hash             | CREATE INDEX ix_ingestion_jobs_file_hash ON public.ingestion_jobs USING btree (file_hash)
+ ingestion_jobs      | ix_ingestion_jobs_status_uploaded_at    | CREATE INDEX ix_ingestion_jobs_status_uploaded_at ON public.ingestion_jobs USING btree (status, uploaded_at DESC)
+ ingestion_jobs      | ix_ingestion_jobs_tenant_code_file_date | CREATE INDEX ix_ingestion_jobs_tenant_code_file_date ON public.ingestion_jobs USING btree (tenant_id, tenant_code, file_date)
+(6 rows)
+
+=== Row counts (should both be zero) ===
+          t          | count 
+---------------------+-------
+ ingestion_jobs      |     0
+ ingestion_audit_log |     0
+(2 rows)
+
