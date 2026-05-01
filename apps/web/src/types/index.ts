@@ -132,29 +132,118 @@ export interface CflSnapshot {
   out_avail: string;
 }
 
-// ──────── Ingestion ────────
-export type JobStatus = 'queued' | 'validating' | 'committed' | 'failed';
-export type ValidationMode = 'STRICT' | 'COMPAT';
+// ──────── Ingestion (Phase A overhaul — matches /api/v1/ingestion/* server schema) ────────
 
-export interface JobTimelineEntry {
-  status: JobStatus;
-  timestamp: string;
-  message?: string;
-}
+export type IngestionStatus =
+  | 'STAGED'
+  | 'VALIDATING'
+  | 'VALIDATED'
+  | 'COMMITTING'
+  | 'COMMITTED'
+  | 'REJECTED'
+  | 'REPLACED'
+  | 'FAILED';
+
+export type IngestionDomain = 'AIRLINE' | 'VELOCITY' | 'CFL';
+export type IngestionMode = 'STRICT' | 'LENIENT';
+
+export type IngestionAuditAction =
+  | 'UPLOADED'
+  | 'VALIDATED'
+  | 'COMMITTED'
+  | 'REJECTED'
+  | 'REPLACED'
+  | 'CANCELLED'
+  | 'DELETED';
 
 export interface IngestionJob {
   id: string;
-  source_name: string;
-  domain: string;
-  tenant_code?: string;
-  status: JobStatus;
-  validation_mode: ValidationMode;
-  records_total: number;
-  records_valid: number;
-  records_rejected: number;
-  started_at: string;
-  completed_at?: string;
-  timeline: JobTimelineEntry[];
+  tenant_id: string;
+  tenant_code: string;
+  domain: IngestionDomain;
+  filename: string;
+  file_hash: string;
+  file_size_bytes: number;
+  file_date: string;
+  status: IngestionStatus;
+  mode: IngestionMode;
+  row_count_total: number | null;
+  row_count_valid: number | null;
+  row_count_rejected: number | null;
+  validation_summary: Record<string, unknown> | null;
+  uploaded_by_user_id: string;
+  uploaded_at: string;
+  validated_at: string | null;
+  committed_at: string | null;
+  replaced_by_job_id: string | null;
+  error_message: string | null;
+}
+
+export interface IngestionUploadFileResult {
+  filename: string;
+  job: IngestionJob | null;
+  duplicate: boolean;
+  conflict: boolean;
+  existing_job_id: string | null;
+  error_code: string | null;
+  error_message: string | null;
+}
+
+export interface IngestionUploadSummary {
+  accepted: number;
+  duplicate: number;
+  conflict: number;
+  rejected: number;
+}
+
+export interface IngestionUploadResponse {
+  files: IngestionUploadFileResult[];
+  summary: IngestionUploadSummary;
+}
+
+export interface IngestionValidationResult {
+  job: IngestionJob;
+  row_count_total: number;
+  row_count_valid: number;
+  row_count_rejected: number;
+  summary: Record<string, unknown>;
+}
+
+export interface IngestionCommitResult {
+  job: IngestionJob;
+  rows_inserted: number;
+  replaced_job_id: string | null;
+}
+
+export interface IngestionAuditEntry {
+  id: string;
+  job_id: string;
+  actor_user_id: string;
+  action: IngestionAuditAction;
+  actor_ip: string | null;
+  timestamp: string;
+  details: Record<string, unknown> | null;
+}
+
+export interface IngestionAuditLog {
+  job_id: string;
+  entries: IngestionAuditEntry[];
+}
+
+export interface IngestionPreviewRow {
+  row_num: number;
+  data: Record<string, unknown>;
+}
+
+export interface IngestionPreviewRejection {
+  row_num: number;
+  reason: string;
+}
+
+export interface IngestionPreview {
+  job_id: string;
+  sample_valid: IngestionPreviewRow[];
+  sample_rejected: IngestionPreviewRejection[];
 }
 
 export interface ImportBatch {

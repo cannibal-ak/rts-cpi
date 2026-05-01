@@ -2,6 +2,7 @@ import React from 'react';
 import { Chip } from '@mui/material';
 
 const statusColors: Record<string, 'success' | 'warning' | 'error' | 'info' | 'default'> = {
+  // Legacy lowercase
   committed: 'success',
   active: 'success',
   fresh: 'success',
@@ -19,6 +20,15 @@ const statusColors: Record<string, 'success' | 'warning' | 'error' | 'info' | 'd
   private: 'default',
   team: 'info',
   public: 'success',
+  // Phase A ingestion statuses (uppercase, server-authoritative)
+  STAGED: 'default',
+  VALIDATING: 'info',
+  VALIDATED: 'info',
+  COMMITTING: 'info',
+  COMMITTED: 'success',
+  REJECTED: 'warning',
+  REPLACED: 'default',
+  FAILED: 'error',
 };
 
 interface StatusChipProps {

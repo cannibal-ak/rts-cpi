@@ -5,7 +5,9 @@
 import type { CpiApiClient, SnapshotQuery, JobQuery } from './client';
 import type {
   Paginated, AirlineSnapshot, JyVelocitySnapshot, CflSnapshot, FilterMetadata,
-  IngestionJob, ImportBatch, AlertRule, AlertEvent,
+  IngestionJob, IngestionUploadResponse, IngestionValidationResult,
+  IngestionCommitResult, IngestionAuditLog, IngestionPreview,
+  AlertRule, AlertEvent,
   TenantFeature, DataFreshness,
 } from '../types';
 
@@ -52,29 +54,49 @@ async function attemptRefresh(): Promise<boolean> {
   return false;
 }
 
+/**
+ * Shape of the structured fields attached to thrown API errors. Cast via:
+ *   const e = err as Error & ApiErrorShape;
+ * to access status / errorCode / details from a caller's catch block. The
+ * legacy ``err.message.startsWith('API ')`` check is preserved for code
+ * that hasn't been migrated.
+ */
+export interface ApiErrorShape {
+  status?: number;
+  errorCode?: string;
+  details?: Record<string, unknown>;
+}
+
 async function handleResponse<T>(res: Response): Promise<T> {
   if (!res.ok) {
-    let detail = '';
-    let code = '';
+    let message = '';
+    let errorCode = '';
+    let details: Record<string, unknown> = {};
     try {
-      const errorData = await res.json();
-      if (typeof errorData.detail === 'object') {
-        detail = errorData.detail.message || JSON.stringify(errorData.detail);
-        code = errorData.detail.code || '';
+      const data = await res.json();
+      if (typeof data.detail === 'object' && data.detail !== null) {
+        const d = data.detail as Record<string, unknown>;
+        message = (d.message as string) || JSON.stringify(d);
+        errorCode = (d.error_code as string) || (d.code as string) || '';
+        details = (d.details as Record<string, unknown>) || {};
       } else {
-        detail = errorData.detail || JSON.stringify(errorData);
+        message = (data.detail as string) || JSON.stringify(data);
       }
     } catch {
-      detail = res.statusText;
+      message = res.statusText;
     }
 
     // Handle forced password change
-    if (res.status === 403 && code === 'PASSWORD_CHANGE_REQUIRED') {
+    if (res.status === 403 && errorCode === 'PASSWORD_CHANGE_REQUIRED') {
       window.location.href = '/change-password';
       throw new Error('Password change required');
     }
 
-    throw new Error(`API ${res.status}: ${detail}`);
+    const err = new Error(`API ${res.status}: ${message}`) as Error & ApiErrorShape;
+    err.status = res.status;
+    err.errorCode = errorCode;
+    err.details = details;
+    throw err;
   }
   return res.json();
 }
@@ -144,6 +166,30 @@ async function patch<T>(path: string, body: unknown): Promise<T> {
     headers: headers(),
     body: JSON.stringify(body),
   });
+}
+
+async function del<T>(path: string): Promise<T> {
+  return fetchWithAuth<T>(`${BASE}${path}`, {
+    method: 'DELETE',
+    headers: headers(),
+  });
+}
+
+async function postMultipart<T>(path: string, files: File[]): Promise<T> {
+  // Don't set Content-Type — the browser injects the multipart boundary.
+  const fd = new FormData();
+  files.forEach((f) => fd.append('files', f, f.name));
+  const init: RequestInit = {
+    method: 'POST',
+    headers: _accessToken ? { Authorization: `Bearer ${_accessToken}` } : {},
+    body: fd,
+  };
+  try {
+    return await fetchWithAuth<T>(`${BASE}${path}`, init);
+  } catch (err: any) {
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
+    throw new Error(`Network Error: ${err.message}`);
+  }
 }
 
 async function download(path: string, params?: Record<string, string | number | undefined>): Promise<void> {
@@ -222,15 +268,18 @@ export const httpClient: CpiApiClient = {
       get<Paginated<IngestionJob>>('/api/v1/ingestion/jobs', q as Record<string, string | number | undefined>),
     getJob: (id: string) =>
       get<IngestionJob>(`/api/v1/ingestion/jobs/${id}`),
-    listJobBatches: (jobId: string) =>
-      get<ImportBatch[]>(`/api/v1/ingestion/jobs/${jobId}/batches`),
-    triggerIngest: async (tenant?: string, force?: boolean) => {
-      const params = new URLSearchParams();
-      if (tenant) params.set('tenant', tenant);
-      if (force) params.set('force', 'true');
-      const qs = params.toString();
-      return post<{ message: string; results: any[] }>(`/api/v1/ingestion/ingest${qs ? '?' + qs : ''}`, {});
-    },
+    upload: (files: File[]) =>
+      postMultipart<IngestionUploadResponse>('/api/v1/ingestion/upload', files),
+    validate: (id: string) =>
+      post<IngestionValidationResult>(`/api/v1/ingestion/jobs/${id}/validate`, {}),
+    commit: (id: string, replaceExisting: boolean) =>
+      post<IngestionCommitResult>(`/api/v1/ingestion/jobs/${id}/commit`, { replace_existing: replaceExisting }),
+    cancel: (id: string) =>
+      del<IngestionJob>(`/api/v1/ingestion/jobs/${id}`),
+    getAudit: (id: string) =>
+      get<IngestionAuditLog>(`/api/v1/ingestion/jobs/${id}/audit`),
+    getPreview: (id: string) =>
+      get<IngestionPreview>(`/api/v1/ingestion/jobs/${id}/preview`),
   },
   alerts: {
     listRules: () => get<AlertRule[]>('/api/v1/alerts/rules'),

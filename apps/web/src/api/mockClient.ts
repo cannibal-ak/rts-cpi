@@ -4,11 +4,16 @@
 import type { CpiApiClient, SnapshotQuery, JobQuery } from './client';
 import type {
   Paginated,
-  ImportBatch,
   AlertRule,
+  IngestionJob,
+  IngestionUploadResponse,
+  IngestionValidationResult,
+  IngestionCommitResult,
+  IngestionAuditLog,
+  IngestionPreview,
 } from '../types';
 import {
-  mockAirlineSnapshots, mockCflSnapshots, mockIngestionJobs,
+  mockAirlineSnapshots, mockCflSnapshots,
   mockAlertRules, mockAlertEvents,
   mockTenantFeatures,
   mockFilterMetadata,
@@ -47,16 +52,19 @@ export const mockClient: CpiApiClient = {
     exportSnapshots: (_q?: Record<string, string>) => delay(undefined),
   },
   ingestion: {
-    listJobs: (q?: JobQuery) => {
-      let jobs = [...mockIngestionJobs];
-      if (q?.domain) jobs = jobs.filter(j => j.domain === q.domain);
-      if (q?.status) jobs = jobs.filter(j => j.status === q.status);
-      if (q?.tenant) jobs = jobs.filter(j => j.tenant_code === q.tenant);
-      return delay(paginate(jobs, q?.page, q?.page_size));
-    },
-    getJob: (id: string) => delay(mockIngestionJobs.find(j => j.id === id) || null),
-    listJobBatches: (_jobId: string) => delay([] as ImportBatch[]),
-    triggerIngest: (_tenant?: string, _force?: boolean) => delay({ message: 'Mock ingestion triggered', results: [] }),
+    // Phase A overhaul — no realistic in-memory simulation of staged uploads;
+    // the mock client returns empty/no-op results so the offline-demo build
+    // still type-checks. Live development uses the real httpClient.
+    listJobs: (q?: JobQuery) =>
+      delay(paginate([] as IngestionJob[], q?.page, q?.page_size)),
+    getJob: (_id: string) => delay(null),
+    upload: (_files: File[]) =>
+      delay({ files: [], summary: { accepted: 0, duplicate: 0, conflict: 0, rejected: 0 } } as IngestionUploadResponse),
+    validate: (_id: string) => Promise.reject(new Error('Mock client does not implement ingestion.validate')) as Promise<IngestionValidationResult>,
+    commit: (_id: string, _replace: boolean) => Promise.reject(new Error('Mock client does not implement ingestion.commit')) as Promise<IngestionCommitResult>,
+    cancel: (_id: string) => Promise.reject(new Error('Mock client does not implement ingestion.cancel')) as Promise<IngestionJob>,
+    getAudit: (id: string) => delay({ job_id: id, entries: [] } as IngestionAuditLog),
+    getPreview: (id: string) => delay({ job_id: id, sample_valid: [], sample_rejected: [] } as IngestionPreview),
   },
   alerts: {
     listRules: () => delay([...mockAlertRules]),

@@ -12,6 +12,7 @@ import HomePage from './pages/home/HomePage';
 import AirlineCpiPage from './pages/airline/AirlineCpiPage';
 import CflCpiPage from './pages/cfl/CflCpiPage';
 import IngestionJobsPage from './pages/ingestion/IngestionJobsPage';
+import UploadPage from './pages/ingestion/UploadPage';
 
 import SupersetPage from './pages/superset/SupersetPage';
 import DashboardViewerPage from './pages/superset/DashboardViewerPage';
@@ -88,6 +89,12 @@ export default function App() {
                 <Route path="/ingestion" element={
                   <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
                     <IngestionJobsPage />
+                  </ProtectedRoute>
+                } />
+
+                <Route path="/ingestion/upload" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <UploadPage />
                   </ProtectedRoute>
                 } />
 
