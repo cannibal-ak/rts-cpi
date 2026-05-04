@@ -88,6 +88,7 @@ services:
       CPI_DEFAULT_TENANT_ID: ${CPI_DEFAULT_TENANT_ID:-a0000000-0000-0000-0000-000000000001}
       CPI_RABBITMQ_URL: ${CPI_RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
       CPI_REDIS_URL: ${CPI_REDIS_URL:-redis://redis:6379/0}
+      CPI_KEK: ${CPI_KEK}  # required — Fernet KEK for app-layer encryption (Phase 1 SFTP)
       CPI_DEBUG: "true"
       # Superset Connection for Dynamic Resolution
       SUPERSET_URL: ${SUPERSET_URL:-http://superset:8088}
