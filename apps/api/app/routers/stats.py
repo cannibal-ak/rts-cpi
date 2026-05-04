@@ -10,7 +10,6 @@ from app.core.database import get_db
 from app.core.deps import get_user_roles, get_user_identity, is_platform_admin
 from app.models.airline import AirlineCpiSnapshot
 from app.models.cfl import CflCpiSnapshot
-from app.models.ingestion import ImportJob
 from pydantic import BaseModel
 from typing import List
 

@@ -35,29 +35,13 @@ export const navigationItems: NavItem[] = [
     category: 'Modules',
   },
 
-  // ── Analytics & Data Ops ─────────────────────
+  // ── Analytics ─────────────────────────────
   {
     label: 'Dashboards',
     path: '/dashboards',
     icon: 'Dashboard',
     category: 'Analytics',
     requiredRoles: ['TENANT_ADMIN'],
-  },
-  {
-    label: 'Ingestion Jobs',
-    path: '/ingestion',
-    icon: 'CloudUpload',
-    requiredRoles: ['TENANT_ADMIN'],
-    requireSuperAdmin: true,
-    category: 'Data Ops',
-  },
-  {
-    label: 'Upload Files',
-    path: '/ingestion/upload',
-    icon: 'CloudUpload',
-    requiredRoles: ['TENANT_ADMIN'],
-    requireSuperAdmin: true,
-    category: 'Data Ops',
   },
 
   // ── Admin (Skywave platform admins only) ─────────────

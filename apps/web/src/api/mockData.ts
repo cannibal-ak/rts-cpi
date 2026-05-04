@@ -1,7 +1,7 @@
 import type {
-  AirlineSnapshot, CflSnapshot, IngestionJob, ValidationError,
+  AirlineSnapshot, CflSnapshot,
   AlertRule, AlertEvent, TenantFeature,
-  FilterMetadata, JobTimelineEntry,
+  FilterMetadata,
 } from '../types';
 
 // ── Helpers ─────────────────────────
@@ -119,104 +119,6 @@ export function generateCflSnapshots(count: number = 40): CflSnapshot[] {
   return rows;
 }
 
-// ── Ingestion jobs ──────────────────
-export function generateIngestionJobs(): IngestionJob[] {
-  const statuses: Array<{ s: 'queued' | 'validating' | 'committed' | 'failed'; tl: (base: string) => JobTimelineEntry[] }> = [
-    {
-      s: 'committed', tl: (b) => [
-        { status: 'queued', timestamp: b },
-        { status: 'validating', timestamp: new Date(new Date(b).getTime() + 30000).toISOString() },
-        { status: 'committed', timestamp: new Date(new Date(b).getTime() + 720000).toISOString(), message: 'All records committed successfully' },
-      ]
-    },
-    {
-      s: 'validating', tl: (b) => [
-        { status: 'queued', timestamp: b },
-        { status: 'validating', timestamp: new Date(new Date(b).getTime() + 15000).toISOString(), message: 'Validation in progress...' },
-      ]
-    },
-    {
-      s: 'failed', tl: (b) => [
-        { status: 'queued', timestamp: b },
-        { status: 'validating', timestamp: new Date(new Date(b).getTime() + 10000).toISOString() },
-        { status: 'failed', timestamp: new Date(new Date(b).getTime() + 120000).toISOString(), message: '180 records rejected — exceeds failure threshold (36%)' },
-      ]
-    },
-    {
-      s: 'queued', tl: (b) => [
-        { status: 'queued', timestamp: b, message: 'Waiting for worker slot' },
-      ]
-    },
-  ];
-
-  const sources = [
-    { name: 'SFTP - OAG Feed (JY)', domain: 'airline', tenant_code: 'JY' },
-    { name: 'API Push - FerryData (FJL)', domain: 'cfl', tenant_code: 'FJL' },
-    { name: 'Upload - Manual Comp (JY)', domain: 'airline', tenant_code: 'JY' },
-    { name: 'SFTP - CruiseLine A (FJL)', domain: 'cfl', tenant_code: 'FJL' },
-    { name: 'SFTP - PW Airline Feed', domain: 'airline', tenant_code: 'PW' },
-    { name: 'Daily CSV Ingest (JY)', domain: 'airline', tenant_code: 'JY' },
-    { name: 'Daily CSV Ingest (PW)', domain: 'airline', tenant_code: 'PW' },
-    { name: 'Daily CSV Ingest (FJL)', domain: 'cfl', tenant_code: 'FJL' },
-  ];
-
-  return sources.map((src, i) => {
-    const st = statuses[i % statuses.length];
-    const base = new Date(Date.now() - (i * 3600000 + randInt(0, 3600000))).toISOString();
-    const total = randInt(500, 20000);
-    const valid = st.s === 'committed' ? total - randInt(0, 20) : st.s === 'failed' ? Math.floor(total * 0.64) : 0;
-    const rejected = st.s === 'committed' ? total - valid : st.s === 'failed' ? total - valid : 0;
-    const timeline = st.tl(base);
-    return {
-      id: `job-${String(i + 1).padStart(3, '0')}`,
-      source_name: src.name,
-      domain: src.domain,
-      tenant_code: src.tenant_code,
-      status: st.s,
-      validation_mode: pick(['STRICT', 'COMPAT'] as const),
-      records_total: total,
-      records_valid: valid,
-      records_rejected: rejected,
-      started_at: base,
-      completed_at: st.s === 'committed' || st.s === 'failed' ? timeline[timeline.length - 1].timestamp : undefined,
-      timeline,
-    };
-  });
-}
-
-// ── Validation errors ───────────────
-export function generateValidationErrors(): ValidationError[] {
-  const errorTemplates = [
-    { field: 'RefTotFare', code: 'VAL_REQUIRED', msg: 'Required field RefTotFare is missing', sev: 'error' as const },
-    { field: 'CompOrg', code: 'VAL_PATTERN_MISMATCH', msg: 'CompOrg must be a valid 3-letter IATA code', sev: 'error' as const },
-    { field: 'TripType', code: 'VAL_INVALID_ENUM', msg: 'TripType must be OW or RT', sev: 'error' as const },
-    { field: 'RefRetDepDate', code: 'VAL_CONDITIONAL_FORBIDDEN', msg: 'ReturnDepDate not allowed for TripType=OW', sev: 'warning' as const },
-    { field: 'CompTotFare', code: 'VAL_RANGE_EXCEEDED', msg: 'CompTotFare exceeds maximum threshold (50000)', sev: 'error' as const },
-    { field: 'RefDepDate', code: 'VAL_INVALID_FORMAT', msg: 'RefDepDate is not a valid ISO 8601 date', sev: 'error' as const },
-    { field: 'CompCabCode', code: 'VAL_INVALID_ENUM', msg: 'CompCabCode value "Z" not in allowed set [F,J,W,Y]', sev: 'error' as const },
-    { field: 'POS', code: 'VAL_PATTERN_MISMATCH', msg: 'POS must be a 2-letter ISO country code', sev: 'warning' as const },
-    { field: 'RefSeats', code: 'VAL_RANGE_EXCEEDED', msg: 'RefSeats value -1 is below minimum (0)', sev: 'error' as const },
-    { field: 'CompBaseFare', code: 'VAL_REQUIRED', msg: 'Required field CompBaseFare is missing', sev: 'error' as const },
-    { field: 'CurrCode', code: 'VAL_PATTERN_MISMATCH', msg: 'CurrCode exceeds maxLength of 3', sev: 'error' as const },
-    { field: 'RetDepDate', code: 'VAL_CONDITIONAL_REQUIRED', msg: 'RetDepDate required for TripType=ROUND_TRIP', sev: 'error' as const },
-  ];
-  const jobs = ['job-003', 'job-001', 'job-005', 'job-007'];
-  const errors: ValidationError[] = [];
-  for (let i = 0; i < 35; i++) {
-    const tmpl = errorTemplates[i % errorTemplates.length];
-    errors.push({
-      id: `ve-${String(i + 1).padStart(3, '0')}`,
-      job_id: pick(jobs),
-      row_number: randInt(1, 15000),
-      field: tmpl.field,
-      error_code: tmpl.code,
-      message: tmpl.msg,
-      severity: tmpl.sev,
-    });
-  }
-  return errors.sort((a, b) => a.job_id.localeCompare(b.job_id) || a.row_number - b.row_number);
-}
-
 // ── Alert rules ─────────────────────
 export function generateAlertRules(): AlertRule[] {
   return [
@@ -277,8 +179,6 @@ export function cflFilterMeta(): FilterMetadata[] {
 // ── Exported Constants ──────────────
 export const mockAirlineSnapshots: AirlineSnapshot[] = [];
 export const mockCflSnapshots: CflSnapshot[] = [];
-export const mockIngestionJobs = generateIngestionJobs();
-export const mockValidationErrors: ValidationError[] = [];
 export const mockAlertRules = generateAlertRules();
 export const mockAlertEvents = generateAlertEvents();
 

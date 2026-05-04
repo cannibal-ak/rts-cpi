@@ -2,11 +2,9 @@
  * HTTP-based API client — talks to the real FastAPI backend.
  * Uses JWT Bearer tokens for authentication (Phase 2).
  */
-import type { CpiApiClient, SnapshotQuery, JobQuery } from './client';
+import type { CpiApiClient, SnapshotQuery } from './client';
 import type {
   Paginated, AirlineSnapshot, JyVelocitySnapshot, CflSnapshot, FilterMetadata,
-  IngestionJob, IngestionUploadResponse, IngestionValidationResult,
-  IngestionCommitResult, IngestionAuditLog, IngestionPreview,
   AlertRule, AlertEvent,
   TenantFeature, DataFreshness,
   SftpConnection, SftpConnectionCreate, SftpConnectionUpdate,
@@ -273,24 +271,6 @@ export const httpClient: CpiApiClient = {
       get<FilterMetadata[]>('/api/v1/cfl/filter-metadata', tenant ? { tenant } : undefined),
     exportSnapshots: (q?: Record<string, string>) =>
       download('/api/v1/cfl/export', q),
-  },
-  ingestion: {
-    listJobs: (q?: JobQuery) =>
-      get<Paginated<IngestionJob>>('/api/v1/ingestion/jobs', q as Record<string, string | number | undefined>),
-    getJob: (id: string) =>
-      get<IngestionJob>(`/api/v1/ingestion/jobs/${id}`),
-    upload: (files: File[]) =>
-      postMultipart<IngestionUploadResponse>('/api/v1/ingestion/upload', files),
-    validate: (id: string) =>
-      post<IngestionValidationResult>(`/api/v1/ingestion/jobs/${id}/validate`, {}),
-    commit: (id: string, replaceExisting: boolean) =>
-      post<IngestionCommitResult>(`/api/v1/ingestion/jobs/${id}/commit`, { replace_existing: replaceExisting }),
-    cancel: (id: string) =>
-      del<IngestionJob>(`/api/v1/ingestion/jobs/${id}`),
-    getAudit: (id: string) =>
-      get<IngestionAuditLog>(`/api/v1/ingestion/jobs/${id}/audit`),
-    getPreview: (id: string) =>
-      get<IngestionPreview>(`/api/v1/ingestion/jobs/${id}/preview`),
   },
   alerts: {
     listRules: () => get<AlertRule[]>('/api/v1/alerts/rules'),

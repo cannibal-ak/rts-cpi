@@ -1,16 +1,10 @@
 /**
  * In-memory mock API client — for offline demos without a backend.
  */
-import type { CpiApiClient, SnapshotQuery, JobQuery } from './client';
+import type { CpiApiClient, SnapshotQuery } from './client';
 import type {
   Paginated,
   AlertRule,
-  IngestionJob,
-  IngestionUploadResponse,
-  IngestionValidationResult,
-  IngestionCommitResult,
-  IngestionAuditLog,
-  IngestionPreview,
   SftpConnection,
   SftpConnectionCreate,
   SftpConnectionUpdate,
@@ -72,21 +66,6 @@ export const mockClient: CpiApiClient = {
       delay(paginate(mockCflSnapshots, q?.page as number, q?.page_size as number)),
     getFilterMetadata: (_tenant?: string) => delay(mockFilterMetadata.cfl),
     exportSnapshots: (_q?: Record<string, string>) => delay(undefined),
-  },
-  ingestion: {
-    // Phase A overhaul — no realistic in-memory simulation of staged uploads;
-    // the mock client returns empty/no-op results so the offline-demo build
-    // still type-checks. Live development uses the real httpClient.
-    listJobs: (q?: JobQuery) =>
-      delay(paginate([] as IngestionJob[], q?.page, q?.page_size)),
-    getJob: (_id: string) => delay(null),
-    upload: (_files: File[]) =>
-      delay({ files: [], summary: { accepted: 0, duplicate: 0, conflict: 0, rejected: 0 } } as IngestionUploadResponse),
-    validate: (_id: string) => Promise.reject(new Error('Mock client does not implement ingestion.validate')) as Promise<IngestionValidationResult>,
-    commit: (_id: string, _replace: boolean) => Promise.reject(new Error('Mock client does not implement ingestion.commit')) as Promise<IngestionCommitResult>,
-    cancel: (_id: string) => Promise.reject(new Error('Mock client does not implement ingestion.cancel')) as Promise<IngestionJob>,
-    getAudit: (id: string) => delay({ job_id: id, entries: [] } as IngestionAuditLog),
-    getPreview: (id: string) => delay({ job_id: id, sample_valid: [], sample_rejected: [] } as IngestionPreview),
   },
   alerts: {
     listRules: () => delay([...mockAlertRules]),
