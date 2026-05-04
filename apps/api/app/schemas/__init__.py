@@ -13,3 +13,8 @@ from app.schemas.admin import (  # noqa: F401
     TenantFeatureOut, TenantFeatureUpdate,
 )
 from app.schemas.filters import FilterMetadataOut  # noqa: F401
+from app.schemas.sftp import (  # noqa: F401
+    SftpConnectionCreate, SftpConnectionUpdate, SftpConnectionRead,
+    IngestionScheduleCreate, IngestionScheduleUpdate, IngestionScheduleRead,
+    IngestionRunRead, IngestionRunDetail, IngestedFileRead,
+)
