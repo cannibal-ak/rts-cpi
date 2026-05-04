@@ -4,20 +4,47 @@ Registers all routers, CORS, and startup events.
 Runs Alembic migrations on startup for dev convenience.
 """
 
+import logging
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
+from app.core.database import SessionLocal
 from app.core.deps import enforce_password_change
 from app.routers import health, auth, airline, cfl, alerts, audit, admin, tenant, stats, superset, ingestion
+from app.routers import (
+    admin_ingestion_runs,
+    admin_ingestion_schedules,
+    admin_sftp_connections,
+)
 from app.api.v1 import ingestion as ingestion_v2
+from app.services import redbeat_sync
+
+
+# Lifespan logs route through uvicorn.error because app.* loggers
+# don't propagate in this container (no app-level basicConfig).
+# Revisit if/when a unified logging config is introduced.
+logger = logging.getLogger("uvicorn.error")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # In dev, Alembic migrations are run via entrypoint script.
     # Tables are created by migration 001, not create_all.
+    try:
+        with SessionLocal() as db:
+            summary = redbeat_sync.reconcile_all(db)
+        logger.info(
+            "redbeat reconcile on startup: added=%d removed=%d kept=%d",
+            len(summary["added"]),
+            len(summary["removed"]),
+            len(summary["kept"]),
+        )
+    except Exception as e:
+        logger.warning(
+            "redbeat reconcile failed on startup (continuing): %s", e,
+        )
     yield
 
 
@@ -55,6 +82,14 @@ app.include_router(superset.router, dependencies=_protected)
 
 # New ingestion router (Phase A overhaul) — JWT-required.
 app.include_router(ingestion_v2.router, dependencies=_protected)
+
+# Phase 3 SFTP-driven ingestion admin routers. Each declares
+# RequirePlatformAdmin() at the APIRouter level; the _protected
+# wrapper here adds the password-change gate (same pattern as
+# admin.router above).
+app.include_router(admin_sftp_connections.router, dependencies=_protected)
+app.include_router(admin_ingestion_schedules.router, dependencies=_protected)
+app.include_router(admin_ingestion_runs.router, dependencies=_protected)
 # Legacy router now contains only the 410 Gone stub for /ingest. We do
 # NOT put it behind the protected dependency group so unauthenticated
 # callers also get the 410 (matches "endpoint is retired" semantics
