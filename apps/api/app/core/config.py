@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import Field
 import os
 
 class Settings(BaseSettings):
@@ -20,6 +21,11 @@ class Settings(BaseSettings):
     superset_admin_user: str = os.environ.get("SUPERSET_ADMIN_USER", "admin")
     superset_admin_pass: str = os.environ.get("SUPERSET_ADMIN_PASS", "admin")
     
+    # Application-layer encryption (Phase 1 SFTP)
+    # Required: 32-byte URL-safe base64 (output of Fernet.generate_key()).
+    # Mapped from CPI_KEK env via case_sensitive=False.
+    cpi_kek: str = Field(..., description="Fernet KEK for at-rest encryption")
+
     # Authentication — JWT + Bcrypt (Phase 2)
     jwt_secret_key: str = os.environ.get("JWT_SECRET_KEY", "CHANGE-ME-IN-PRODUCTION")
     jwt_algorithm: str = os.environ.get("JWT_ALGORITHM", "HS256")
