@@ -8,6 +8,11 @@ import type {
   IngestionCommitResult, IngestionAuditLog, IngestionPreview,
   AlertRule, AlertEvent,
   TenantFeature, DataFreshness,
+  SftpConnection, SftpConnectionCreate, SftpConnectionUpdate,
+  SftpConnectionTestResult, SftpConnectionListQuery,
+  IngestionSchedule, IngestionScheduleCreate, IngestionScheduleUpdate,
+  IngestionScheduleListQuery, RunNowResult,
+  IngestionRun, IngestionRunDetail, IngestionRunListQuery,
 } from '../types';
 
 // ── Query params ────────────────────────────
@@ -70,6 +75,30 @@ export interface CpiApiClient {
   admin: {
     getTenantFeatures(): Promise<TenantFeature[]>;
     setTenantFeature(code: string, enabled: boolean): Promise<TenantFeature>;
+
+    // ── Phase 3 SFTP-driven ingestion admin ──
+    sftpConnections: {
+      list(query?: SftpConnectionListQuery): Promise<Paginated<SftpConnection>>;
+      get(id: string): Promise<SftpConnection>;
+      create(body: SftpConnectionCreate): Promise<SftpConnection>;
+      update(id: string, body: SftpConnectionUpdate): Promise<SftpConnection>;
+      delete(id: string): Promise<void>;
+      test(id: string): Promise<SftpConnectionTestResult>;
+    };
+    ingestionSchedules: {
+      list(query?: IngestionScheduleListQuery): Promise<Paginated<IngestionSchedule>>;
+      get(id: string): Promise<IngestionSchedule>;
+      create(body: IngestionScheduleCreate): Promise<IngestionSchedule>;
+      update(id: string, body: IngestionScheduleUpdate): Promise<IngestionSchedule>;
+      delete(id: string): Promise<void>;
+      enable(id: string): Promise<IngestionSchedule>;
+      disable(id: string): Promise<IngestionSchedule>;
+      runNow(id: string): Promise<RunNowResult>;
+    };
+    ingestionRuns: {
+      list(query?: IngestionRunListQuery): Promise<Paginated<IngestionRun>>;
+      get(id: string): Promise<IngestionRunDetail>;
+    };
   };
   // Stats
   stats: {

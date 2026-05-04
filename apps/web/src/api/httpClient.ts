@@ -9,6 +9,11 @@ import type {
   IngestionCommitResult, IngestionAuditLog, IngestionPreview,
   AlertRule, AlertEvent,
   TenantFeature, DataFreshness,
+  SftpConnection, SftpConnectionCreate, SftpConnectionUpdate,
+  SftpConnectionTestResult, SftpConnectionListQuery,
+  IngestionSchedule, IngestionScheduleCreate, IngestionScheduleUpdate,
+  IngestionScheduleListQuery, RunNowResult,
+  IngestionRun, IngestionRunDetail, IngestionRunListQuery,
 } from '../types';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -97,6 +102,12 @@ async function handleResponse<T>(res: Response): Promise<T> {
     err.errorCode = errorCode;
     err.details = details;
     throw err;
+  }
+  // 204 No Content has no body — fetch's res.json() would throw
+  // "Unexpected end of JSON input". Phase 3's DELETE endpoints return
+  // 204; resolve with undefined so callers typed Promise<void> work.
+  if (res.status === 204) {
+    return undefined as T;
   }
   return res.json();
 }
@@ -291,6 +302,68 @@ export const httpClient: CpiApiClient = {
     getTenantFeatures(): Promise<TenantFeature[]> { return get<TenantFeature[]>('/api/v1/admin/tenant/features'); },
     setTenantFeature(code: string, enabled: boolean): Promise<TenantFeature> {
       return patch<TenantFeature>(`/api/v1/admin/tenant/features/${code}`, { enabled });
+    },
+
+    // ── Phase 3 SFTP-driven ingestion admin (16 endpoints) ──
+    sftpConnections: {
+      list: (query?: SftpConnectionListQuery) => {
+        const params: Record<string, string | number | undefined> = {};
+        if (query?.page !== undefined) params.page = query.page;
+        if (query?.page_size !== undefined) params.page_size = query.page_size;
+        if (query?.tenant_code !== undefined) params.tenant_code = query.tenant_code;
+        if (query?.is_active !== undefined) params.is_active = String(query.is_active);
+        return get<Paginated<SftpConnection>>('/api/v1/admin/sftp-connections/', params);
+      },
+      get: (id: string) =>
+        get<SftpConnection>(`/api/v1/admin/sftp-connections/${id}`),
+      create: (body: SftpConnectionCreate) =>
+        post<SftpConnection>('/api/v1/admin/sftp-connections/', body),
+      update: (id: string, body: SftpConnectionUpdate) =>
+        put<SftpConnection>(`/api/v1/admin/sftp-connections/${id}`, body),
+      delete: (id: string) =>
+        del<void>(`/api/v1/admin/sftp-connections/${id}`),
+      test: (id: string) =>
+        post<SftpConnectionTestResult>(`/api/v1/admin/sftp-connections/${id}/test`, {}),
+    },
+    ingestionSchedules: {
+      list: (query?: IngestionScheduleListQuery) => {
+        const params: Record<string, string | number | undefined> = {};
+        if (query?.page !== undefined) params.page = query.page;
+        if (query?.page_size !== undefined) params.page_size = query.page_size;
+        if (query?.tenant_code !== undefined) params.tenant_code = query.tenant_code;
+        if (query?.is_enabled !== undefined) params.is_enabled = String(query.is_enabled);
+        if (query?.sftp_connection_id !== undefined) params.sftp_connection_id = query.sftp_connection_id;
+        return get<Paginated<IngestionSchedule>>('/api/v1/admin/ingestion-schedules/', params);
+      },
+      get: (id: string) =>
+        get<IngestionSchedule>(`/api/v1/admin/ingestion-schedules/${id}`),
+      create: (body: IngestionScheduleCreate) =>
+        post<IngestionSchedule>('/api/v1/admin/ingestion-schedules/', body),
+      update: (id: string, body: IngestionScheduleUpdate) =>
+        put<IngestionSchedule>(`/api/v1/admin/ingestion-schedules/${id}`, body),
+      delete: (id: string) =>
+        del<void>(`/api/v1/admin/ingestion-schedules/${id}`),
+      enable: (id: string) =>
+        post<IngestionSchedule>(`/api/v1/admin/ingestion-schedules/${id}/enable`, {}),
+      disable: (id: string) =>
+        post<IngestionSchedule>(`/api/v1/admin/ingestion-schedules/${id}/disable`, {}),
+      runNow: (id: string) =>
+        post<RunNowResult>(`/api/v1/admin/ingestion-schedules/${id}/run-now`, {}),
+    },
+    ingestionRuns: {
+      list: (query?: IngestionRunListQuery) => {
+        const params: Record<string, string | number | undefined> = {};
+        if (query?.page !== undefined) params.page = query.page;
+        if (query?.page_size !== undefined) params.page_size = query.page_size;
+        if (query?.tenant_code !== undefined) params.tenant_code = query.tenant_code;
+        if (query?.schedule_id !== undefined) params.schedule_id = query.schedule_id;
+        if (query?.status !== undefined) params.status = query.status;
+        if (query?.started_after !== undefined) params.started_after = query.started_after;
+        if (query?.started_before !== undefined) params.started_before = query.started_before;
+        return get<Paginated<IngestionRun>>('/api/v1/admin/ingestion-runs/', params);
+      },
+      get: (id: string) =>
+        get<IngestionRunDetail>(`/api/v1/admin/ingestion-runs/${id}`),
     },
   },
   stats: {

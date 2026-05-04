@@ -11,6 +11,20 @@ import type {
   IngestionCommitResult,
   IngestionAuditLog,
   IngestionPreview,
+  SftpConnection,
+  SftpConnectionCreate,
+  SftpConnectionUpdate,
+  SftpConnectionTestResult,
+  SftpConnectionListQuery,
+  IngestionSchedule,
+  IngestionScheduleCreate,
+  IngestionScheduleUpdate,
+  IngestionScheduleListQuery,
+  RunNowResult,
+  IngestionRun,
+  IngestionRunDetail,
+  IngestedFile,
+  IngestionRunListQuery,
 } from '../types';
 import {
   mockAirlineSnapshots, mockCflSnapshots,
@@ -18,6 +32,14 @@ import {
   mockTenantFeatures,
   mockFilterMetadata,
 } from './mockData';
+import {
+  mockSftpConnections,
+  mockIngestionSchedules,
+  mockIngestionRuns,
+  mockIngestedFiles,
+  makeQueryFilter,
+  mockUuid,
+} from '../mock/sftpAdminMock';
 
 function paginate<T>(items: T[], page = 1, size = 20): Paginated<T> {
   const start = (page - 1) * size;
@@ -77,6 +99,258 @@ export const mockClient: CpiApiClient = {
       const f = mockTenantFeatures.find(tf => tf.code === code);
       if (f) f.enabled = enabled;
       return delay(f || { code, label: code, category: 'module' as const, enabled });
+    },
+
+    // ── Phase 3 SFTP-driven ingestion admin (offline mocks) ──
+    sftpConnections: {
+      list: (query?: SftpConnectionListQuery) => {
+        const result = makeQueryFilter<SftpConnection>(
+          mockSftpConnections,
+          {
+            tenant_code: query?.tenant_code,
+            is_active: query?.is_active,
+          },
+          query?.page ?? 1,
+          query?.page_size ?? 20,
+        );
+        return delay<Paginated<SftpConnection>>({
+          items: result.items,
+          page_info: {
+            total: result.total,
+            page: result.page,
+            page_size: result.page_size,
+            has_next: result.has_next,
+          },
+        });
+      },
+      get: (id: string) => {
+        const row = mockSftpConnections.find(c => c.id === id);
+        if (!row) return Promise.reject(new Error(`API 404: SFTP connection ${id} not found`));
+        return delay({ ...row });
+      },
+      create: (body: SftpConnectionCreate) => {
+        const now = new Date().toISOString();
+        const row: SftpConnection = {
+          id: mockUuid(),
+          tenant_code: body.tenant_code,
+          name: body.name,
+          host: body.host,
+          port: body.port ?? 22,
+          username: body.username,
+          auth_method: body.auth_method,
+          remote_base_path: body.remote_base_path,
+          is_active: body.is_active ?? true,
+          host_key_fingerprint: null,
+          masked_credential: body.auth_method === 'password' ? '****' : 'pkey: <encrypted>',
+          created_at: now,
+          updated_at: now,
+        };
+        mockSftpConnections.push(row);
+        return delay({ ...row });
+      },
+      update: (id: string, body: SftpConnectionUpdate) => {
+        const row = mockSftpConnections.find(c => c.id === id);
+        if (!row) return Promise.reject(new Error(`API 404: SFTP connection ${id} not found`));
+        if (body.name !== undefined) row.name = body.name;
+        if (body.host !== undefined) row.host = body.host;
+        if (body.port !== undefined) row.port = body.port;
+        if (body.username !== undefined) row.username = body.username;
+        if (body.auth_method !== undefined) {
+          row.auth_method = body.auth_method;
+          row.masked_credential = body.auth_method === 'password' ? '****' : 'pkey: <encrypted>';
+        }
+        if (body.remote_base_path !== undefined) row.remote_base_path = body.remote_base_path;
+        if (body.is_active !== undefined) row.is_active = body.is_active;
+        row.updated_at = new Date().toISOString();
+        return delay({ ...row });
+      },
+      delete: (id: string) => {
+        const refs = mockIngestionSchedules.filter(s => s.sftp_connection_id === id).length;
+        if (refs > 0) {
+          return Promise.reject(
+            new Error(
+              `API 409: Cannot delete: ${refs} schedule(s) still reference this connection.`,
+            ),
+          );
+        }
+        const idx = mockSftpConnections.findIndex(c => c.id === id);
+        if (idx >= 0) mockSftpConnections.splice(idx, 1);
+        return delay<void>(undefined as void);
+      },
+      test: (_id: string): Promise<SftpConnectionTestResult> => {
+        const ok = Math.random() < 0.5;
+        const errors = [
+          'connect_failed: Connection refused',
+          'auth_failed: Authentication failed',
+          'connect_failed: Host unreachable',
+          'connect_failed: getaddrinfo ENOTFOUND',
+        ];
+        const detail = ok
+          ? 'Connection successful — server banner: SSH-2.0-OpenSSH_8.4'
+          : errors[Math.floor(Math.random() * errors.length)];
+        return delay({ ok, detail });
+      },
+    },
+
+    ingestionSchedules: {
+      list: (query?: IngestionScheduleListQuery) => {
+        const result = makeQueryFilter<IngestionSchedule>(
+          mockIngestionSchedules,
+          {
+            tenant_code: query?.tenant_code,
+            is_enabled: query?.is_enabled,
+            sftp_connection_id: query?.sftp_connection_id,
+          },
+          query?.page ?? 1,
+          query?.page_size ?? 20,
+        );
+        return delay<Paginated<IngestionSchedule>>({
+          items: result.items,
+          page_info: {
+            total: result.total,
+            page: result.page,
+            page_size: result.page_size,
+            has_next: result.has_next,
+          },
+        });
+      },
+      get: (id: string) => {
+        const row = mockIngestionSchedules.find(s => s.id === id);
+        if (!row) return Promise.reject(new Error(`API 404: schedule ${id} not found`));
+        return delay({ ...row });
+      },
+      create: (body: IngestionScheduleCreate) => {
+        const now = new Date().toISOString();
+        const row: IngestionSchedule = {
+          id: mockUuid(),
+          tenant_code: body.tenant_code,
+          sftp_connection_id: body.sftp_connection_id,
+          cron_expression: body.cron_expression,
+          timezone: body.timezone ?? 'UTC',
+          is_enabled: body.is_enabled ?? true,
+          domain: body.domain,
+          filename_regex: body.filename_regex,
+          replace_existing: body.replace_existing ?? false,
+          last_run_at: null,
+          next_run_at: null,
+          redbeat_registered: body.is_enabled ?? true,
+          created_at: now,
+          updated_at: now,
+        };
+        mockIngestionSchedules.push(row);
+        return delay({ ...row });
+      },
+      update: (id: string, body: IngestionScheduleUpdate) => {
+        const row = mockIngestionSchedules.find(s => s.id === id);
+        if (!row) return Promise.reject(new Error(`API 404: schedule ${id} not found`));
+        if (body.sftp_connection_id !== undefined) row.sftp_connection_id = body.sftp_connection_id;
+        if (body.cron_expression !== undefined) row.cron_expression = body.cron_expression;
+        if (body.timezone !== undefined) row.timezone = body.timezone;
+        if (body.is_enabled !== undefined) {
+          row.is_enabled = body.is_enabled;
+          row.redbeat_registered = body.is_enabled;
+        }
+        if (body.domain !== undefined) row.domain = body.domain;
+        if (body.filename_regex !== undefined) row.filename_regex = body.filename_regex;
+        if (body.replace_existing !== undefined) row.replace_existing = body.replace_existing;
+        row.updated_at = new Date().toISOString();
+        return delay({ ...row });
+      },
+      delete: (id: string) => {
+        const idx = mockIngestionSchedules.findIndex(s => s.id === id);
+        if (idx >= 0) mockIngestionSchedules.splice(idx, 1);
+        // Cascade-simulate the migration-020 ON DELETE SET NULL on
+        // ingestion_run.schedule_id and ingested_file.schedule_id.
+        for (const r of mockIngestionRuns) {
+          if (r.schedule_id === id) {
+            (r as IngestionRun & { schedule_id: string | null }).schedule_id = null as unknown as string;
+          }
+        }
+        for (const f of mockIngestedFiles) {
+          if (f.schedule_id === id) f.schedule_id = null;
+        }
+        return delay<void>(undefined as void);
+      },
+      enable: (id: string) => {
+        const row = mockIngestionSchedules.find(s => s.id === id);
+        if (!row) return Promise.reject(new Error(`API 404: schedule ${id} not found`));
+        row.is_enabled = true;
+        row.redbeat_registered = true;
+        row.updated_at = new Date().toISOString();
+        return delay({ ...row });
+      },
+      disable: (id: string) => {
+        const row = mockIngestionSchedules.find(s => s.id === id);
+        if (!row) return Promise.reject(new Error(`API 404: schedule ${id} not found`));
+        row.is_enabled = false;
+        row.redbeat_registered = false;
+        row.updated_at = new Date().toISOString();
+        return delay({ ...row });
+      },
+      runNow: (id: string): Promise<RunNowResult> => {
+        const row = mockIngestionSchedules.find(s => s.id === id);
+        if (!row) return Promise.reject(new Error(`API 404: schedule ${id} not found`));
+        // Side-effect: push a synthetic RUNNING run so the runs page
+        // reflects the trigger. Real backend: worker creates this row
+        // when it picks up the task.
+        const newRun: IngestionRun = {
+          id: mockUuid(),
+          schedule_id: id,
+          tenant_code: row.tenant_code,
+          started_at: new Date().toISOString(),
+          finished_at: null,
+          status: 'RUNNING',
+          files_seen: 0,
+          files_pulled: 0,
+          jobs_created: 0,
+          jobs_committed: 0,
+          triggered_by: 'MANUAL',
+          detail_log: null,
+          error_summary: null,
+        };
+        mockIngestionRuns.unshift(newRun);
+        return delay({ task_id: mockUuid(), run_id: null }, 300);
+      },
+    },
+
+    ingestionRuns: {
+      list: (query?: IngestionRunListQuery) => {
+        let rows: IngestionRun[] = [...mockIngestionRuns];
+        if (query?.tenant_code !== undefined) rows = rows.filter(r => r.tenant_code === query.tenant_code);
+        if (query?.schedule_id !== undefined) rows = rows.filter(r => r.schedule_id === query.schedule_id);
+        if (query?.status !== undefined) rows = rows.filter(r => r.status === query.status);
+        if (query?.started_after !== undefined) {
+          const after = query.started_after;
+          rows = rows.filter(r => r.started_at >= after);
+        }
+        if (query?.started_before !== undefined) {
+          const before = query.started_before;
+          rows = rows.filter(r => r.started_at < before);
+        }
+        rows.sort((a, b) => b.started_at.localeCompare(a.started_at));
+        const page = query?.page ?? 1;
+        const pageSize = query?.page_size ?? 20;
+        const start = (page - 1) * pageSize;
+        const slice = rows.slice(start, start + pageSize);
+        return delay<Paginated<IngestionRun>>({
+          items: slice,
+          page_info: {
+            total: rows.length,
+            page,
+            page_size: pageSize,
+            has_next: start + pageSize < rows.length,
+          },
+        });
+      },
+      get: (id: string): Promise<IngestionRunDetail> => {
+        const row = mockIngestionRuns.find(r => r.id === id);
+        if (!row) return Promise.reject(new Error(`API 404: ingestion run ${id} not found`));
+        const files: IngestedFile[] = mockIngestedFiles
+          .filter(f => f.run_id === id)
+          .sort((a, b) => a.created_at.localeCompare(b.created_at))
+          .map(f => ({ ...f }));
+        return delay({ ...row, ingested_files: files });
+      },
     },
   },
   stats: {
