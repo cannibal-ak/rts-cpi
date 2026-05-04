@@ -82,7 +82,7 @@ services:
     volumes:
       - ./apps/api:/app
       - ./:/sample_data:ro
-    environment:
+    environment: &api-env
       CPI_DATABASE_URL: ${CPI_DATABASE_URL:-postgresql://cpi:cpi_secret@postgres:5432/cpi_db}
       CPI_DATABASE_URL_RLS: ${CPI_DATABASE_URL_RLS:-postgresql://cpi_app:cpi_app_secret@postgres:5432/cpi_db}
       CPI_DEFAULT_TENANT_ID: ${CPI_DEFAULT_TENANT_ID:-a0000000-0000-0000-0000-000000000001}
@@ -180,6 +180,63 @@ services:
         superset run -h 0.0.0.0 -p 8088 --with-threads
     profiles:
       - superset
+
+  # ════════════════════════════════════════════
+  # ASYNC — Celery worker + beat (Phase 2 SFTP)
+  # ════════════════════════════════════════════
+
+  worker:
+    image: cpi-api
+    container_name: cpi-worker-1
+    restart: unless-stopped
+    command: ["celery", "-A", "app.worker", "worker", "--loglevel=info", "--concurrency=2"]
+    environment:
+      <<: *api-env
+    volumes:
+      - ./apps/api:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker inspect ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  beat:
+    image: cpi-api
+    container_name: cpi-beat-1
+    restart: unless-stopped
+    command: ["celery", "-A", "app.worker", "beat", "--loglevel=info", "--scheduler", "redbeat.RedBeatScheduler"]
+    environment:
+      <<: *api-env
+    volumes:
+      - ./apps/api:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # ════════════════════════════════════════════
+  # DEV — SFTP server for local Phase 2 testing
+  # ════════════════════════════════════════════
+
+  sftp-dev:
+    image: atmoz/sftp:latest
+    container_name: cpi-sftp-dev-1
+    restart: unless-stopped
+    ports:
+      - "2222:22"
+    volumes:
+      - ./dev-sftp-mount/jy:/home/jydev/upload
+      - ./dev-sftp-mount/pw:/home/pwdev/upload
+    command: jydev:jydev:1001:1001:upload pwdev:pwdev:1002:1002:upload
 
 volumes:
   pgdata:

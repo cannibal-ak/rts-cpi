@@ -112,3 +112,9 @@ logs/
 *.sql.gz
 *.dump
 backups/
+
+# Phase 2 SFTP — dev-only mount points (real files never committed)
+dev-sftp-mount/jy/*
+dev-sftp-mount/pw/*
+!dev-sftp-mount/jy/.gitkeep
+!dev-sftp-mount/pw/.gitkeep
