@@ -15,6 +15,7 @@ import IngestionJobsPage from './pages/ingestion/IngestionJobsPage';
 import UploadPage from './pages/ingestion/UploadPage';
 import SftpConnectionsPage from './pages/admin/SftpConnectionsPage';
 import IngestionSchedulesPage from './pages/admin/IngestionSchedulesPage';
+import IngestionRunsPage from './pages/admin/IngestionRunsPage';
 
 import SupersetPage from './pages/superset/SupersetPage';
 import DashboardViewerPage from './pages/superset/DashboardViewerPage';
@@ -109,6 +110,11 @@ export default function App() {
                 <Route path="/admin/ingestion-schedules" element={
                   <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
                     <IngestionSchedulesPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/admin/ingestion-runs" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <IngestionRunsPage />
                   </ProtectedRoute>
                 } />
 

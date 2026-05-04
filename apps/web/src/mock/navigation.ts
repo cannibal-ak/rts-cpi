@@ -77,4 +77,12 @@ export const navigationItems: NavItem[] = [
     requireSuperAdmin: true,
     category: 'Admin',
   },
+  {
+    label: 'Ingestion Runs',
+    path: '/admin/ingestion-runs',
+    icon: 'History',
+    requiredRoles: ['TENANT_ADMIN'],
+    requireSuperAdmin: true,
+    category: 'Admin',
+  },
 ];
