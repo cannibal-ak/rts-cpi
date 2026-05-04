@@ -307,3 +307,174 @@ export interface FilterMetadata {
   label: string;
   values: string[];
 }
+
+// ─── SFTP admin (Phase 4) ─────────────────────────────────
+// Reuses IngestionDomain from the Phase A ingestion section
+// above ('AIRLINE' | 'VELOCITY' | 'CFL') — same source-of-truth
+// for the YAML-declared domains.
+
+export type SftpAuthMethod = 'password' | 'private_key';
+
+// Read shape — what the API returns for a connection.
+// Plaintext credentials are NEVER present; masked_credential
+// is the operator-facing presence indicator.
+export interface SftpConnection {
+  id: string;
+  tenant_code: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  auth_method: SftpAuthMethod;
+  remote_base_path: string;
+  is_active: boolean;
+  host_key_fingerprint: string | null;
+  masked_credential: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SftpConnectionCreate {
+  tenant_code: string;
+  name: string;
+  host: string;
+  port?: number;
+  username: string;
+  auth_method: SftpAuthMethod;
+  password?: string;
+  private_key_pem?: string;
+  remote_base_path: string;
+  is_active?: boolean;
+}
+
+export interface SftpConnectionUpdate {
+  name?: string;
+  host?: string;
+  port?: number;
+  username?: string;
+  auth_method?: SftpAuthMethod;
+  password?: string;
+  private_key_pem?: string;
+  remote_base_path?: string;
+  is_active?: boolean;
+}
+
+export interface IngestionSchedule {
+  id: string;
+  tenant_code: string;
+  sftp_connection_id: string;
+  cron_expression: string;
+  timezone: string;
+  is_enabled: boolean;
+  domain: IngestionDomain;
+  filename_regex: string;
+  replace_existing: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  redbeat_registered: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IngestionScheduleCreate {
+  tenant_code: string;
+  sftp_connection_id: string;
+  cron_expression: string;
+  timezone?: string;
+  is_enabled?: boolean;
+  domain: IngestionDomain;
+  filename_regex: string;
+  replace_existing?: boolean;
+}
+
+export interface IngestionScheduleUpdate {
+  sftp_connection_id?: string;
+  cron_expression?: string;
+  timezone?: string;
+  is_enabled?: boolean;
+  domain?: IngestionDomain;
+  filename_regex?: string;
+  replace_existing?: boolean;
+}
+
+export interface IngestionRun {
+  id: string;
+  schedule_id: string;
+  tenant_code: string | null;
+  started_at: string;
+  finished_at: string | null;
+  // The API returns string today: 'RUNNING' | 'SUCCESS' |
+  // 'PARTIAL' | 'FAILED'. Kept open as `string` so a future
+  // server-side enum extension doesn't break the type.
+  status: string;
+  files_seen: number;
+  files_pulled: number;
+  jobs_created: number;
+  jobs_committed: number;
+  triggered_by: string | null;
+  // detail_log is a free-form JSONB observability field; the
+  // current Phase 2 worker writes a list[dict] of per-file
+  // outcomes, but the schema permits any shape. Treat as
+  // opaque on the client.
+  detail_log: unknown | null;
+  error_summary: string | null;
+}
+
+export interface IngestionRunDetail extends IngestionRun {
+  ingested_files: IngestedFile[];
+}
+
+export interface IngestedFile {
+  id: string;
+  run_id: string;
+  schedule_id: string | null;
+  remote_filename: string;
+  sha256: string;
+  remote_size_bytes: number;
+  remote_mtime_utc: string | null;
+  // 'COMMITTED' | 'DUPLICATE' | 'FAILED' | future variants —
+  // see IngestionRun.status note for the rationale.
+  outcome: string;
+  ingestion_job_id: string | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+// ── Operation results ──
+
+export interface SftpConnectionTestResult {
+  ok: boolean;
+  detail: string;
+}
+
+export interface RunNowResult {
+  task_id: string;
+  run_id: string | null;
+}
+
+// ── List query shapes ──
+
+export interface SftpConnectionListQuery {
+  page?: number;
+  page_size?: number;
+  tenant_code?: string;
+  is_active?: boolean;
+}
+
+export interface IngestionScheduleListQuery {
+  page?: number;
+  page_size?: number;
+  tenant_code?: string;
+  is_enabled?: boolean;
+  sftp_connection_id?: string;
+}
+
+export interface IngestionRunListQuery {
+  page?: number;
+  page_size?: number;
+  tenant_code?: string;
+  schedule_id?: string;
+  status?: string;
+  started_after?: string;
+  started_before?: string;
+}
