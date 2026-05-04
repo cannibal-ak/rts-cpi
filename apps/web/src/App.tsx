@@ -13,6 +13,7 @@ import AirlineCpiPage from './pages/airline/AirlineCpiPage';
 import CflCpiPage from './pages/cfl/CflCpiPage';
 import IngestionJobsPage from './pages/ingestion/IngestionJobsPage';
 import UploadPage from './pages/ingestion/UploadPage';
+import SftpConnectionsPage from './pages/admin/SftpConnectionsPage';
 
 import SupersetPage from './pages/superset/SupersetPage';
 import DashboardViewerPage from './pages/superset/DashboardViewerPage';
@@ -95,6 +96,13 @@ export default function App() {
                 <Route path="/ingestion/upload" element={
                   <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
                     <UploadPage />
+                  </ProtectedRoute>
+                } />
+
+                {/* Admin (Skywave platform admins only) */}
+                <Route path="/admin/sftp-connections" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <SftpConnectionsPage />
                   </ProtectedRoute>
                 } />
 

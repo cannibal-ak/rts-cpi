@@ -59,4 +59,14 @@ export const navigationItems: NavItem[] = [
     requireSuperAdmin: true,
     category: 'Data Ops',
   },
+
+  // ── Admin (Skywave platform admins only) ─────────────
+  {
+    label: 'SFTP Connections',
+    path: '/admin/sftp-connections',
+    icon: 'Storage',
+    requiredRoles: ['TENANT_ADMIN'],
+    requireSuperAdmin: true,
+    category: 'Admin',
+  },
 ];
