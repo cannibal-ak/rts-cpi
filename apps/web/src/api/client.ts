@@ -4,8 +4,6 @@
  */
 import type {
   Paginated, AirlineSnapshot, JyVelocitySnapshot, CflSnapshot, FilterMetadata,
-  IngestionJob, IngestionUploadResponse, IngestionValidationResult,
-  IngestionCommitResult, IngestionAuditLog, IngestionPreview,
   AlertRule, AlertEvent,
   TenantFeature, DataFreshness,
   SftpConnection, SftpConnectionCreate, SftpConnectionUpdate,
@@ -20,14 +18,6 @@ export interface SnapshotQuery {
   page?: number;
   page_size?: number;
   [key: string]: string | number | undefined;
-}
-
-export interface JobQuery {
-  page?: number;
-  page_size?: number;
-  domain?: string;
-  status?: string;
-  tenant_code?: string;
 }
 
 
@@ -52,17 +42,6 @@ export interface CpiApiClient {
     listSnapshots(q?: SnapshotQuery): Promise<Paginated<CflSnapshot>>;
     getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
     exportSnapshots(q?: Record<string, string>): Promise<void>;
-  };
-  // Ingestion (Phase A overhaul — staged → validate → commit)
-  ingestion: {
-    listJobs(q?: JobQuery): Promise<Paginated<IngestionJob>>;
-    getJob(id: string): Promise<IngestionJob | null>;
-    upload(files: File[]): Promise<IngestionUploadResponse>;
-    validate(id: string): Promise<IngestionValidationResult>;
-    commit(id: string, replaceExisting: boolean): Promise<IngestionCommitResult>;
-    cancel(id: string): Promise<IngestionJob>;
-    getAudit(id: string): Promise<IngestionAuditLog>;
-    getPreview(id: string): Promise<IngestionPreview>;
   };
   // Alerts
   alerts: {

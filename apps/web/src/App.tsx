@@ -11,8 +11,6 @@ import LoginPage from './pages/login/LoginPage';
 import HomePage from './pages/home/HomePage';
 import AirlineCpiPage from './pages/airline/AirlineCpiPage';
 import CflCpiPage from './pages/cfl/CflCpiPage';
-import IngestionJobsPage from './pages/ingestion/IngestionJobsPage';
-import UploadPage from './pages/ingestion/UploadPage';
 import SftpConnectionsPage from './pages/admin/SftpConnectionsPage';
 import IngestionSchedulesPage from './pages/admin/IngestionSchedulesPage';
 import IngestionRunsPage from './pages/admin/IngestionRunsPage';
@@ -87,20 +85,6 @@ export default function App() {
                 {/* Legacy redirects */}
                 <Route path="/airline" element={<Navigate to="/cpi/airline/jy" replace />} />
                 <Route path="/cfl" element={<Navigate to="/cpi/cruise/fjl" replace />} />
-
-
-                <Route path="/ingestion" element={
-                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
-                    <IngestionJobsPage />
-                  </ProtectedRoute>
-                } />
-
-                <Route path="/ingestion/upload" element={
-                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
-                    <UploadPage />
-                  </ProtectedRoute>
-                } />
-
                 {/* Admin (Skywave platform admins only) */}
                 <Route path="/admin/sftp-connections" element={
                   <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
