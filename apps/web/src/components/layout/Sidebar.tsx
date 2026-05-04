@@ -15,7 +15,7 @@ import {
   Home, Flight, DirectionsBoat, Dashboard,
   CloudUpload,
   Security, Settings, Description, ViewModule,
-  Storage,
+  Storage, Schedule,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSession } from '../../context/SessionContext';
@@ -31,7 +31,7 @@ const iconMap: Record<string, React.ReactElement> = {
   Dashboard: <Dashboard />,
   CloudUpload: <CloudUpload />,
   Security: <Security />, Settings: <Settings />, Description: <Description />,
-  Storage: <Storage />,
+  Storage: <Storage />, Schedule: <Schedule />,
 };
 
 interface SidebarProps {

@@ -69,4 +69,12 @@ export const navigationItems: NavItem[] = [
     requireSuperAdmin: true,
     category: 'Admin',
   },
+  {
+    label: 'Ingestion Schedules',
+    path: '/admin/ingestion-schedules',
+    icon: 'Schedule',
+    requiredRoles: ['TENANT_ADMIN'],
+    requireSuperAdmin: true,
+    category: 'Admin',
+  },
 ];
