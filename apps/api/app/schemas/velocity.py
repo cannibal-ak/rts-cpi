@@ -1,4 +1,4 @@
-"""JY velocity snapshot schemas — mirrors vw_jy_velocity_snapshot."""
+"""Velocity snapshot schemas — mirrors vw_velocity_<tenant>_snapshot."""
 
 from pydantic import BaseModel, ConfigDict
 from typing import Optional
@@ -6,7 +6,7 @@ from datetime import date, datetime
 from uuid import UUID
 
 
-class JyVelocitySnapshotOut(BaseModel):
+class VelocitySnapshotOut(BaseModel):
     id: UUID
     tenant_id: UUID
     dep_date: date
@@ -26,6 +26,7 @@ class JyVelocitySnapshotOut(BaseModel):
     forecasted_seat_factor: int
     seats_available: int
     booking_pct: float
+    airline_code: str
     data_owner: Optional[str] = None
     tenant_code: Optional[str] = None
     business_type: Optional[str] = None
