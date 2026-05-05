@@ -12,11 +12,12 @@ import {
   useMediaQuery,
 } from '@mui/material';
 import {
-  Home, Flight, DirectionsBoat, Dashboard,
+  Home, Flight, DirectionsBoat,
   CloudUpload,
-  Security, Settings, Description, ViewModule,
+  Security, Settings, Description,
   Storage, Schedule, History,
 } from '@mui/icons-material';
+import { ModuleIcon, DashboardIcon } from '@/components/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSession } from '../../context/SessionContext';
 import { navigationItems } from '../../mock/navigation';
@@ -29,7 +30,7 @@ const MINI_DRAWER_WIDTH = 68;
 
 const iconMap: Record<string, React.ReactElement> = {
   Home: <Home />, Flight: <Flight />, DirectionsBoat: <DirectionsBoat />,
-  Dashboard: <Dashboard />,
+  Dashboard: <DashboardIcon />,
   CloudUpload: <CloudUpload />,
   Security: <Security />, Settings: <Settings />, Description: <Description />,
   Storage: <Storage />, Schedule: <Schedule />, History: <History />,
@@ -153,7 +154,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                           }}
                         >
                           <ListItemIcon sx={{ minWidth: 0, justifyContent: 'center' }}>
-                            <ViewModule />
+                            <ModuleIcon />
                           </ListItemIcon>
                         </ListItemButton>
                       </Tooltip>
