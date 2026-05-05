@@ -7,6 +7,7 @@ export const navigationItems: NavItem[] = [
     icon: 'Home',
     category: 'Overview',
     requiredRoles: ['TENANT_ADMIN'],
+    requireSuperAdmin: true,
   },
 
   // ── Per-tenant CPI modules ───────────────────

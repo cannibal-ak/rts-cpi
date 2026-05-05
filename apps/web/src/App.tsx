@@ -20,6 +20,7 @@ import DashboardViewerPage from './pages/superset/DashboardViewerPage';
 import NotAuthorizedPage from './pages/NotAuthorizedPage';
 import NotFoundPage from './pages/NotFoundPage';
 import ChangePasswordPage from './pages/auth/ChangePasswordPage';
+import { isSuperAdmin } from './utils/access';
 
 /**
  * RootRoute handles the logic for the base path "/".
@@ -28,10 +29,10 @@ import ChangePasswordPage from './pages/auth/ChangePasswordPage';
  */
 function RootRoute() {
   const { session } = useSession();
-  if (session.user.roles.includes('TENANT_ADMIN')) {
+  if (isSuperAdmin(session)) {
     return <HomePage />;
   }
-  // All other authenticated users (JY, PW, FJL) land on Dashboards
+  // Tenant users (JY, PW, FJL) land on Dashboards
   return <Navigate to="/dashboards" replace />;
 }
 
