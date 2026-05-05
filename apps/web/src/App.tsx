@@ -21,18 +21,23 @@ import NotAuthorizedPage from './pages/NotAuthorizedPage';
 import NotFoundPage from './pages/NotFoundPage';
 import ChangePasswordPage from './pages/auth/ChangePasswordPage';
 import { isSuperAdmin } from './utils/access';
+import { getPrimaryDashboardId } from './pages/superset/dashboardAccess';
 
 /**
  * RootRoute handles the logic for the base path "/".
  * Admin -> HomePage
- * Others -> Dashboards
+ * Single-dashboard tenant -> /dashboards/{their-id}
+ * Fallback (no mapping) -> /dashboards listing
  */
 function RootRoute() {
   const { session } = useSession();
   if (isSuperAdmin(session)) {
     return <HomePage />;
   }
-  // Tenant users (JY, PW, FJL) land on Dashboards
+  const dashboardId = getPrimaryDashboardId(session);
+  if (dashboardId) {
+    return <Navigate to={`/dashboards/${dashboardId}`} replace />;
+  }
   return <Navigate to="/dashboards" replace />;
 }
 

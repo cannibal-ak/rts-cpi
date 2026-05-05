@@ -6,6 +6,7 @@ import { keyframes } from '@mui/system';
 import { api } from '../../api';
 import { useSession } from '../../context/SessionContext';
 import { canAccessDashboard } from './dashboardAccess';
+import { isSuperAdmin } from '../../utils/access';
 
 /**
  * Superset base URL — used by the Embedded SDK to construct the iframe src.
@@ -152,9 +153,11 @@ export default function DashboardViewerPage() {
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header bar */}
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-        <IconButton onClick={() => navigate('/dashboards')} sx={{ mr: 1 }}>
-          <ArrowBack />
-        </IconButton>
+        {isSuperAdmin(session) && (
+          <IconButton onClick={() => navigate('/dashboards')} sx={{ mr: 1 }}>
+            <ArrowBack />
+          </IconButton>
+        )}
         <Typography variant="h5" component="h1" fontWeight={600}>
           {meta?.title ?? 'Dashboard'}
         </Typography>

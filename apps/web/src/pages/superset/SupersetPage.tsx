@@ -1,5 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import {
   Box, Typography, Grid, Card, Button, Avatar, alpha, Theme
 } from '@mui/material';
@@ -7,7 +7,8 @@ import { OpenInNew, Flight, DirectionsBoat } from '@mui/icons-material';
 import PageHeader from '../../components/common/PageHeader';
 import { useSession } from '../../context/SessionContext';
 import { DASHBOARD_LAUNCH_LABEL } from '../../constants/ui';
-import { canAccessDashboard } from './dashboardAccess';
+import { canAccessDashboard, getPrimaryDashboardId } from './dashboardAccess';
+import { isSuperAdmin } from '../../utils/access';
 
 const dashboardPacks = [
   {
@@ -32,6 +33,13 @@ export default function SupersetPage() {
   const { session } = useSession();
 
   const filteredPacks = dashboardPacks.filter(pack => canAccessDashboard(session, pack.id));
+
+  // Tenants with exactly one accessible dashboard are sent straight there.
+  // Avoids a single-card listing being a click-tax. Admin always sees the listing.
+  if (!isSuperAdmin(session)) {
+    const id = getPrimaryDashboardId(session);
+    if (id) return <Navigate to={`/dashboards/${id}`} replace />;
+  }
 
   return (
     <Box>

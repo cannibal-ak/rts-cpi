@@ -14,13 +14,12 @@ import { Visibility, VisibilityOff, LockOutlined } from '@mui/icons-material';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useSession } from '../../context/SessionContext';
-import { isSuperAdmin } from '../../utils/access';
 
 
 
 export default function LoginPage() {
     const { login, isAuthenticated, mustChangePassword } = useAuth();
-    const { session, isSyncing } = useSession();
+    const { isSyncing } = useSession();
     const navigate = useNavigate();
 
     const [email, setEmail] = useState('');
@@ -42,8 +41,8 @@ export default function LoginPage() {
             );
         }
 
-        if (isSuperAdmin(session)) return <Navigate to="/" replace />;
-        return <Navigate to="/dashboards" replace />;
+        // RootRoute owns role-aware dispatch — flow everyone through '/'.
+        return <Navigate to="/" replace />;
     }
 
     const handleSubmit = async (e: React.FormEvent) => {

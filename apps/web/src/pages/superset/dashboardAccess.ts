@@ -15,3 +15,14 @@ export function canAccessDashboard(
   if (!moduleCode) return false;
   return session.enabled_modules.includes(moduleCode);
 }
+
+// Reverse-lookup: returns the dashboard ID for a tenant with exactly one
+// accessible dashboard. Returns null for admins (multiple matches),
+// users with no enabled modules, or modules with no mapping.
+export function getPrimaryDashboardId(session: TenantSession): string | null {
+  const accessibleIds = Object.entries(DASHBOARD_MODULE_MAP)
+    .filter(([, moduleCode]) => session.enabled_modules.includes(moduleCode))
+    .map(([id]) => id);
+  if (accessibleIds.length !== 1) return null;
+  return accessibleIds[0];
+}

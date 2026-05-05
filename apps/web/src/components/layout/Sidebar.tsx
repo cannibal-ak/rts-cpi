@@ -22,6 +22,7 @@ import { useSession } from '../../context/SessionContext';
 import { navigationItems } from '../../mock/navigation';
 import { NavItem } from '../../types';
 import { isSuperAdmin } from '../../utils/access';
+import { getPrimaryDashboardId } from '../../pages/superset/dashboardAccess';
 
 const DRAWER_WIDTH = 260;
 const MINI_DRAWER_WIDTH = 68;
@@ -57,8 +58,17 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
   const categories = Array.from(new Set(filteredItems.map(i => i.category || 'Other')));
 
+  // Resolve the navigation target for the Dashboards entry based on role.
+  // Admin -> listing. Single-dashboard tenant -> their dashboard. Fallback -> listing.
+  const resolveTarget = (path: string): string => {
+    if (path !== '/dashboards') return path;
+    if (isSuperAdmin(session)) return '/dashboards';
+    const id = getPrimaryDashboardId(session);
+    return id ? `/dashboards/${id}` : '/dashboards';
+  };
+
   const handleNav = (path: string) => {
-    navigate(path);
+    navigate(resolveTarget(path));
     onClose(); // Automatically collapse/minimize after navigation
   };
 
@@ -116,7 +126,11 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
               <List dense disablePadding>
                 {showConsolidated ? (
                   (() => {
-                    const isAnySelected = catItems.some(i => location.pathname === i.path);
+                    const isAnySelected = catItems.some(i =>
+                      i.path === '/dashboards'
+                        ? location.pathname.startsWith('/dashboards')
+                        : location.pathname === i.path,
+                    );
                     const firstItem = catItems[0];
                     return (
                       <Tooltip title="Modules" placement="right" arrow>
@@ -147,7 +161,10 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                   })()
                 ) : (
                   catItems.map(item => {
-                    const isSelected = location.pathname === item.path;
+                    const isSelected =
+                      item.path === '/dashboards'
+                        ? location.pathname.startsWith('/dashboards')
+                        : location.pathname === item.path;
                     return (
                       <Tooltip key={item.path} title={item.label} placement="right" arrow disableHoverListener={open}>
                         <ListItemButton
