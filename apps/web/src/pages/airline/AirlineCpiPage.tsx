@@ -27,7 +27,7 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   const [freshness, setFreshness] = useState<DataFreshness | null>(null);
 
   const pageTitle = TENANT_LABELS[tenantCode] || `Airline CPI – ${tenantCode}`;
-  const showTabs = tenantCode === 'JY';
+  const showTabs = tenantCode === 'JY' || tenantCode === 'PW';
 
   // Reset filters and tab when the tenant changes
   useEffect(() => {
@@ -72,6 +72,7 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
           )}
           {tab === 1 && (
             <AirlineCpiVelocityTab
+              tenantCode={tenantCode}
               filters={velocityFilters}
               onFiltersChange={setVelocityFilters}
             />

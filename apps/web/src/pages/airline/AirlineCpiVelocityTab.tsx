@@ -8,9 +8,11 @@ import FilterPanel from '../../components/filters/FilterPanel';
 import ActionBar from '../../components/filters/ActionBar';
 import EmptyState from '../../components/common/EmptyState';
 import { api } from '../../api';
-import type { JyVelocitySnapshot, FilterMetadata, Paginated } from '../../types';
+import type { VelocitySnapshot, FilterMetadata, Paginated } from '../../types';
 
 interface AirlineCpiVelocityTabProps {
+  /** Tenant whose velocity data is shown (JY or PW). */
+  tenantCode: 'JY' | 'PW';
   filters: Record<string, string>;
   onFiltersChange: (f: Record<string, string>) => void;
 }
@@ -24,20 +26,20 @@ function pctColor(pct: number | null | undefined): string {
   return 'error.main';
 }
 
-export default function AirlineCpiVelocityTab({ filters, onFiltersChange }: AirlineCpiVelocityTabProps) {
+export default function AirlineCpiVelocityTab({ tenantCode, filters, onFiltersChange }: AirlineCpiVelocityTabProps) {
   const [filterOpen, setFilterOpen] = useState(true);
   const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<Paginated<JyVelocitySnapshot> | null>(null);
+  const [data, setData] = useState<Paginated<VelocitySnapshot> | null>(null);
   const [meta, setMeta] = useState<FilterMetadata[]>([]);
   const [page, setPage] = useState(0);
   const [rowsPerPage, setRowsPerPage] = useState(20);
 
-  // Velocity is JY-only. tenant param is fixed.
-  const TENANT = 'JY' as const;
+  // Velocity is per-tenant; the prop drives every API call below.
+  const TENANT = tenantCode;
 
   useEffect(() => {
     api.airline.velocity.getFilterMetadata(TENANT).then(setMeta);
-  }, []);
+  }, [TENANT]);
 
   const fetchData = useCallback(async (f?: Record<string, string>, p?: number) => {
     setLoading(true);
@@ -53,7 +55,7 @@ export default function AirlineCpiVelocityTab({ filters, onFiltersChange }: Airl
     } finally {
       setLoading(false);
     }
-  }, [filters, page, rowsPerPage]);
+  }, [filters, page, rowsPerPage, TENANT]);
 
   // On metadata load, auto-select latest file_date if filters are empty, then fetch.
   useEffect(() => {
@@ -118,7 +120,7 @@ export default function AirlineCpiVelocityTab({ filters, onFiltersChange }: Airl
 
       <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <FilterPanel
-          title="JY Velocity Filters"
+          title={`${tenantCode} Velocity Filters`}
           fields={displayedFields}
           open={filterOpen}
           onToggle={() => setFilterOpen(!filterOpen)}

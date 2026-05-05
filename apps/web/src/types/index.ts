@@ -77,7 +77,7 @@ export interface AirlineSnapshot {
 }
 
 // ──────── JY velocity snapshot ────────
-export interface JyVelocitySnapshot {
+export interface VelocitySnapshot {
   id: string;
   tenant_id: string;
   dep_date: string;
@@ -105,6 +105,7 @@ export interface JyVelocitySnapshot {
   source_file?: string;
   loaded_at?: string;
   ingested_at?: string;
+  airline_code: string;
 }
 
 // ──────── CFL snapshot ────────
