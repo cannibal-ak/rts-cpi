@@ -14,6 +14,7 @@ import { Visibility, VisibilityOff, LockOutlined } from '@mui/icons-material';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useSession } from '../../context/SessionContext';
+import { isSuperAdmin } from '../../utils/access';
 
 
 
@@ -41,7 +42,7 @@ export default function LoginPage() {
             );
         }
 
-        if (session.user.roles.includes('TENANT_ADMIN')) return <Navigate to="/" replace />;
+        if (isSuperAdmin(session)) return <Navigate to="/" replace />;
         return <Navigate to="/dashboards" replace />;
     }
 

@@ -23,7 +23,7 @@ export default function NotAuthorizedPage() {
       <Typography variant="body1" color="text.secondary" sx={{ maxWidth: 480, mb: 3 }}>
         You do not have the required permissions to access this page. Please contact your tenant administrator if you believe this is an error.
       </Typography>
-      <Button variant="contained" onClick={() => navigate('/')}>Return to Home</Button>
+      <Button variant="contained" onClick={() => navigate('/')}>Go to Dashboard</Button>
     </Box>
   );
 }
