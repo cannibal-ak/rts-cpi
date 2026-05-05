@@ -25,7 +25,7 @@ TEST_TODAY = date(2026, 4, 30)
             "VELOCITY",
             date(2026, 4, 1),
         ),
-        ("PW_010426.csv", "PW", "AIRLINE", date(2026, 4, 1)),
+        ("PW_010426.xlsx", "PW", "AIRLINE", date(2026, 4, 1)),
         (
             "PWVelocityData_01.04.2026.csv",
             "PW",
@@ -61,7 +61,7 @@ def test_case_insensitive_match() -> None:
 def test_basename_extraction() -> None:
     """parse_filename should accept full paths and use the basename only."""
     result = parse_filename(
-        "/tmp/uploads/PW_010426.csv", today=TEST_TODAY
+        "/tmp/uploads/PW_010426.xlsx", today=TEST_TODAY
     )
     assert result.is_valid
     assert result.tenant_code == "PW"
@@ -101,14 +101,14 @@ def test_wrong_extension() -> None:
 
 def test_malformed_date() -> None:
     """Right shape but the date portion is not parseable."""
-    result = parse_filename("PW_XXXXXX.csv", today=TEST_TODAY)
+    result = parse_filename("PW_XXXXXX.xlsx", today=TEST_TODAY)
     assert not result.is_valid
     assert "malformed date" in result.error_reason
 
 
 def test_missing_date() -> None:
     """Right shape but the date portion is empty."""
-    result = parse_filename("PW_.csv", today=TEST_TODAY)
+    result = parse_filename("PW_.xlsx", today=TEST_TODAY)
     assert not result.is_valid
     assert result.error_reason == "missing date in filename"
 
@@ -116,7 +116,7 @@ def test_missing_date() -> None:
 def test_future_date() -> None:
     """A correctly-formed filename whose date is after today is rejected."""
     # 011230 in DDMMYY = 2030-12-01, comfortably after TEST_TODAY (2026-04-30).
-    result = parse_filename("PW_011230.csv", today=TEST_TODAY)
+    result = parse_filename("PW_011230.xlsx", today=TEST_TODAY)
     assert not result.is_valid
     assert result.tenant_code == "PW"  # tenant identified
     assert result.domain == "AIRLINE"
@@ -135,6 +135,13 @@ def test_extension_mismatch_for_tenant() -> None:
     assert "extension" in result.error_reason.lower()
 
 
+def test_pw_extension_mismatch() -> None:
+    """PW pricing requires .xlsx (mirrors JY); .csv should be rejected."""
+    result = parse_filename("PW_010426.csv", today=TEST_TODAY)
+    assert not result.is_valid
+    assert "extension" in result.error_reason.lower()
+
+
 def test_garbage_filename() -> None:
     """A filename that doesn't even match the prefix_DATE.ext shape."""
     result = parse_filename("not-a-real-filename", today=TEST_TODAY)
@@ -144,7 +151,7 @@ def test_garbage_filename() -> None:
 
 def test_parsed_filename_is_frozen_dataclass() -> None:
     """ParsedFilename should be immutable so callers can't mutate it."""
-    result = parse_filename("PW_010426.csv", today=TEST_TODAY)
+    result = parse_filename("PW_010426.xlsx", today=TEST_TODAY)
     assert isinstance(result, ParsedFilename)
     with pytest.raises(Exception):
         result.is_valid = False  # type: ignore[misc]

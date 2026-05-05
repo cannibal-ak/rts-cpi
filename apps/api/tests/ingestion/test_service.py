@@ -40,14 +40,35 @@ PRICING_CSV_ROW = (
 )
 
 
+def _xlsx_bytes_from_csv_strings(header: str, row: str, rows: int) -> bytes:
+    """Render a CSV-shaped header + row into a real XLSX byte stream.
+
+    The airline parser dispatches on file extension (.xlsx -> openpyxl),
+    so test fixtures must produce real XLSX bytes once PW airline
+    follows JY's .xlsx pattern (Phase 3 of the PW-parity work).
+    """
+    from io import BytesIO
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(header.strip().split(","))
+    row_values = row.strip().split(",")
+    for _ in range(rows):
+        ws.append(row_values)
+    bio = BytesIO()
+    wb.save(bio)
+    return bio.getvalue()
+
+
 def _pricing_pw_bytes(rows: int = 3) -> bytes:
-    return (PRICING_CSV_HEADER + PRICING_CSV_ROW * rows).encode("utf-8")
+    return _xlsx_bytes_from_csv_strings(PRICING_CSV_HEADER, PRICING_CSV_ROW, rows)
 
 
 def _pricing_pw_bytes_v2(rows: int = 3) -> bytes:
     """Slightly different content (different fares) for replace tests."""
     row = PRICING_CSV_ROW.replace("500", "999").replace("400", "888")
-    return (PRICING_CSV_HEADER + row * rows).encode("utf-8")
+    return _xlsx_bytes_from_csv_strings(PRICING_CSV_HEADER, row, rows)
 
 
 def _make_service(db_session, staging_dir: Path) -> IngestionService:
@@ -61,7 +82,7 @@ def test_upload_file_happy_path(db_session, admin_jwt_payload, staging_dir):
     svc = _make_service(db_session, staging_dir)
     payload = _pricing_pw_bytes()
 
-    result = svc.upload_file(payload, "PW_010426.csv", admin_jwt_payload)
+    result = svc.upload_file(payload, "PW_010426.xlsx", admin_jwt_payload)
 
     assert not result.duplicate
     assert not result.conflict
@@ -69,7 +90,7 @@ def test_upload_file_happy_path(db_session, admin_jwt_payload, staging_dir):
     assert result.job.tenant_code == "PW"
     assert result.job.domain == "AIRLINE"
     assert result.job.file_size_bytes == len(payload)
-    assert (staging_dir / str(result.job.id) / "PW_010426.csv").exists()
+    assert (staging_dir / str(result.job.id) / "PW_010426.xlsx").exists()
 
     # Audit row created
     audit = (
@@ -103,7 +124,7 @@ def test_upload_file_rejects_non_admin(
 ):
     svc = _make_service(db_session, staging_dir)
     with pytest.raises(IngestionAuthError):
-        svc.upload_file(_pricing_pw_bytes(), "PW_010426.csv", jy_jwt_payload)
+        svc.upload_file(_pricing_pw_bytes(), "PW_010426.xlsx", jy_jwt_payload)
 
 
 def test_upload_file_rejects_invalid_filename(
@@ -122,12 +143,12 @@ def test_upload_file_returns_duplicate_for_committed_hash(
     payload = _pricing_pw_bytes()
 
     # Upload + validate + commit once
-    r1 = svc.upload_file(payload, "PW_010426.csv", admin_jwt_payload)
+    r1 = svc.upload_file(payload, "PW_010426.xlsx", admin_jwt_payload)
     svc.validate_job(r1.job.id, admin_jwt_payload)
     svc.commit_job(r1.job.id, admin_jwt_payload)
 
     # Same bytes again — should detect as duplicate
-    r2 = svc.upload_file(payload, "PW_010426.csv", admin_jwt_payload)
+    r2 = svc.upload_file(payload, "PW_010426.xlsx", admin_jwt_payload)
     assert r2.duplicate is True
     assert r2.job.id == r1.job.id
 
@@ -138,13 +159,13 @@ def test_upload_file_flags_conflict_for_same_date_different_hash(
     svc = _make_service(db_session, staging_dir)
 
     r1 = svc.upload_file(
-        _pricing_pw_bytes(), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes(), "PW_010426.xlsx", admin_jwt_payload
     )
     svc.validate_job(r1.job.id, admin_jwt_payload)
     svc.commit_job(r1.job.id, admin_jwt_payload)
 
     r2 = svc.upload_file(
-        _pricing_pw_bytes_v2(), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes_v2(), "PW_010426.xlsx", admin_jwt_payload
     )
     assert r2.duplicate is False
     assert r2.conflict is True
@@ -157,7 +178,7 @@ def test_upload_file_flags_conflict_for_same_date_different_hash(
 def test_validate_job_happy_path(db_session, admin_jwt_payload, staging_dir):
     svc = _make_service(db_session, staging_dir)
     r = svc.upload_file(
-        _pricing_pw_bytes(rows=5), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes(rows=5), "PW_010426.xlsx", admin_jwt_payload
     )
 
     vr = svc.validate_job(r.job.id, admin_jwt_payload)
@@ -173,12 +194,16 @@ def test_validate_job_records_rejected_rows(
     db_session, admin_jwt_payload, staging_dir
 ):
     svc = _make_service(db_session, staging_dir)
-    bad_csv = (
-        PRICING_CSV_HEADER
-        + PRICING_CSV_ROW
-        + ",,RT,PW,1,LHR,JFK,01Apr26,Y,1,1,1,1,1,BA,1,LHR,JFK,01Apr26,Y,1,1,1,1,1\n"
-    ).encode("utf-8")
-    r = svc.upload_file(bad_csv, "PW_010426.csv", admin_jwt_payload)
+    # Build a 2-row XLSX where row 1 is valid and row 2 has an empty cap_date.
+    from io import BytesIO
+    from openpyxl import Workbook
+    bad_row = ",,RT,PW,1,LHR,JFK,01Apr26,Y,1,1,1,1,1,BA,1,LHR,JFK,01Apr26,Y,1,1,1,1,1"
+    wb = Workbook(); ws = wb.active
+    ws.append(PRICING_CSV_HEADER.strip().split(","))
+    ws.append(PRICING_CSV_ROW.strip().split(","))
+    ws.append(bad_row.split(","))
+    bio = BytesIO(); wb.save(bio); bad_xlsx = bio.getvalue()
+    r = svc.upload_file(bad_xlsx, "PW_010426.xlsx", admin_jwt_payload)
     vr = svc.validate_job(r.job.id, admin_jwt_payload)
     assert vr.row_count_total == 2
     assert vr.row_count_valid == 1
@@ -202,7 +227,7 @@ def test_commit_job_happy_path_inserts_facts_with_correct_tenant_id(
     PW's tenant_id, not Skywave's."""
     svc = _make_service(db_session, staging_dir)
     r = svc.upload_file(
-        _pricing_pw_bytes(rows=3), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes(rows=3), "PW_010426.xlsx", admin_jwt_payload
     )
     svc.validate_job(r.job.id, admin_jwt_payload)
     cr = svc.commit_job(r.job.id, admin_jwt_payload)
@@ -219,7 +244,7 @@ def test_commit_job_happy_path_inserts_facts_with_correct_tenant_id(
             "WHERE source_file = :sf AND report_date = :rd "
             "GROUP BY tenant_id, tenant_code"
         ),
-        {"sf": "PW_010426.csv", "rd": cr.job.file_date},
+        {"sf": "PW_010426.xlsx", "rd": cr.job.file_date},
     ).all()
     assert len(rows) == 1
     tenant_id_used, tenant_code_used, n = rows[0]
@@ -235,14 +260,14 @@ def test_commit_job_blocked_by_conflict(
 
     # First commit succeeds
     r1 = svc.upload_file(
-        _pricing_pw_bytes(), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes(), "PW_010426.xlsx", admin_jwt_payload
     )
     svc.validate_job(r1.job.id, admin_jwt_payload)
     svc.commit_job(r1.job.id, admin_jwt_payload)
 
     # Second commit on different content for same date should require replace
     r2 = svc.upload_file(
-        _pricing_pw_bytes_v2(), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes_v2(), "PW_010426.xlsx", admin_jwt_payload
     )
     svc.validate_job(r2.job.id, admin_jwt_payload)
     with pytest.raises(IngestionConflictError) as exc_info:
@@ -256,13 +281,13 @@ def test_commit_job_replace_existing_marks_old_replaced_and_swaps_data(
     svc = _make_service(db_session, staging_dir)
 
     r1 = svc.upload_file(
-        _pricing_pw_bytes(rows=3), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes(rows=3), "PW_010426.xlsx", admin_jwt_payload
     )
     svc.validate_job(r1.job.id, admin_jwt_payload)
     svc.commit_job(r1.job.id, admin_jwt_payload)
 
     r2 = svc.upload_file(
-        _pricing_pw_bytes_v2(rows=4), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes_v2(rows=4), "PW_010426.xlsx", admin_jwt_payload
     )
     svc.validate_job(r2.job.id, admin_jwt_payload)
     cr2 = svc.commit_job(
@@ -295,7 +320,7 @@ def test_commit_job_wrong_state_raises(
     """Commit on a STAGED (not yet validated) job must error."""
     svc = _make_service(db_session, staging_dir)
     r = svc.upload_file(
-        _pricing_pw_bytes(), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes(), "PW_010426.xlsx", admin_jwt_payload
     )
     with pytest.raises(IngestionStateError):
         svc.commit_job(r.job.id, admin_jwt_payload)
@@ -307,7 +332,7 @@ def test_commit_job_wrong_state_raises(
 def test_cancel_job_happy_path(db_session, admin_jwt_payload, staging_dir):
     svc = _make_service(db_session, staging_dir)
     r = svc.upload_file(
-        _pricing_pw_bytes(), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes(), "PW_010426.xlsx", admin_jwt_payload
     )
     job_dir = staging_dir / str(r.job.id)
     assert job_dir.exists()
@@ -324,7 +349,7 @@ def test_cancel_job_rejects_committed_job(
 ):
     svc = _make_service(db_session, staging_dir)
     r = svc.upload_file(
-        _pricing_pw_bytes(), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes(), "PW_010426.xlsx", admin_jwt_payload
     )
     svc.validate_job(r.job.id, admin_jwt_payload)
     svc.commit_job(r.job.id, admin_jwt_payload)
@@ -337,7 +362,7 @@ def test_cancel_job_rejects_non_admin(
 ):
     svc = _make_service(db_session, staging_dir)
     r = svc.upload_file(
-        _pricing_pw_bytes(), "PW_010426.csv", admin_jwt_payload
+        _pricing_pw_bytes(), "PW_010426.xlsx", admin_jwt_payload
     )
     with pytest.raises(IngestionAuthError):
         svc.cancel_job(r.job.id, jy_jwt_payload)

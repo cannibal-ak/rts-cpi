@@ -12,7 +12,7 @@ from app.core.deps import get_tenant_db, sanitize_filter, sanitize_date, get_use
 from app.models.airline import AirlineCpiSnapshot
 from app.schemas.common import PaginatedResponse, PageInfo
 from app.schemas.airline import AirlineSnapshotOut
-from app.schemas.velocity import JyVelocitySnapshotOut
+from app.schemas.velocity import VelocitySnapshotOut
 from app.schemas.filters import FilterMetadataOut
 
 router = APIRouter(
@@ -211,24 +211,25 @@ def export_snapshots(
     )
 
 
-# ── Velocity endpoints (JY only) ────────────────────────────────────
+# ── Velocity endpoints (multi-tenant: JY + PW) ──────────────────────
 
-VELOCITY_VIEW = "vw_jy_velocity_snapshot"
-VELOCITY_TENANTS = {"JY"}
+VELOCITY_VIEW_MAP = {
+    "JY": "vw_velocity_jy_snapshot",
+    "PW": "vw_velocity_pw_snapshot",
+}
+VELOCITY_TENANTS = set(VELOCITY_VIEW_MAP.keys())
 
 
 def _resolve_velocity_tenant(user_identity: str, user_roles: list[str], tenant: str | None) -> str:
-    """Validate scope and return effective tenant — only JY is valid for velocity."""
+    """Validate scope and return effective tenant for velocity (JY or PW)."""
     if is_platform_admin(user_identity, user_roles):
-        effective = tenant or "JY"
+        effective = tenant or "JY"  # platform admin can pick, defaults to JY
     else:
         if user_identity not in VELOCITY_TENANTS:
             raise HTTPException(status_code=403, detail="Not Authorized")
-        if tenant and tenant != user_identity:
-            raise HTTPException(status_code=400, detail="Velocity data only available for JY tenant")
-        effective = user_identity
+        effective = user_identity  # locked to own tenant; ignore ?tenant
     if effective not in VELOCITY_TENANTS:
-        raise HTTPException(status_code=400, detail="Velocity data only available for JY tenant")
+        raise HTTPException(status_code=400, detail="Invalid tenant for velocity module")
     return effective
 
 
@@ -263,7 +264,7 @@ def _build_velocity_where(file_date, origin, destination, city_pair, days_left_i
     return where_str, params
 
 
-@router.get("/velocity/snapshots", response_model=PaginatedResponse[JyVelocitySnapshotOut])
+@router.get("/velocity/snapshots", response_model=PaginatedResponse[VelocitySnapshotOut])
 def list_velocity_snapshots(
     db: Session = Depends(get_tenant_db),
     user_roles: list[str] = Depends(get_user_roles),
@@ -277,7 +278,8 @@ def list_velocity_snapshots(
     city_pair: str | None = None,
     days_left: str | None = None,
 ):
-    _resolve_velocity_tenant(user_identity, user_roles, tenant)
+    effective_tenant = _resolve_velocity_tenant(user_identity, user_roles, tenant)
+    view_name = VELOCITY_VIEW_MAP[effective_tenant]
 
     file_date = sanitize_date(file_date, "file_date")
     origin = sanitize_filter(origin, "origin")
@@ -289,11 +291,11 @@ def list_velocity_snapshots(
     params["limit"] = page_size
     params["offset"] = (page - 1) * page_size
 
-    count_sql = text(f"SELECT count(*) FROM {VELOCITY_VIEW} {where_str}")
+    count_sql = text(f"SELECT count(*) FROM {view_name} {where_str}")
     total = db.execute(count_sql, params).scalar() or 0
 
     data_sql = text(
-        f"SELECT * FROM {VELOCITY_VIEW} {where_str} "
+        f"SELECT * FROM {view_name} {where_str} "
         "ORDER BY dep_date DESC, dep_time DESC LIMIT :limit OFFSET :offset"
     )
     rows = db.execute(data_sql, params).mappings().all()
@@ -312,37 +314,38 @@ def get_velocity_filter_metadata(
     user_identity: str = Depends(get_user_identity),
     tenant: str | None = Query(None),
 ):
-    _resolve_velocity_tenant(user_identity, user_roles, tenant)
+    effective_tenant = _resolve_velocity_tenant(user_identity, user_roles, tenant)
+    view_name = VELOCITY_VIEW_MAP[effective_tenant]
 
     result = []
 
     file_dates = db.execute(text(
-        f"SELECT DISTINCT report_date FROM {VELOCITY_VIEW} "
+        f"SELECT DISTINCT report_date FROM {view_name} "
         "WHERE report_date IS NOT NULL ORDER BY report_date DESC"
     )).scalars().all()
     result.append({"field": "file_date", "label": "File Date",
                    "values": [d.isoformat() for d in file_dates] or ["No file dates available"]})
 
     origins = db.execute(text(
-        f"SELECT DISTINCT origin FROM {VELOCITY_VIEW} "
+        f"SELECT DISTINCT origin FROM {view_name} "
         "WHERE origin IS NOT NULL AND origin <> '' ORDER BY origin"
     )).scalars().all()
     result.append({"field": "origin", "label": "Origin", "values": list(origins)})
 
     destinations = db.execute(text(
-        f"SELECT DISTINCT destination FROM {VELOCITY_VIEW} "
+        f"SELECT DISTINCT destination FROM {view_name} "
         "WHERE destination IS NOT NULL AND destination <> '' ORDER BY destination"
     )).scalars().all()
     result.append({"field": "destination", "label": "Destination", "values": list(destinations)})
 
     city_pairs = db.execute(text(
-        f"SELECT DISTINCT city_pair FROM {VELOCITY_VIEW} "
+        f"SELECT DISTINCT city_pair FROM {view_name} "
         "WHERE city_pair IS NOT NULL AND city_pair <> '' ORDER BY city_pair"
     )).scalars().all()
     result.append({"field": "city_pair", "label": "City Pair", "values": list(city_pairs)})
 
     days = db.execute(text(
-        f"SELECT DISTINCT days_left FROM {VELOCITY_VIEW} ORDER BY days_left"
+        f"SELECT DISTINCT days_left FROM {view_name} ORDER BY days_left"
     )).scalars().all()
     result.append({"field": "days_left", "label": "Days Left",
                    "values": [str(d) for d in days]})
@@ -362,7 +365,8 @@ def export_velocity_snapshots(
     city_pair: str | None = None,
     days_left: str | None = None,
 ):
-    _resolve_velocity_tenant(user_identity, user_roles, tenant)
+    effective_tenant = _resolve_velocity_tenant(user_identity, user_roles, tenant)
+    view_name = VELOCITY_VIEW_MAP[effective_tenant]
 
     file_date = sanitize_date(file_date, "file_date")
     origin = sanitize_filter(origin, "origin")
@@ -373,7 +377,7 @@ def export_velocity_snapshots(
     where_str, params = _build_velocity_where(file_date, origin, destination, city_pair, days_left_int)
 
     data_sql = text(
-        f"SELECT * FROM {VELOCITY_VIEW} {where_str} "
+        f"SELECT * FROM {view_name} {where_str} "
         "ORDER BY dep_date DESC, dep_time DESC LIMIT 5000"
     )
     rows = db.execute(data_sql, params).mappings().all()

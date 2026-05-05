@@ -512,7 +512,7 @@ class IngestionService:
         elif prior.domain == "VELOCITY":
             self.db.execute(
                 text(
-                    "DELETE FROM jy_velocity_snapshot "
+                    "DELETE FROM velocity_snapshot "
                     "WHERE tenant_code = :tc AND report_date = :rd"
                 ),
                 {"tc": prior.tenant_code, "rd": prior.file_date},
@@ -630,20 +630,20 @@ class IngestionService:
     ) -> int:
         sql = text(
             """
-            INSERT INTO jy_velocity_snapshot (
+            INSERT INTO velocity_snapshot (
                 id, tenant_id, dep_date, dep_time, dep_code, city_pair,
                 origin, destination, eqp, legseg_type, leg_seg_order,
                 days_left, compartment, current_booking, capacity,
                 actual_seat_factor, forecasted_seat_factor,
-                data_owner, tenant_code, business_type, report_date,
-                source_file, loaded_at
+                airline_code, data_owner, tenant_code, business_type,
+                report_date, source_file, loaded_at
             ) VALUES (
                 :id, :tid, :dd, :dt, :dc, :cp,
                 :org, :dst, :eqp, :lst, :lso,
                 :dl, :comp, :cb, :cap,
                 :asf, :fsf,
-                :owner, :tcode, :btype, :rdate,
-                :sfile, now()
+                :acode, :owner, :tcode, :btype,
+                :rdate, :sfile, now()
             )
             """
         )
@@ -673,6 +673,7 @@ class IngestionService:
                 "cap": safe_int(row.get("Capacity") or 0),
                 "asf": safe_int(row.get("Actual_Seat_Factor") or 0),
                 "fsf": safe_int(row.get("Forecasted_Seat_Factor") or 0),
+                "acode": job.tenant_code,
                 "owner": job.tenant_code,
                 "tcode": job.tenant_code,
                 "btype": _business_type_for(job.domain),

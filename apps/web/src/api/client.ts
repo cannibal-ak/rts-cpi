@@ -3,7 +3,7 @@
  * Every method returns a Promise; the mock implementation resolves in-memory.
  */
 import type {
-  Paginated, AirlineSnapshot, JyVelocitySnapshot, CflSnapshot, FilterMetadata,
+  Paginated, AirlineSnapshot, VelocitySnapshot, CflSnapshot, FilterMetadata,
   AlertRule, AlertEvent,
   TenantFeature, DataFreshness,
   SftpConnection, SftpConnectionCreate, SftpConnectionUpdate,
@@ -32,7 +32,7 @@ export interface CpiApiClient {
     getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
     exportSnapshots(q?: Record<string, string>): Promise<void>;
     velocity: {
-      listSnapshots(q?: SnapshotQuery): Promise<Paginated<JyVelocitySnapshot>>;
+      listSnapshots(q?: SnapshotQuery): Promise<Paginated<VelocitySnapshot>>;
       getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
       exportSnapshots(q?: Record<string, string>): Promise<void>;
     };
