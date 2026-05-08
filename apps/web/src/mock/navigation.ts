@@ -18,6 +18,7 @@ export const navigationItems: NavItem[] = [
     requiredModules: ['airline_jy'],
     requiredRoles: ['TENANT_ADMIN'],
     category: 'Modules',
+    hideForSuperAdmin: true,
   },
   {
     label: 'Airline CPI \u2013 PW',
@@ -26,6 +27,7 @@ export const navigationItems: NavItem[] = [
     requiredModules: ['airline_pw'],
     requiredRoles: ['TENANT_ADMIN'],
     category: 'Modules',
+    hideForSuperAdmin: true,
   },
   {
     label: 'Cruise/Ferry CPI \u2013 FJL',
@@ -34,6 +36,7 @@ export const navigationItems: NavItem[] = [
     requiredModules: ['cfl_fjl'],
     requiredRoles: ['TENANT_ADMIN'],
     category: 'Modules',
+    hideForSuperAdmin: true,
   },
 
   // ── Analytics ─────────────────────────────
@@ -42,6 +45,7 @@ export const navigationItems: NavItem[] = [
     path: '/dashboards',
     icon: 'Dashboard',
     category: 'Analytics',
+    hideForSuperAdmin: true,
     requiredRoles: ['TENANT_ADMIN'],
   },
 
