@@ -49,6 +49,7 @@ from app.ingestion.parsers import (
     read_data_file,
     safe_float,
     safe_int,
+    safe_int_nullable,
 )
 from app.models.ingestion import IngestionAuditLog, IngestionJob
 
@@ -568,7 +569,23 @@ class IngestionService:
                 comp_cab_code, comp_tot_fare, comp_base_fare, comp_tax,
                 comp_yq, comp_seats,
                 pos, poa, data_owner, tenant_code, business_type,
-                report_date, source_file, loaded_at
+                report_date, source_file, loaded_at,
+                -- Phase 2C: 47 new dictionary columns (migration 022)
+                ref_dep_time, ref_arr_time, ref_stops, ref_via,
+                ref_ff_code, ref_cab_name, ref_bkg_class, ref_yr,
+                ref_anc_price, ref_anc_type, ref_equip_code,
+                ref_ret_flt_num, ref_ret_dep_date, ref_ret_dep_time,
+                ref_ret_arr_time, ref_ret_stops, ref_ret_via,
+                ref_ret_cab_name, ref_ret_cab_code, ref_ret_bkg_class,
+                ref_ret_seats, ref_ret_equip_code,
+                comp_dep_time, comp_arr_time, comp_stops, comp_via,
+                comp_ff_code, comp_cab_name, comp_bkg_class, comp_yr,
+                comp_anc_price, comp_anc_type, comp_equip_code,
+                comp_ret_flt_num, comp_ret_dep_date, comp_ret_dep_time,
+                comp_ret_arr_time, comp_ret_stops, comp_ret_via,
+                comp_ret_cab_name, comp_ret_cab_code, comp_ret_bkg_class,
+                comp_ret_seats, comp_ret_equip_code,
+                pod, poc, path
             ) VALUES (
                 :id, :tid, :cd, :ct, :tt,
                 :ra, :rf, :ro, :rd, :rdd,
@@ -577,8 +594,23 @@ class IngestionService:
                 :ca, :cf, :co, :cdst, :cdd,
                 :ccc, :ctf, :cbf, :ctax,
                 :cyq, :cs,
-                'US', 'US', :owner, :tcode, :btype,
-                :rdate, :sfile, now()
+                :pos, :poa, :owner, :tcode, :btype,
+                :rdate, :sfile, now(),
+                :ref_dep_time, :ref_arr_time, :ref_stops, :ref_via,
+                :ref_ff_code, :ref_cab_name, :ref_bkg_class, :ref_yr,
+                :ref_anc_price, :ref_anc_type, :ref_equip_code,
+                :ref_ret_flt_num, :ref_ret_dep_date, :ref_ret_dep_time,
+                :ref_ret_arr_time, :ref_ret_stops, :ref_ret_via,
+                :ref_ret_cab_name, :ref_ret_cab_code, :ref_ret_bkg_class,
+                :ref_ret_seats, :ref_ret_equip_code,
+                :comp_dep_time, :comp_arr_time, :comp_stops, :comp_via,
+                :comp_ff_code, :comp_cab_name, :comp_bkg_class, :comp_yr,
+                :comp_anc_price, :comp_anc_type, :comp_equip_code,
+                :comp_ret_flt_num, :comp_ret_dep_date, :comp_ret_dep_time,
+                :comp_ret_arr_time, :comp_ret_stops, :comp_ret_via,
+                :comp_ret_cab_name, :comp_ret_cab_code, :comp_ret_bkg_class,
+                :comp_ret_seats, :comp_ret_equip_code,
+                :pod, :poc, :path
             )
             """
         )
@@ -615,11 +647,79 @@ class IngestionService:
                 "ctax": safe_float(row.get("CompTax")),
                 "cyq": safe_float(row.get("CompYQ")),
                 "cs": safe_int(row.get("CompSeats") or 9),
+                # pos/poa: read from source (PW carries them); fall back to "US"
+                # so JY rows (no POS/POA in source) still satisfy NOT NULL.
+                "pos": (row.get("POS") or "US")[:4],
+                "poa": (row.get("POA") or "US")[:4],
                 "owner": job.tenant_code,
                 "tcode": job.tenant_code,
                 "btype": _business_type_for(job.domain),
                 "rdate": job.file_date,
                 "sfile": job.filename,
+                # ── Phase 2C: 47 new dictionary columns ──
+                # Reference flight — outbound additions (11)
+                "ref_dep_time": ((row.get("RefDepTime") or "").strip()[:4] or None),
+                "ref_arr_time": ((row.get("RefArrTime") or "").strip()[:4] or None),
+                "ref_stops": safe_int_nullable(row.get("RefStops")),
+                "ref_via": ((row.get("RefVia") or "").strip()[:4] or None),
+                "ref_ff_code": ((row.get("RefFFCode") or "").strip()[:20] or None),
+                "ref_cab_name": ((row.get("RefCabName") or "").strip()[:20] or None),
+                "ref_bkg_class": ((row.get("RefBkgClass") or "").strip()[:4] or None),
+                "ref_yr": safe_float(row.get("RefYR")),
+                "ref_anc_price": safe_float(row.get("RefAncPrice")),
+                "ref_anc_type": ((row.get("RefAncType") or "").strip()[:20] or None),
+                # Equipment unification: JY's RefAircraft OR PW's RefEquipCode
+                "ref_equip_code": (
+                    (row.get("RefAircraft") or row.get("RefEquipCode") or "")
+                    .strip()[:32] or None
+                ),
+                # Reference flight — return-leg (11) — JY-only in source
+                "ref_ret_flt_num": ((row.get("RefRetFltNum") or "").strip()[:10] or None),
+                "ref_ret_dep_date": parse_date(row.get("RefRetDepDate")),
+                "ref_ret_dep_time": ((row.get("RefRetDepTime") or "").strip()[:4] or None),
+                "ref_ret_arr_time": ((row.get("RefRetArrTime") or "").strip()[:4] or None),
+                "ref_ret_stops": safe_int_nullable(row.get("RefRetStops")),
+                "ref_ret_via": ((row.get("RefRetVia") or "").strip()[:4] or None),
+                "ref_ret_cab_name": ((row.get("RefRetCabName") or "").strip()[:20] or None),
+                "ref_ret_cab_code": ((row.get("RefRetCabCode") or "").strip()[:4] or None),
+                "ref_ret_bkg_class": ((row.get("RefRetBkgClass") or "").strip()[:4] or None),
+                "ref_ret_seats": safe_int_nullable(row.get("RefRetSeats")),
+                "ref_ret_equip_code": ((row.get("RefRetAircraft") or "").strip()[:32] or None),
+                # Competitor — outbound additions (11)
+                "comp_dep_time": ((row.get("CompDepTime") or "").strip()[:4] or None),
+                "comp_arr_time": ((row.get("CompArrTime") or "").strip()[:4] or None),
+                "comp_stops": safe_int_nullable(row.get("CompStops")),
+                "comp_via": ((row.get("CompVia") or "").strip()[:4] or None),
+                "comp_ff_code": ((row.get("CompFFCode") or "").strip()[:20] or None),
+                "comp_cab_name": ((row.get("CompCabName") or "").strip()[:20] or None),
+                "comp_bkg_class": ((row.get("CompBkgClass") or "").strip()[:4] or None),
+                "comp_yr": safe_float(row.get("CompYR")),
+                "comp_anc_price": safe_float(row.get("CompAncPrice")),
+                "comp_anc_type": ((row.get("CompAncType") or "").strip()[:20] or None),
+                "comp_equip_code": (
+                    (row.get("CompAircraft") or row.get("CompEquipCode") or "")
+                    .strip()[:32] or None
+                ),
+                # Competitor — return-leg (11) — JY-only in source
+                "comp_ret_flt_num": ((row.get("CompRetFltNum") or "").strip()[:10] or None),
+                "comp_ret_dep_date": parse_date(row.get("CompRetDepDate")),
+                "comp_ret_dep_time": ((row.get("CompRetDepTime") or "").strip()[:4] or None),
+                "comp_ret_arr_time": ((row.get("CompRetArrTime") or "").strip()[:4] or None),
+                "comp_ret_stops": safe_int_nullable(row.get("CompRetStops")),
+                "comp_ret_via": ((row.get("CompRetVia") or "").strip()[:4] or None),
+                "comp_ret_cab_name": ((row.get("CompRetCabName") or "").strip()[:20] or None),
+                "comp_ret_cab_code": ((row.get("CompRetCabCode") or "").strip()[:4] or None),
+                "comp_ret_bkg_class": ((row.get("CompRetBkgClass") or "").strip()[:4] or None),
+                "comp_ret_seats": safe_int_nullable(row.get("CompRetSeats")),
+                "comp_ret_equip_code": (
+                    (row.get("CompRetAircraft") or row.get("CompRetEquipCode") or "")
+                    .strip()[:32] or None
+                ),
+                # Point-of-* (PW source carries pod/poc)
+                "pod": ((row.get("POD") or "").strip()[:4] or None),
+                "poc": ((row.get("POC") or "").strip()[:4] or None),
+                # Provenance (no source carries today)
+                "path": ((row.get("Path") or "").strip()[:50] or None),
             }
             self.db.execute(sql, params)
             inserted += 1

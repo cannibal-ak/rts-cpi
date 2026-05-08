@@ -45,6 +45,66 @@ class AirlineCpiSnapshot(Base):
     comp_curr = Column(String(4), nullable=True, server_default="USD")
     pos = Column(String(4), nullable=False)
     poa = Column(String(4), nullable=False)
+
+    # ── Reference flight — outbound additions (11) — Phase 2A migration 022 ──
+    ref_dep_time = Column(String(4), nullable=True)
+    ref_arr_time = Column(String(4), nullable=True)
+    ref_stops = Column(Integer, nullable=True)
+    ref_via = Column(String(4), nullable=True)
+    ref_ff_code = Column(String(20), nullable=True)
+    ref_cab_name = Column(String(20), nullable=True)
+    ref_bkg_class = Column(String(4), nullable=True)
+    ref_yr = Column(Numeric(12, 2), nullable=True)
+    ref_anc_price = Column(Numeric(12, 2), nullable=True)
+    ref_anc_type = Column(String(20), nullable=True)
+    ref_equip_code = Column(String(32), nullable=True)
+
+    # ── Reference flight — return-leg (11) — JY-only in source ──
+    ref_ret_flt_num = Column(String(10), nullable=True)
+    ref_ret_dep_date = Column(Date, nullable=True)
+    ref_ret_dep_time = Column(String(4), nullable=True)
+    ref_ret_arr_time = Column(String(4), nullable=True)
+    ref_ret_stops = Column(Integer, nullable=True)
+    ref_ret_via = Column(String(4), nullable=True)
+    ref_ret_cab_name = Column(String(20), nullable=True)
+    ref_ret_cab_code = Column(String(4), nullable=True)
+    ref_ret_bkg_class = Column(String(4), nullable=True)
+    ref_ret_seats = Column(Integer, nullable=True)
+    ref_ret_equip_code = Column(String(32), nullable=True)
+
+    # ── Competitor — outbound additions (11) ──
+    comp_dep_time = Column(String(4), nullable=True)
+    comp_arr_time = Column(String(4), nullable=True)
+    comp_stops = Column(Integer, nullable=True)
+    comp_via = Column(String(4), nullable=True)
+    comp_ff_code = Column(String(20), nullable=True)
+    comp_cab_name = Column(String(20), nullable=True)
+    comp_bkg_class = Column(String(4), nullable=True)
+    comp_yr = Column(Numeric(12, 2), nullable=True)
+    comp_anc_price = Column(Numeric(12, 2), nullable=True)
+    comp_anc_type = Column(String(20), nullable=True)
+    comp_equip_code = Column(String(32), nullable=True)
+
+    # ── Competitor — return-leg (11) — JY-only in source ──
+    comp_ret_flt_num = Column(String(10), nullable=True)
+    comp_ret_dep_date = Column(Date, nullable=True)
+    comp_ret_dep_time = Column(String(4), nullable=True)
+    comp_ret_arr_time = Column(String(4), nullable=True)
+    comp_ret_stops = Column(Integer, nullable=True)
+    comp_ret_via = Column(String(4), nullable=True)
+    comp_ret_cab_name = Column(String(20), nullable=True)
+    comp_ret_cab_code = Column(String(4), nullable=True)
+    comp_ret_bkg_class = Column(String(4), nullable=True)
+    comp_ret_seats = Column(Integer, nullable=True)
+    comp_ret_equip_code = Column(String(32), nullable=True)
+
+    # ── Point-of-* (PW source carries pod/poc) (2) ──
+    pod = Column(String(4), nullable=True)
+    poc = Column(String(4), nullable=True)
+
+    # ── Provenance (1) — dictionary-required, currently absent from sources ──
+    path = Column(String(50), nullable=True)
+
     data_owner = Column(String(32), nullable=True, index=True)
 
     # ── Tenant Segregation & Ingestion Metadata ──

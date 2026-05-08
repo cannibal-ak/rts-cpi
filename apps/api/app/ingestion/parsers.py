@@ -82,6 +82,24 @@ def safe_int(value: object) -> int:
         return 0
 
 
+def safe_int_nullable(value: object) -> int | None:
+    """Like ``safe_int``, but returns ``None`` for missing/blank/unparseable input.
+
+    Use this for nullable integer DB columns where 0 would be a valid
+    semantic value (e.g. ``ref_stops = 0`` is "nonstop"; we don't want
+    a missing value to silently look like a nonstop flight).
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s or s.upper() == "NULL":
+        return None
+    try:
+        return int(s)
+    except (ValueError, TypeError):
+        return None
+
+
 def read_data_file(file_path: str) -> Iterator[dict]:
     """Yield rows from a CSV or XLSX file as ``dict``s keyed by header.
 
