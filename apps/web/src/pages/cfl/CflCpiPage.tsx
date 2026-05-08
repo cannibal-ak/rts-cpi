@@ -127,7 +127,7 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
 
       <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <FilterPanel
-          title={`${tenantCode} Filters`}
+          title={`${tenantCode} Pricing Filters`}
           fields={displayedFields}
           open={filterOpen}
           onToggle={() => setFilterOpen(!filterOpen)}
@@ -172,10 +172,10 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
                         <TableCell><Typography variant="body2">{row.source}</Typography></TableCell>
                         <TableCell><Chip label={row.prod_family} size="small" /></TableCell>
                         <TableCell><Tooltip title={row.out_equip_name}><Typography variant="caption" noWrap sx={{ maxWidth: 100, display: 'block' }}>{row.out_equip_name}</Typography></Tooltip></TableCell>
-                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace" fontWeight={600}>{formatCurrency(row.total_fare)}</Typography></TableCell>
-                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{formatCurrency(row.out_per_pax_fare)}</Typography></TableCell>
-                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.out_veh_fare > 0 ? formatCurrency(row.out_veh_fare) : '—'}</Typography></TableCell>
-                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{formatCurrency(row.out_taxes)}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace" fontWeight={600}>{formatCurrency(row.total_fare, row.curr_code)}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{formatCurrency(row.out_per_pax_fare, row.curr_code)}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.out_veh_fare > 0 ? formatCurrency(row.out_veh_fare, row.curr_code) : '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{formatCurrency(row.out_taxes, row.curr_code)}</Typography></TableCell>
                         <TableCell><Chip label={row.veh_size} size="small" variant="outlined" /></TableCell>
                         <TableCell>
                           <Chip label={row.out_avail} size="small"

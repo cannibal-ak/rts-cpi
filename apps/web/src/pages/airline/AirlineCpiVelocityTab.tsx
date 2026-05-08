@@ -118,7 +118,7 @@ export default function AirlineCpiVelocityTab({ filters, onFiltersChange }: Airl
 
       <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <FilterPanel
-          title="JY Velocity Filters"
+          title={`${TENANT} Velocity Filters`}
           fields={displayedFields}
           open={filterOpen}
           onToggle={() => setFilterOpen(!filterOpen)}

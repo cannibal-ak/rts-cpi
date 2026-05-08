@@ -74,6 +74,72 @@ export interface AirlineSnapshot {
   poa: string;
   fare_delta?: number;
   fare_delta_pct?: number;
+
+  // ── Phase 2A migration 022: 47 new dictionary columns ──
+  // Reference flight — outbound additions (11)
+  ref_dep_time?: string | null;
+  ref_arr_time?: string | null;
+  ref_stops?: number | null;
+  ref_via?: string | null;
+  ref_ff_code?: string | null;
+  ref_cab_name?: string | null;
+  ref_bkg_class?: string | null;
+  ref_yr?: number | null;
+  ref_anc_price?: number | null;
+  ref_anc_type?: string | null;
+  ref_equip_code?: string | null;
+  // Reference flight — return-leg (11) — JY-only in source
+  ref_ret_flt_num?: string | null;
+  ref_ret_dep_date?: string | null;
+  ref_ret_dep_time?: string | null;
+  ref_ret_arr_time?: string | null;
+  ref_ret_stops?: number | null;
+  ref_ret_via?: string | null;
+  ref_ret_cab_name?: string | null;
+  ref_ret_cab_code?: string | null;
+  ref_ret_bkg_class?: string | null;
+  ref_ret_seats?: number | null;
+  ref_ret_equip_code?: string | null;
+  // Competitor — outbound additions (11)
+  comp_dep_time?: string | null;
+  comp_arr_time?: string | null;
+  comp_stops?: number | null;
+  comp_via?: string | null;
+  comp_ff_code?: string | null;
+  comp_cab_name?: string | null;
+  comp_bkg_class?: string | null;
+  comp_yr?: number | null;
+  comp_anc_price?: number | null;
+  comp_anc_type?: string | null;
+  comp_equip_code?: string | null;
+  // Competitor — return-leg (11) — JY-only in source
+  comp_ret_flt_num?: string | null;
+  comp_ret_dep_date?: string | null;
+  comp_ret_dep_time?: string | null;
+  comp_ret_arr_time?: string | null;
+  comp_ret_stops?: number | null;
+  comp_ret_via?: string | null;
+  comp_ret_cab_name?: string | null;
+  comp_ret_cab_code?: string | null;
+  comp_ret_bkg_class?: string | null;
+  comp_ret_seats?: number | null;
+  comp_ret_equip_code?: string | null;
+  // Point-of-* (PW source carries pod/poc) (2)
+  pod?: string | null;
+  poc?: string | null;
+  // Provenance (1)
+  path?: string | null;
+
+  // ── Phase 2E: 9 newly-exposed infra/metadata fields ──
+  ref_curr?: string | null;
+  comp_curr?: string | null;
+  tenant_code?: string | null;
+  report_date?: string | null;
+  file_date?: string | null;
+  source_file?: string | null;
+  business_type?: string | null;
+  ingested_at?: string | null;
+  loaded_at?: string | null;
 }
 
 // ──────── JY velocity snapshot ────────
