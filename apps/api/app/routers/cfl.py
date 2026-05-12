@@ -112,11 +112,6 @@ def get_filter_metadata(
         
     result.append({"field": "file_date", "label": "File Date", "values": all_dates})
 
-    # Operator filter — always scoped to FJL for CFL module
-    vals = ["FJL"]
-        
-    result.append({"field": "operator", "label": "Airline / Operator", "values": vals})
-
     return result
 
 
