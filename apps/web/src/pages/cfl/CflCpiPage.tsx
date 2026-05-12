@@ -39,8 +39,6 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
     });
   }, [tenantCode]);
 
-  useEffect(() => { fetchData(); }, [tenantCode]);
-
   const fetchData = useCallback(async (f?: Record<string, string>, p?: number) => {
     setLoading(true);
     try {
@@ -76,24 +74,28 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
     fetchData(defaultFilters, 0);
   };
 
-  // Auto-select latest date when metadata is loaded
   useEffect(() => {
-    if (meta.length > 0 && Object.keys(filters).length === 0) {
-      const defaultFilters: Record<string, string> = {};
+    if (meta.length === 0) return;
+    if (Object.keys(filters).length === 0) {
+      const defaults: Record<string, string> = {};
       const fileDateMeta = meta.find(m => m.field === 'file_date');
       if (fileDateMeta && fileDateMeta.values.length > 0 && fileDateMeta.values[0] !== 'No file dates available') {
-        defaultFilters.file_date = fileDateMeta.values[0];
+        defaults.file_date = fileDateMeta.values[0];
       }
       const operatorMeta = meta.find(m => m.field === 'operator');
       if (operatorMeta && operatorMeta.values.length === 1) {
-        defaultFilters.operator = operatorMeta.values[0];
+        defaults.operator = operatorMeta.values[0];
       }
-      if (Object.keys(defaultFilters).length > 0) {
-        setFilters(defaultFilters);
-        fetchData(defaultFilters, 0);
+      if (Object.keys(defaults).length > 0) {
+        setFilters(defaults);
+        fetchData(defaults, 0);
+        return;
       }
     }
-  }, [meta, fetchData, filters]);
+    fetchData(filters, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meta]);
+
   const handlePageChange = (_: unknown, p: number) => { setPage(p); fetchData(filters, p); };
 
   const allFields = meta.map(m => {
@@ -142,7 +144,7 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
             <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}><CircularProgress /></Box>
           ) : !data || data.items.length === 0 ? (
             <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <EmptyState icon={<DirectionsBoat sx={{ fontSize: 64 }} />} title="No CFL Data" description="Apply filters to search cruise/ferry snapshots." actionLabel="Load All" onAction={() => fetchData({}, 0)} />
+              <EmptyState icon={<DirectionsBoat sx={{ fontSize: 64 }} />} title="No CFL Data" description="No snapshots match the current filters." />
             </Box>
           ) : (
             <>
