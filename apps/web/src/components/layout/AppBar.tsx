@@ -79,14 +79,11 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
         </IconButton>
 
         {isFjlTenant ? (
-          /* Fjord Line — red text on black; mix-blend-mode: screen makes
-             the black background drop out in both light and dark headers
-             while preserving the red mark. */
           <Box
             component="img"
             src={fjordlineLogo}
             alt="Fjord Line"
-            sx={{ height: 48, mr: 1.5, mixBlendMode: 'screen' }}
+            sx={{ height: 48, mr: 1.5 }}
           />
         ) : (
           <>
