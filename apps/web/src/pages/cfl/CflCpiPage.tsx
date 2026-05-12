@@ -1,10 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Chip, CircularProgress, TablePagination, Tooltip,
+  Chip, CircularProgress, TablePagination, Tooltip, Breadcrumbs, Link,
 } from '@mui/material';
-import { DirectionsBoat } from '@mui/icons-material';
-import PageHeader from '../../components/common/PageHeader';
+import { DirectionsBoat, NavigateNext } from '@mui/icons-material';
 import DataFreshnessIndicator from '../../components/common/DataFreshnessIndicator';
 import FilterPanel from '../../components/filters/FilterPanel';
 import ActionBar from '../../components/filters/ActionBar';
@@ -118,12 +117,31 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <PageHeader
-        title={pageTitle}
-        subtitle={`Competitive pricing across ${tenantCode} cruise and ferry routes`}
-        breadcrumbs={[{ label: 'Home', href: '/' }, { label: pageTitle }]}
-        actions={freshness && <DataFreshnessIndicator data={freshness} compact />}
-      />
+      <Box
+        sx={{
+          mb: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 1,
+          minHeight: 28,
+          flexWrap: 'wrap',
+        }}
+      >
+        <Breadcrumbs separator={<NavigateNext fontSize="small" />}>
+          <Link underline="hover" color="inherit" href="/" sx={{ fontSize: 13 }}>
+            Home
+          </Link>
+          <Typography color="text.primary" sx={{ fontSize: 13 }}>
+            {pageTitle}
+          </Typography>
+        </Breadcrumbs>
+        {freshness && (
+          <Box sx={{ display: 'inline-flex', alignItems: 'center' }}>
+            <DataFreshnessIndicator data={freshness} compact />
+          </Box>
+        )}
+      </Box>
 
       <ActionBar onExport={() => api.cfl.exportSnapshots({ ...filters, tenant: tenantCode })} />
 
