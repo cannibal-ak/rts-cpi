@@ -23,10 +23,15 @@ import { useNavigate } from 'react-router-dom';
 import { useSession } from '../../context/SessionContext';
 import { useThemeMode } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import fjordlineLogo from '../../assets/logos/fjordline-logo.png';
 
 interface AppBarProps {
   onToggleSidebar: () => void;
 }
+
+const TENANT_DISPLAY_NAMES: Record<string, string> = {
+  FJL: 'Fjord Line',
+};
 
 export default function AppBar({ onToggleSidebar }: AppBarProps) {
   const { session } = useSession();
@@ -34,6 +39,14 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
   const { logout } = useAuth();
   const navigate = useNavigate();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+
+  // A single-module session identifies one tenant; multi-module is the
+  // Skywave admin and falls through to the RTS branding below.
+  const tenantCode: 'FJL' | null =
+    session.enabled_modules.length === 1 && session.enabled_modules[0] === 'cfl_fjl'
+      ? 'FJL'
+      : null;
+  const isFjlTenant = tenantCode === 'FJL';
 
   const handleLogout = () => {
     setAnchorEl(null);
@@ -65,30 +78,44 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
           <MenuIcon />
         </IconButton>
 
-        {/* RTS Logo — tries PNG first, falls back to SVG */}
-        <Box
-          component="img"
-          src="/assets/RTS_Logo.png"
-          alt="RTS Logo"
-          onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
-            const img = e.currentTarget;
-            if (img.src.endsWith('.png')) {
-              img.src = '/assets/RTS_Logo.svg';
-            } else {
-              img.style.display = 'none';
-            }
-          }}
-          sx={{ height: 40, mr: 1.5 }}
-        />
-        <Typography variant="body2" noWrap sx={{ color: 'text.secondary', ml: 0.5, display: { xs: 'none', sm: 'block' }, fontWeight: 500 }}>
-          Competitor Pricing Intelligence
-        </Typography>
+        {isFjlTenant ? (
+          /* Fjord Line — red text on black; mix-blend-mode: screen makes
+             the black background drop out in both light and dark headers
+             while preserving the red mark. */
+          <Box
+            component="img"
+            src={fjordlineLogo}
+            alt="Fjord Line"
+            sx={{ height: 48, mr: 1.5, mixBlendMode: 'screen' }}
+          />
+        ) : (
+          <>
+            {/* RTS Logo — tries PNG first, falls back to SVG */}
+            <Box
+              component="img"
+              src="/assets/RTS_Logo.png"
+              alt="RTS Logo"
+              onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
+                const img = e.currentTarget;
+                if (img.src.endsWith('.png')) {
+                  img.src = '/assets/RTS_Logo.svg';
+                } else {
+                  img.style.display = 'none';
+                }
+              }}
+              sx={{ height: 40, mr: 1.5 }}
+            />
+            <Typography variant="body2" noWrap sx={{ color: 'text.secondary', ml: 0.5, display: { xs: 'none', sm: 'block' }, fontWeight: 500 }}>
+              Competitor Pricing Intelligence
+            </Typography>
+          </>
+        )}
 
         <Box sx={{ flexGrow: 1 }} />
 
         <Chip
           size="small"
-          label={session.tenant_name}
+          label={tenantCode ? (TENANT_DISPLAY_NAMES[tenantCode] ?? session.tenant_name) : session.tenant_name}
           variant="outlined"
           sx={{ display: { xs: 'none', md: 'flex' } }}
         />
