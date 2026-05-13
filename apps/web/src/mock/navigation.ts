@@ -82,4 +82,22 @@ export const navigationItems: NavItem[] = [
     requireSuperAdmin: true,
     category: 'Admin',
   },
+
+  // ── Data Ops (manual fallback alongside SFTP automation) ─────
+  {
+    label: 'Ingestion Jobs',
+    path: '/ingestion',
+    icon: 'Assignment',
+    requiredRoles: ['TENANT_ADMIN'],
+    requireSuperAdmin: true,
+    category: 'Data Ops',
+  },
+  {
+    label: 'Upload Files',
+    path: '/ingestion/upload',
+    icon: 'CloudUpload',
+    requiredRoles: ['TENANT_ADMIN'],
+    requireSuperAdmin: true,
+    category: 'Data Ops',
+  },
 ];

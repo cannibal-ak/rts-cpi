@@ -15,6 +15,8 @@ import SftpConnectionsPage from './pages/admin/SftpConnectionsPage';
 import IngestionSchedulesPage from './pages/admin/IngestionSchedulesPage';
 import IngestionRunsPage from './pages/admin/IngestionRunsPage';
 import PasswordManagementPage from './pages/PasswordManagementPage';
+import IngestionJobsPage from './pages/ingestion/IngestionJobsPage';
+import UploadPage from './pages/ingestion/UploadPage';
 
 import SupersetPage from './pages/superset/SupersetPage';
 import DashboardViewerPage from './pages/superset/DashboardViewerPage';
@@ -106,6 +108,16 @@ export default function App() {
                 <Route path="/admin/ingestion-runs" element={
                   <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
                     <IngestionRunsPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/ingestion" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <IngestionJobsPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/ingestion/upload" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <UploadPage />
                   </ProtectedRoute>
                 } />
                 <Route path="/admin/password-management" element={

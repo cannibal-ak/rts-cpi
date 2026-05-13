@@ -4,7 +4,7 @@ from app.models.tenant import Tenant, ApiClient  # noqa: F401
 from app.models.user import AppUser, RoleBinding  # noqa: F401
 from app.models.tenant_feature import TenantFeature  # noqa: F401
 from app.models.source import SourceSystem, SourceConnection, SourceFile  # noqa: F401
-from app.models.ingestion import IngestionJob, IngestionAuditLog  # noqa: F401
+from app.models.ingestion import ImportJob, ImportBatch, IngestError, IngestionJob, IngestionAuditLog  # noqa: F401
 from app.models.velocity import VelocitySnapshot  # noqa: F401
 from app.models.airline import AirlineCpiSnapshot  # noqa: F401
 from app.models.cfl import CflCpiSnapshot  # noqa: F401

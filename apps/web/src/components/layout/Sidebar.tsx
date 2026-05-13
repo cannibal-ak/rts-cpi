@@ -17,6 +17,7 @@ import {
   Security, Settings, Description,
   Storage, Schedule, History,
   VpnKey,
+  Assignment,
 } from '@mui/icons-material';
 import { ModuleIcon, DashboardIcon } from '@/components/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -35,7 +36,7 @@ const iconMap: Record<string, React.ReactElement> = {
   CloudUpload: <CloudUpload />,
   Security: <Security />, Settings: <Settings />, Description: <Description />,
   Storage: <Storage />, Schedule: <Schedule />, History: <History />,
-  VpnKey: <VpnKey />,
+  VpnKey: <VpnKey />, Assignment: <Assignment />,
 };
 
 interface SidebarProps {

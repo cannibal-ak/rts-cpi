@@ -16,6 +16,14 @@ import type {
 } from '../types';
 
 // ── Query params ────────────────────────────
+export interface JobQuery {
+  page?: number;
+  page_size?: number;
+  domain?: string;
+  status?: string;
+  tenant_code?: string;
+}
+
 export interface SnapshotQuery {
   page?: number;
   page_size?: number;
@@ -105,6 +113,16 @@ export interface CpiApiClient {
         embedded_uuid: string;
         dashboard_title: string;
     }>;
+  };
+  ingestion: {
+    listJobs(q?: JobQuery): Promise<Paginated<IngestionJob>>;
+    getJob(id: string): Promise<IngestionJob | null>;
+    upload(files: File[]): Promise<IngestionUploadResponse>;
+    validate(id: string): Promise<IngestionValidationResult>;
+    commit(id: string, replaceExisting: boolean): Promise<IngestionCommitResult>;
+    cancel(id: string): Promise<IngestionJob>;
+    getAudit(id: string): Promise<IngestionAuditLog>;
+    getPreview(id: string): Promise<IngestionPreview>;
   };
 }
 

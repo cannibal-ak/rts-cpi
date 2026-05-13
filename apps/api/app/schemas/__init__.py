@@ -15,3 +15,7 @@ from app.schemas.sftp import (  # noqa: F401
     IngestionScheduleCreate, IngestionScheduleUpdate, IngestionScheduleRead,
     IngestionRunRead, IngestionRunDetail, IngestedFileRead,
 )
+
+from app.schemas.ingestion import (  # noqa: F401
+    IngestionJobOut, UploadRequest, JobTimelineEntry,
+)

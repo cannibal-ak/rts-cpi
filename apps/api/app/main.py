@@ -19,6 +19,7 @@ from app.routers import (
     admin_sftp_connections,
     admin_password_management,
 )
+from app.api.v1 import ingestion as ingestion_v2
 from app.services import redbeat_sync
 
 # Lifespan logs route through uvicorn.error because app.* loggers
@@ -89,6 +90,10 @@ app.include_router(admin_ingestion_runs.router, dependencies=_protected)
 # force reset. Router-level RequirePlatformAdmin + the _protected
 # password-change gate mirror the other admin routers above.
 app.include_router(admin_password_management.router, dependencies=_protected)
+
+# Phase A ingestion router — Data Ops (manual upload + jobs view).
+# Admin-only; uses _protected pattern like every other admin router.
+app.include_router(ingestion_v2.router, dependencies=_protected)
 
 @app.get("/")
 def root():
