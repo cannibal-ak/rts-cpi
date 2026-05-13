@@ -356,6 +356,21 @@ export const mockClient: CpiApiClient = {
       forceReset: (_email: string, _newPassword: string, _forceChangeOnLogin: boolean) =>
         delay({ success: false, message: 'Not available in mock mode' }),
     },
+    // Dashboard isn't exercised offline; mocks return plausible data so the UI renders.
+    dashboard: {
+      getHealth: () => delay({
+        services: [
+          { name: 'API', status: 'healthy' as const, response_time_ms: 0, details: null },
+          { name: 'Database', status: 'healthy' as const, response_time_ms: 2, details: null },
+          { name: 'Redis', status: 'healthy' as const, response_time_ms: 1, details: null },
+          { name: 'RabbitMQ', status: 'healthy' as const, response_time_ms: 3, details: null },
+          { name: 'Superset', status: 'healthy' as const, response_time_ms: 15, details: null },
+          { name: 'SFTP', status: 'healthy' as const, response_time_ms: 2, details: '2 active connection(s)' },
+        ],
+        checked_at: new Date().toISOString(),
+      }),
+      getTenantSummary: () => delay({ tenants: [] }),
+    },
   },
   stats: {
     getFreshnessMetrics: () => delay([

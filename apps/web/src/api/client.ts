@@ -13,6 +13,7 @@ import type {
   IngestionRun, IngestionRunDetail, IngestionRunListQuery,
   AdminUserListResponse, AdminResetTokenListResponse,
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
+  PlatformHealthResponse, TenantSummaryResponse,
 } from '../types';
 
 // ── Query params ────────────────────────────
@@ -95,6 +96,12 @@ export interface CpiApiClient {
       listResetCodes(limit?: number): Promise<AdminResetTokenListResponse>;
       generateCode(email: string): Promise<AdminGenerateResetCodeResponse>;
       forceReset(email: string, newPassword: string, forceChangeOnLogin: boolean): Promise<AdminForceResetResponse>;
+    };
+
+    // ── Admin Dashboard (Home page) ──
+    dashboard: {
+      getHealth(): Promise<PlatformHealthResponse>;
+      getTenantSummary(): Promise<TenantSummaryResponse>;
     };
   };
   // Stats

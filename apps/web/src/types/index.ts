@@ -651,3 +651,43 @@ export interface ImportBatch {
   };
   created_at: string;
 }
+
+// ──────── Admin Dashboard (Home page) ────────
+export type ServiceHealthStatus = 'healthy' | 'unhealthy' | 'unknown';
+
+export interface ServiceHealthItem {
+  name: string;
+  status: ServiceHealthStatus;
+  response_time_ms: number | null;
+  details: string | null;
+}
+
+export interface PlatformHealthResponse {
+  services: ServiceHealthItem[];
+  checked_at: string;
+}
+
+export type TenantFreshnessStatus = 'fresh' | 'stale' | 'critical' | 'no_data';
+
+export interface TenantDataSummary {
+  tenant_id: string;
+  tenant_name: string;
+  tenant_type: 'airline' | 'cruise';
+  airline_code: string;
+  sftp_connected: boolean;
+  sftp_last_pull: string | null;
+  sftp_last_pull_status: string | null;
+  latest_data_date: string | null;
+  last_capture_at: string | null;
+  freshness_status: TenantFreshnessStatus;
+  total_records: number;
+  next_scheduled_run: string | null;
+  schedule_enabled: boolean;
+  last_run_status: string | null;
+  last_run_id: string | null;
+  last_run_at: string | null;
+}
+
+export interface TenantSummaryResponse {
+  tenants: TenantDataSummary[];
+}

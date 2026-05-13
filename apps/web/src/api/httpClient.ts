@@ -14,6 +14,7 @@ import type {
   IngestionRun, IngestionRunDetail, IngestionRunListQuery,
   AdminUserListResponse, AdminResetTokenListResponse,
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
+  PlatformHealthResponse, TenantSummaryResponse,
   IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionAuditLog, IngestionPreview,
 } from '../types';
 
@@ -378,6 +379,10 @@ export const httpClient: CpiApiClient = {
           new_password: newPassword,
           force_change_on_login: forceChangeOnLogin,
         }),
+    },
+    dashboard: {
+      getHealth: () => get<PlatformHealthResponse>('/api/v1/admin/dashboard/health'),
+      getTenantSummary: () => get<TenantSummaryResponse>('/api/v1/admin/dashboard/tenant-summary'),
     },
   },
   stats: {

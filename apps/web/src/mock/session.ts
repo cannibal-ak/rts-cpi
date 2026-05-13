@@ -9,7 +9,7 @@ interface HomeIngestionJob {
 
 export const mockSession: TenantSession = {
   tenant_id: import.meta.env.VITE_TENANT_ID || 'a0000000-0000-0000-0000-000000000001',
-  tenant_name: 'SkyWave Airlines Group',
+  tenant_name: 'Revenue Technology Services',
   enabled_modules: ['airline_jy', 'airline_pw', 'cfl_fjl'],
   enabled_capabilities: ['alerts', 'exports', 'saved_views', 'contracts'],
   user: {
@@ -25,7 +25,7 @@ export const mockRolePresets: Record<string, TenantSession> = {
   airline_jy: {
     ...mockSession,
     tenant_id: 'a0000000-0000-0000-0000-000000000001',
-    tenant_name: 'Acme Airways - JY',
+    tenant_name: 'interCaribbean Airways',
     enabled_modules: ['airline_jy'],
     user: { id: 'user-jy', name: 'Airline_JY', email: 'jy@airline.com', roles: ['TENANT_ADMIN'] },
   },
