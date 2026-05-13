@@ -19,10 +19,6 @@ import {
   useTheme,
 } from '@mui/material';
 import {
-  CloudUpload as CloudUploadIcon,
-  Storage as StorageIcon,
-  BarChart as BarChartIcon,
-  People as PeopleIcon,
   CheckCircle as CheckCircleIcon,
   Cancel as CancelIcon,
   FiberManualRecord as DotIcon,
@@ -285,38 +281,6 @@ function TenantCard({
   );
 }
 
-function QuickActions() {
-  const navigate = useNavigate();
-  const actions = [
-    { label: 'Upload Files', icon: <CloudUploadIcon />, to: '/ingestion/upload' },
-    { label: 'SFTP Connections', icon: <StorageIcon />, to: '/admin/sftp-connections' },
-    { label: 'Dashboards', icon: <BarChartIcon />, to: '/dashboards' },
-    { label: 'Password Management', icon: <PeopleIcon />, to: '/admin/password-management' },
-  ];
-  return (
-    <Paper variant="outlined" sx={{ p: 2 }}>
-      <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1.5 }}>
-        Quick Actions
-      </Typography>
-      <Grid container spacing={2}>
-        {actions.map((a) => (
-          <Grid item xs={12} sm={6} md={3} key={a.label}>
-            <Button
-              variant="outlined"
-              fullWidth
-              startIcon={a.icon}
-              onClick={() => navigate(a.to)}
-              sx={{ justifyContent: 'flex-start', textTransform: 'none', py: 1.25 }}
-            >
-              {a.label}
-            </Button>
-          </Grid>
-        ))}
-      </Grid>
-    </Paper>
-  );
-}
-
 // ── Main page ─────────────────────────────────────────────
 export default function HomePage() {
   const theme = useTheme();
@@ -377,7 +341,7 @@ export default function HomePage() {
       <HealthStrip health={health} loading={loading} lastCheckedAt={lastCheckedAt} />
 
       {/* Row 2 — Enhanced Tenant Cards */}
-      <Box sx={{ mb: 3 }}>
+      <Box>
         {loading && !summary ? (
           <Box sx={{ display: 'flex', alignItems: 'center', minHeight: 120, justifyContent: 'center' }}>
             <CircularProgress size={28} />
@@ -396,9 +360,6 @@ export default function HomePage() {
           </Grid>
         )}
       </Box>
-
-      {/* Row 3 — Quick Actions */}
-      <QuickActions />
     </Box>
   );
 }
