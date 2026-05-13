@@ -74,4 +74,12 @@ export const navigationItems: NavItem[] = [
     requireSuperAdmin: true,
     category: 'Admin',
   },
+  {
+    label: 'Password Management',
+    path: '/admin/password-management',
+    icon: 'VpnKey',
+    requiredRoles: ['TENANT_ADMIN'],
+    requireSuperAdmin: true,
+    category: 'Admin',
+  },
 ];

@@ -387,3 +387,48 @@ export interface IngestionRunListQuery {
   started_after?: string;
   started_before?: string;
 }
+
+// ──────── Admin Password Management ────────
+export interface AdminUserListItem {
+  id: string;
+  email: string;
+  tenant_name: string;
+  role: string;
+  is_active: boolean;
+  is_locked: boolean;
+  force_password_change: boolean;
+  last_login: string | null;
+  created_at: string;
+}
+
+export interface AdminUserListResponse {
+  users: AdminUserListItem[];
+  total: number;
+}
+
+export interface AdminResetTokenItem {
+  id: string;
+  email: string;
+  code: string;
+  status: 'pending' | 'used' | 'expired';
+  created_at: string;
+  expires_at: string;
+  attempts: number;
+}
+
+export interface AdminResetTokenListResponse {
+  tokens: AdminResetTokenItem[];
+  total: number;
+}
+
+export interface AdminGenerateResetCodeResponse {
+  success: boolean;
+  message: string;
+  code: string;
+  expires_at: string;
+}
+
+export interface AdminForceResetResponse {
+  success: boolean;
+  message: string;
+}

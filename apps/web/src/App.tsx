@@ -14,6 +14,7 @@ import CflCpiPage from './pages/cfl/CflCpiPage';
 import SftpConnectionsPage from './pages/admin/SftpConnectionsPage';
 import IngestionSchedulesPage from './pages/admin/IngestionSchedulesPage';
 import IngestionRunsPage from './pages/admin/IngestionRunsPage';
+import PasswordManagementPage from './pages/PasswordManagementPage';
 
 import SupersetPage from './pages/superset/SupersetPage';
 import DashboardViewerPage from './pages/superset/DashboardViewerPage';
@@ -105,6 +106,11 @@ export default function App() {
                 <Route path="/admin/ingestion-runs" element={
                   <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
                     <IngestionRunsPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/admin/password-management" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <PasswordManagementPage />
                   </ProtectedRoute>
                 } />
 

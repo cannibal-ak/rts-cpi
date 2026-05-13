@@ -12,6 +12,8 @@ import type {
   IngestionSchedule, IngestionScheduleCreate, IngestionScheduleUpdate,
   IngestionScheduleListQuery, RunNowResult,
   IngestionRun, IngestionRunDetail, IngestionRunListQuery,
+  AdminUserListResponse, AdminResetTokenListResponse,
+  AdminGenerateResetCodeResponse, AdminForceResetResponse,
 } from '../types';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -344,6 +346,19 @@ export const httpClient: CpiApiClient = {
       },
       get: (id: string) =>
         get<IngestionRunDetail>(`/api/v1/admin/ingestion-runs/${id}`),
+    },
+    passwordManagement: {
+      listUsers: () => get<AdminUserListResponse>('/api/v1/admin/password-management/users'),
+      listResetCodes: (limit?: number) =>
+        get<AdminResetTokenListResponse>('/api/v1/admin/password-management/reset-codes', limit ? { limit } : undefined),
+      generateCode: (email: string) =>
+        post<AdminGenerateResetCodeResponse>('/api/v1/admin/password-management/generate-code', { email }),
+      forceReset: (email: string, newPassword: string, forceChangeOnLogin: boolean) =>
+        post<AdminForceResetResponse>('/api/v1/admin/password-management/force-reset', {
+          email,
+          new_password: newPassword,
+          force_change_on_login: forceChangeOnLogin,
+        }),
     },
   },
   stats: {

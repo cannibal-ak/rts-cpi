@@ -17,6 +17,7 @@ from app.routers import (
     admin_ingestion_runs,
     admin_ingestion_schedules,
     admin_sftp_connections,
+    admin_password_management,
 )
 from app.services import redbeat_sync
 
@@ -83,6 +84,11 @@ app.include_router(superset.router, dependencies=_protected)
 app.include_router(admin_sftp_connections.router, dependencies=_protected)
 app.include_router(admin_ingestion_schedules.router, dependencies=_protected)
 app.include_router(admin_ingestion_runs.router, dependencies=_protected)
+
+# Admin Password Management — list users, reset code queue, generate code,
+# force reset. Router-level RequirePlatformAdmin + the _protected
+# password-change gate mirror the other admin routers above.
+app.include_router(admin_password_management.router, dependencies=_protected)
 
 @app.get("/")
 def root():

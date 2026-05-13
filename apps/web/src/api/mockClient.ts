@@ -331,6 +331,15 @@ export const mockClient: CpiApiClient = {
         return delay({ ...row, ingested_files: files });
       },
     },
+    // Password management isn't exercised offline; stubs keep the interface satisfied.
+    passwordManagement: {
+      listUsers: () => delay({ users: [], total: 0 }),
+      listResetCodes: () => delay({ tokens: [], total: 0 }),
+      generateCode: (_email: string) =>
+        delay({ success: false, message: 'Not available in mock mode', code: '000000', expires_at: new Date().toISOString() }),
+      forceReset: (_email: string, _newPassword: string, _forceChangeOnLogin: boolean) =>
+        delay({ success: false, message: 'Not available in mock mode' }),
+    },
   },
   stats: {
     getFreshnessMetrics: () => delay([

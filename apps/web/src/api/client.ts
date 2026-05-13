@@ -11,6 +11,8 @@ import type {
   IngestionSchedule, IngestionScheduleCreate, IngestionScheduleUpdate,
   IngestionScheduleListQuery, RunNowResult,
   IngestionRun, IngestionRunDetail, IngestionRunListQuery,
+  AdminUserListResponse, AdminResetTokenListResponse,
+  AdminGenerateResetCodeResponse, AdminForceResetResponse,
 } from '../types';
 
 // ── Query params ────────────────────────────
@@ -77,6 +79,14 @@ export interface CpiApiClient {
     ingestionRuns: {
       list(query?: IngestionRunListQuery): Promise<Paginated<IngestionRun>>;
       get(id: string): Promise<IngestionRunDetail>;
+    };
+
+    // ── Password Management ──
+    passwordManagement: {
+      listUsers(): Promise<AdminUserListResponse>;
+      listResetCodes(limit?: number): Promise<AdminResetTokenListResponse>;
+      generateCode(email: string): Promise<AdminGenerateResetCodeResponse>;
+      forceReset(email: string, newPassword: string, forceChangeOnLogin: boolean): Promise<AdminForceResetResponse>;
     };
   };
   // Stats
