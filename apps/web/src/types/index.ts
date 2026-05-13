@@ -120,9 +120,18 @@ export interface CflSnapshot {
   dest: string;
   out_dep_date: string;
   out_dep_time: string;
+  // Outbound Arrival (migration 024)
+  out_arr_date: string | null;
+  out_arr_time: string | null;
   prod_family: string;
   out_equip_name: string;
   out_cab_type: string;
+  // Outbound Descriptions & Seats (migration 024)
+  out_cabin_desc: string | null;
+  out_seat_type: string | null;
+  out_num_cabs: number | null;
+  out_seat_fare: number | null;
+  out_num_seats: number | null;
   total_fare: number;
   out_per_pax_fare: number;
   out_veh_fare: number;
@@ -132,6 +141,36 @@ export interface CflSnapshot {
   veh_size: string;
   curr_code: string;
   out_avail: string;
+  // Return Journey — Schedule & Product (migration 024)
+  ret_dep_date: string | null;
+  ret_dep_time: string | null;
+  ret_arr_date: string | null;
+  ret_arr_time: string | null;
+  ret_equip_name: string | null;
+  ret_cab_type: string | null;
+  ret_cab_desc: string | null;
+  ret_seat_type: string | null;
+  ret_avail: string | null;
+  // Return Journey — Fares (migration 024)
+  ret_per_pax_fare: number | null;
+  ret_num_pax: number | null;
+  ret_veh_fare: number | null;
+  ret_cab_fare: number | null;
+  ret_num_cabs: number | null;
+  ret_seat_fare: number | null;
+  ret_num_seats: number | null;
+  ret_taxes: number | null;
+  // Total/Combined Fares (migration 024)
+  tot_per_pax_fare: number | null;
+  tot_num_pax: number | null;
+  tot_veh_fare: number | null;
+  tot_cab_fare: number | null;
+  tot_num_cabs: number | null;
+  tot_seat_fare: number | null;
+  tot_num_seats: number | null;
+  tot_taxes: number | null;
+  // Duration (migration 024)
+  duration: number | null;
 }
 
 // ──────── Alerts ────────

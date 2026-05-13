@@ -170,6 +170,7 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
                 <Table size="small" stickyHeader aria-label="CFL CPI snapshots">
                   <TableHead>
                     <TableRow>
+                      {/* ── Existing outbound summary ── */}
                       <TableCell>Route</TableCell>
                       <TableCell>Trip</TableCell>
                       <TableCell>Operator</TableCell>
@@ -182,6 +183,45 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
                       <TableCell>Vehicle</TableCell>
                       <TableCell>Avail</TableCell>
                       <TableCell>Dep Date</TableCell>
+                      {/* ── Outbound Arrival (024) ── */}
+                      <TableCell>Out Arr Date</TableCell>
+                      <TableCell>Out Arr Time</TableCell>
+                      {/* ── Outbound Descriptions & Seats (024) ── */}
+                      <TableCell>Out Cabin Desc</TableCell>
+                      <TableCell>Out Seat Type</TableCell>
+                      <TableCell align="right">Out #Cabins</TableCell>
+                      <TableCell align="right">Out Seat Charge</TableCell>
+                      <TableCell align="right">Out #Seats</TableCell>
+                      {/* ── Return Journey — Schedule & Product (024) ── */}
+                      <TableCell>Return Dep Date</TableCell>
+                      <TableCell>Return Dep Time</TableCell>
+                      <TableCell>Return Arr Date</TableCell>
+                      <TableCell>Return Arr Time</TableCell>
+                      <TableCell>Ship Name (R)</TableCell>
+                      <TableCell>Return Cabin Type</TableCell>
+                      <TableCell>Return Cabin Desc</TableCell>
+                      <TableCell>Return Seat Type</TableCell>
+                      <TableCell>Return Availability</TableCell>
+                      {/* ── Return Journey — Fares (024) ── */}
+                      <TableCell align="right">Return Per Pax</TableCell>
+                      <TableCell align="right">Return #Pax</TableCell>
+                      <TableCell align="right">Return Vehicle</TableCell>
+                      <TableCell align="right">Return Cabin</TableCell>
+                      <TableCell align="right">Return #Cabins</TableCell>
+                      <TableCell align="right">Return Seat</TableCell>
+                      <TableCell align="right">Return #Seats</TableCell>
+                      <TableCell align="right">Return Taxes</TableCell>
+                      {/* ── Total/Combined Fares (024) ── */}
+                      <TableCell align="right">Total Per Pax</TableCell>
+                      <TableCell align="right">Total #Pax</TableCell>
+                      <TableCell align="right">Total Vehicle</TableCell>
+                      <TableCell align="right">Total Cabin</TableCell>
+                      <TableCell align="right">Total #Cabins</TableCell>
+                      <TableCell align="right">Total Seat</TableCell>
+                      <TableCell align="right">Total #Seats</TableCell>
+                      <TableCell align="right">Total Taxes</TableCell>
+                      {/* ── Duration (024) ── */}
+                      <TableCell align="right">Duration (Days)</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -202,6 +242,49 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
                             color={row.out_avail === 'Available' ? 'success' : row.out_avail === 'Limited' ? 'warning' : 'error'} variant="outlined" />
                         </TableCell>
                         <TableCell><Typography variant="caption">{row.out_dep_date}</Typography></TableCell>
+                        {/* ── Outbound Arrival (024) ── */}
+                        <TableCell><Typography variant="caption">{row.out_arr_date ?? '—'}</Typography></TableCell>
+                        <TableCell><Typography variant="caption">{row.out_arr_time ?? '—'}</Typography></TableCell>
+                        {/* ── Outbound Descriptions & Seats (024) ── */}
+                        <TableCell><Tooltip title={row.out_cabin_desc ?? ''}><Typography variant="caption" noWrap sx={{ maxWidth: 140, display: 'block' }}>{row.out_cabin_desc ?? '—'}</Typography></Tooltip></TableCell>
+                        <TableCell><Typography variant="caption">{row.out_seat_type ?? '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.out_num_cabs ?? '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.out_seat_fare != null ? formatCurrency(row.out_seat_fare) : '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.out_num_seats ?? '—'}</Typography></TableCell>
+                        {/* ── Return Journey — Schedule & Product (024) ── */}
+                        <TableCell><Typography variant="caption">{row.ret_dep_date ?? '—'}</Typography></TableCell>
+                        <TableCell><Typography variant="caption">{row.ret_dep_time ?? '—'}</Typography></TableCell>
+                        <TableCell><Typography variant="caption">{row.ret_arr_date ?? '—'}</Typography></TableCell>
+                        <TableCell><Typography variant="caption">{row.ret_arr_time ?? '—'}</Typography></TableCell>
+                        <TableCell><Tooltip title={row.ret_equip_name ?? ''}><Typography variant="caption" noWrap sx={{ maxWidth: 100, display: 'block' }}>{row.ret_equip_name ?? '—'}</Typography></Tooltip></TableCell>
+                        <TableCell><Typography variant="caption">{row.ret_cab_type ?? '—'}</Typography></TableCell>
+                        <TableCell><Tooltip title={row.ret_cab_desc ?? ''}><Typography variant="caption" noWrap sx={{ maxWidth: 140, display: 'block' }}>{row.ret_cab_desc ?? '—'}</Typography></Tooltip></TableCell>
+                        <TableCell><Typography variant="caption">{row.ret_seat_type ?? '—'}</Typography></TableCell>
+                        <TableCell>
+                          {row.ret_avail
+                            ? <Chip label={row.ret_avail} size="small" color={row.ret_avail === 'Available' ? 'success' : row.ret_avail === 'Limited' ? 'warning' : 'error'} variant="outlined" />
+                            : <Typography variant="caption">—</Typography>}
+                        </TableCell>
+                        {/* ── Return Journey — Fares (024) ── */}
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.ret_per_pax_fare != null ? formatCurrency(row.ret_per_pax_fare) : '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.ret_num_pax ?? '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.ret_veh_fare != null ? formatCurrency(row.ret_veh_fare) : '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.ret_cab_fare != null ? formatCurrency(row.ret_cab_fare) : '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.ret_num_cabs ?? '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.ret_seat_fare != null ? formatCurrency(row.ret_seat_fare) : '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.ret_num_seats ?? '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.ret_taxes != null ? formatCurrency(row.ret_taxes) : '—'}</Typography></TableCell>
+                        {/* ── Total/Combined Fares (024) ── */}
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.tot_per_pax_fare != null ? formatCurrency(row.tot_per_pax_fare) : '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.tot_num_pax ?? '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.tot_veh_fare != null ? formatCurrency(row.tot_veh_fare) : '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.tot_cab_fare != null ? formatCurrency(row.tot_cab_fare) : '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.tot_num_cabs ?? '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.tot_seat_fare != null ? formatCurrency(row.tot_seat_fare) : '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.tot_num_seats ?? '—'}</Typography></TableCell>
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.tot_taxes != null ? formatCurrency(row.tot_taxes) : '—'}</Typography></TableCell>
+                        {/* ── Duration (024) ── */}
+                        <TableCell align="right"><Typography variant="body2" fontFamily="monospace">{row.duration ?? '—'}</Typography></TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

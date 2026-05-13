@@ -73,6 +73,25 @@ def safe_float(value: object) -> float:
         return 0.0
 
 
+def safe_float_nullable(value: object) -> float | None:
+    """Like ``safe_float``, but returns ``None`` for missing/blank/unparseable input.
+
+    Use this for nullable numeric DB columns where 0.0 would be a valid
+    semantic value (e.g. a missing return-leg fare should be NULL, not
+    0.0 — which would distort averages and filtering). Also treats the
+    literal strings "NA", "N/A", and "NULL" (case-insensitive) as None.
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s or s.upper() in {"NA", "N/A", "NULL"}:
+        return None
+    try:
+        return float(s.replace(",", ""))
+    except (ValueError, TypeError):
+        return None
+
+
 def safe_int(value: object) -> int:
     if not value:
         return 0
@@ -80,6 +99,24 @@ def safe_int(value: object) -> int:
         return int(str(value).strip() or 0)
     except (ValueError, TypeError):
         return 0
+
+
+def safe_int_nullable(value: object) -> int | None:
+    """Like ``safe_int``, but returns ``None`` for missing/blank/unparseable input.
+
+    Use this for nullable integer DB columns where 0 would be a valid
+    semantic value (e.g. ``ref_stops = 0`` is "nonstop"; we don't want
+    a missing value to silently look like a nonstop flight).
+    """
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s or s.upper() == "NULL":
+        return None
+    try:
+        return int(s)
+    except (ValueError, TypeError):
+        return None
 
 
 def read_data_file(file_path: str) -> Iterator[dict]:
