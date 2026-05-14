@@ -264,21 +264,80 @@ export default function DashboardViewerPage() {
         </Tooltip>
       </Box>
 
-      {/* ── Slice & dice row: selector panel + dashboard/chart pane ────── */}
+      {/* ── Dashboard pane — kept mounted across mode toggles so the SDK
+          iframe (and its guest-token / fetch lifecycle) survives a switch
+          to Chart view and back without re-init.  In Chart view it is hidden
+          via display:none, NOT unmounted. ──────────────────────────────── */}
       <Box sx={{
+        display: viewMode === 'dashboard' ? 'flex' : 'none',
+        flexDirection: 'column',
         flexGrow: 1,
-        display: 'flex',
-        flexDirection: isNarrow ? 'column' : 'row',
-        minHeight: 0,        // allow inner flex children to shrink
+        minHeight: 0,
       }}>
+        {/* Dashboard container */}
+        <Paper
+          variant="outlined"
+          sx={{
+            flexGrow: 1,
+            overflow: 'hidden',
+            position: 'relative',
+            bgcolor: 'background.paper',
+            // Bleed past <main>'s p:3 horizontal padding so the embedded dashboard
+            // gets the full available width — prevents right-edge clipping of the
+            // last X-axis tick / legend items inside the iframe.
+            mx: -3,
+            borderRadius: 0,
+            borderLeft: 'none',
+            borderRight: 'none',
+            // The SDK injects an <iframe> inside mountRef
+            '& iframe': { width: '100%', height: '100%', border: 'none' },
+          }}
+        >
+          {/* Loading overlay */}
+          <Fade in={isLoading} unmountOnExit>
+            <Box sx={{
+              position: 'absolute', inset: 0, display: 'flex',
+              flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              bgcolor: 'background.paper', zIndex: 10,
+            }}>
+              <LoadingIcon sx={{ fontSize: 56, color: 'primary.main', mb: 2, animation: `${pulse} 2s infinite ease-in-out` }} />
+              <Typography variant="h6" color="text.secondary">{loadingLabel}</Typography>
+            </Box>
+          </Fade>
+
+          {/* Error state */}
+          {error && (
+            <Box sx={{ p: 4, textAlign: 'center' }}>
+              <Typography color="error" variant="h6" gutterBottom>{error}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Check that Superset is running and the dashboard exists.
+              </Typography>
+            </Box>
+          )}
+
+          {/* SDK mount point — must stay in the DOM even while loading */}
+          <Box
+            ref={mountRef}
+            sx={{
+              width: '100%',
+              height: '100%',
+              visibility: isLoading ? 'hidden' : 'visible',
+              '& > iframe': { height: 'calc(100vh - 140px) !important' },
+            }}
+          />
+        </Paper>
+      </Box>
+
+      {/* ── Chart view pane — selector sidebar + isolated chart iframe.
+          Conditionally rendered so the sidebar (and the flex row) do not
+          exist in the DOM during Dashboard mode — the dashboard view is
+          visually identical to the pre-feature state. ─────────────────── */}
+      {viewMode === 'chart' && (
         <Box sx={{
-          // Keep selector above the dashboard Paper's negative-margin bleed
-          // so the iframe never visually crosses the sidebar's right edge.
-          position: 'relative',
-          zIndex: 1,
-          ...(isNarrow
-            ? { width: '100%' }
-            : { display: 'flex', flexShrink: 0 }),
+          flexGrow: 1,
+          display: 'flex',
+          flexDirection: isNarrow ? 'column' : 'row',
+          minHeight: 0,
         }}>
           <ChartSelectorPanel
             charts={analyticsCharts}
@@ -289,86 +348,22 @@ export default function DashboardViewerPage() {
             onRetry={refetchCharts}
             horizontal={isNarrow}
           />
-        </Box>
 
-        {/* Right pane — dashboard (existing Paper, untouched) or single chart */}
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
-          {/* Dashboard pane: kept mounted across mode toggles so the SDK
-              iframe survives the round-trip without re-fetching guest tokens. */}
-          <Box sx={{
-            display: viewMode === 'dashboard' ? 'flex' : 'none',
-            flexDirection: 'column',
-            flex: 1,
-            minHeight: 0,
-          }}>
-            {/* Dashboard container */}
-            <Paper
-              variant="outlined"
-              sx={{
-                flexGrow: 1,
-                overflow: 'hidden',
-                position: 'relative',
-                bgcolor: 'background.paper',
-                // Bleed past <main>'s p:3 horizontal padding so the embedded dashboard
-                // gets the full available width — prevents right-edge clipping of the
-                // last X-axis tick / legend items inside the iframe.
-                mx: -3,
-                borderRadius: 0,
-                borderLeft: 'none',
-                borderRight: 'none',
-                // The SDK injects an <iframe> inside mountRef
-                '& iframe': { width: '100%', height: '100%', border: 'none' },
-              }}
-            >
-              {/* Loading overlay */}
-              <Fade in={isLoading} unmountOnExit>
-                <Box sx={{
-                  position: 'absolute', inset: 0, display: 'flex',
-                  flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                  bgcolor: 'background.paper', zIndex: 10,
-                }}>
-                  <LoadingIcon sx={{ fontSize: 56, color: 'primary.main', mb: 2, animation: `${pulse} 2s infinite ease-in-out` }} />
-                  <Typography variant="h6" color="text.secondary">{loadingLabel}</Typography>
-                </Box>
-              </Fade>
-
-              {/* Error state */}
-              {error && (
-                <Box sx={{ p: 4, textAlign: 'center' }}>
-                  <Typography color="error" variant="h6" gutterBottom>{error}</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Check that Superset is running and the dashboard exists.
-                  </Typography>
-                </Box>
-              )}
-
-              {/* SDK mount point — must stay in the DOM even while loading */}
-              <Box
-                ref={mountRef}
-                sx={{
-                  width: '100%',
-                  height: '100%',
-                  visibility: isLoading ? 'hidden' : 'visible',
-                  '& > iframe': { height: 'calc(100vh - 140px) !important' },
-                }}
+          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            {selectedSliceId !== null && analyticsCharts.length > 0 && (
+              <SingleChartViewer
+                sliceId={selectedSliceId}
+                sliceName={analyticsCharts[Math.max(0, selectedIndex)]?.slice_name ?? `Chart ${selectedSliceId}`}
+                supersetBaseUrl={SUPERSET_URL}
+                currentIndex={Math.max(0, selectedIndex)}
+                total={analyticsCharts.length}
+                onPrev={handlePrev}
+                onNext={handleNext}
               />
-            </Paper>
+            )}
           </Box>
-
-          {/* Chart pane */}
-          {viewMode === 'chart' && selectedSliceId !== null && analyticsCharts.length > 0 && (
-            <SingleChartViewer
-              sliceId={selectedSliceId}
-              sliceName={analyticsCharts[Math.max(0, selectedIndex)]?.slice_name ?? `Chart ${selectedSliceId}`}
-              supersetBaseUrl={SUPERSET_URL}
-              currentIndex={Math.max(0, selectedIndex)}
-              total={analyticsCharts.length}
-              onPrev={handlePrev}
-              onNext={handleNext}
-            />
-          )}
         </Box>
-      </Box>
+      )}
     </Box>
   );
 }
