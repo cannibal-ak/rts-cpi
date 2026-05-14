@@ -358,7 +358,7 @@ export default function AirlineCpiVelocityTab({ tenantCode, filters, onFiltersCh
         {/* File Date — server-side */}
         <CompactSingleSelect
           icon={<CalendarToday sx={{ fontSize: 12, color: 'text.secondary' }} />}
-          label="File"
+          label="Date"
           value={filters.file_date || ''}
           options={fileDateOptions.map(d => ({ value: d, label: d }))}
           onChange={handleFileDateChange}

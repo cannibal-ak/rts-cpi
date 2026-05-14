@@ -3,6 +3,7 @@ import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   CircularProgress, Button, Collapse, Chip, IconButton, Autocomplete, TextField,
   FormControl, Select, MenuItem, Stack, Divider, Tooltip, Breadcrumbs, Link,
+  Tabs, Tab,
 } from '@mui/material';
 import {
   DirectionsBoat, KeyboardArrowDown, KeyboardArrowUp, RestartAlt, CalendarToday,
@@ -552,6 +553,7 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* ── Header bar (breadcrumb + export + freshness) ─────────────── */}
+      {/* ── Row 1 — Header bar (breadcrumb + freshness dot) ─────────── */}
       <Box sx={{
         display: 'flex',
         alignItems: 'center',
@@ -560,36 +562,70 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
         height: 32,
         minHeight: 32,
         px: 2,
-        borderBottom: 1,
-        borderColor: 'divider',
         flexShrink: 0,
       }}>
         <Breadcrumbs separator={<NavigateNext sx={{ fontSize: 14 }} />}>
           <Link underline="hover" color="inherit" href="/" sx={{ fontSize: 12 }}>Home</Link>
           <Typography color="text.primary" sx={{ fontSize: 12, fontWeight: 500 }}>{pageTitle}</Typography>
         </Breadcrumbs>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Tooltip title={`Download filtered rows as CSV (${EXPORT_COLUMNS.length} dictionary-named columns)`}>
-            <span>
-              <Button
-                size="small"
-                startIcon={<FileDownload sx={{ fontSize: 14 }} />}
-                onClick={handleExportCsv}
-                disabled={filteredData.length === 0}
-                sx={{
-                  fontSize: 11.5,
-                  textTransform: 'none',
-                  minHeight: 24,
-                  py: 0.25,
-                  px: 1,
-                }}
-              >
-                Export
-              </Button>
-            </span>
-          </Tooltip>
-          {freshness && <FreshnessBadge data={freshness} />}
-        </Box>
+        {freshness && <FreshnessBadge data={freshness} />}
+      </Box>
+
+      {/* ── Row 2 — Tab label + Export (single thin toolbar) ──────────
+          FJL has no velocity data, so the "Pricing" tab is a single
+          non-clickable label rendered with the same MUI Tabs styling
+          as the JY/PW pages, for visual consistency. */}
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'space-between',
+        gap: 1,
+        borderBottom: 1,
+        borderColor: 'divider',
+        minHeight: 32,
+        height: 32,
+        px: 2,
+        flexShrink: 0,
+      }}>
+        <Tabs
+          value={0}
+          aria-label={`${tenantCode} data tabs`}
+          sx={{
+            minHeight: 32,
+            '& .MuiTabs-flexContainer': { gap: 0 },
+            '& .MuiTab-root': {
+              minHeight: 32,
+              py: 0.25,
+              px: 1.5,
+              fontSize: 12,
+              fontWeight: 500,
+              textTransform: 'none',
+            },
+            '& .MuiTabs-indicator': { height: 2 },
+          }}
+        >
+          <Tab label="Pricing" />
+        </Tabs>
+        <Tooltip title={`Download filtered rows as CSV (${EXPORT_COLUMNS.length} dictionary-named columns)`}>
+          <span>
+            <Button
+              size="small"
+              startIcon={<FileDownload sx={{ fontSize: 14 }} />}
+              onClick={handleExportCsv}
+              disabled={filteredData.length === 0}
+              sx={{
+                fontSize: 11.5,
+                textTransform: 'none',
+                minHeight: 26,
+                py: 0.25,
+                px: 1,
+                mb: 0.25,
+              }}
+            >
+              Export
+            </Button>
+          </span>
+        </Tooltip>
       </Box>
 
       {/* ── Inline filter strip ──────────────────────────────────────── */}
@@ -609,7 +645,7 @@ export default function CflCpiPage({ tenantCode }: CflCpiPageProps) {
         {/* File Date — server-side */}
         <CompactSingleSelect
           icon={<CalendarToday sx={{ fontSize: 12, color: 'text.secondary' }} />}
-          label="File"
+          label="Date"
           value={filters.file_date || ''}
           options={fileDateOptions.map(d => ({ value: d, label: d }))}
           onChange={handleFileDateChange}

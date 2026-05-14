@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Box, Paper, IconButton, Typography, Fade, Chip } from '@mui/material';
-import { ArrowBack, Flight, DirectionsBoat, CalendarMonth } from '@mui/icons-material';
+import { Box, Paper, IconButton, Typography, Fade, Chip, Tooltip } from '@mui/material';
+import { ArrowBack, Flight, DirectionsBoat, CalendarMonth, Refresh } from '@mui/icons-material';
 import { keyframes } from '@mui/system';
 import { api } from '../../api';
 import { useSession } from '../../context/SessionContext';
@@ -55,6 +55,7 @@ export default function DashboardViewerPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dataDate, setDataDate] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const meta = id ? DASHBOARD_META[id] : undefined;
 
@@ -136,7 +137,7 @@ export default function DashboardViewerPage() {
     embed();
 
     return () => { unmount?.(); };
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const LoadingIcon = meta?.isAirline ? Flight : DirectionsBoat;
   const loadingLabel = meta?.isAirline ? 'Loading Airline Analytics...' : 'Preparing Maritime Insights...';
@@ -152,9 +153,11 @@ export default function DashboardViewerPage() {
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header bar */}
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-        <IconButton onClick={() => navigate('/dashboards')} sx={{ mr: 1 }}>
-          <ArrowBack />
-        </IconButton>
+        <Tooltip title="Back to dashboards">
+          <IconButton onClick={() => navigate('/dashboards')} sx={{ mr: 1 }}>
+            <ArrowBack />
+          </IconButton>
+        </Tooltip>
         <Typography variant="h5" component="h1" fontWeight={600}>
           {meta?.title ?? 'Dashboard'}
         </Typography>
@@ -168,6 +171,18 @@ export default function DashboardViewerPage() {
             sx={{ ml: 2, fontWeight: 500 }}
           />
         )}
+        <Box sx={{ flexGrow: 1 }} />
+        <Tooltip title="Refresh dashboard">
+          <IconButton
+            size="small"
+            onClick={() => setRefreshKey(k => k + 1)}
+            disabled={isLoading}
+            aria-label="Refresh dashboard"
+            sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
+          >
+            <Refresh fontSize="small" />
+          </IconButton>
+        </Tooltip>
       </Box>
 
       {/* Dashboard container */}
