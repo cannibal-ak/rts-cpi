@@ -1,12 +1,21 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Box, Paper, IconButton, Typography, Fade, Chip } from '@mui/material';
-import { ArrowBack, Flight, DirectionsBoat, CalendarMonth } from '@mui/icons-material';
+import {
+  Box, Paper, IconButton, Typography, Fade, Chip, Tooltip,
+  ToggleButton, ToggleButtonGroup, useMediaQuery,
+} from '@mui/material';
+import {
+  ArrowBack, Flight, DirectionsBoat, CalendarMonth, Refresh,
+  Dashboard as DashboardIcon, BarChart as BarChartIcon,
+} from '@mui/icons-material';
 import { keyframes } from '@mui/system';
+import type { Theme } from '@mui/material/styles';
 import { api } from '../../api';
 import { useSession } from '../../context/SessionContext';
 import { canAccessDashboard } from './dashboardAccess';
-import { isSuperAdmin } from '../../utils/access';
+import { useDashboardCharts } from '../../hooks/useDashboardCharts';
+import ChartSelectorPanel from '../../components/dashboard/ChartSelectorPanel';
+import SingleChartViewer from '../../components/dashboard/SingleChartViewer';
 
 /**
  * Superset base URL — used by the Embedded SDK to construct the iframe src.
@@ -17,9 +26,9 @@ const SUPERSET_URL = 'http://192.168.101.10:8088';
 
 // Dashboard metadata (must match backend DASHBOARDS registry)
 const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline: boolean; freshnessDomain: string }> = {
-  '1': { title: 'Airline CPI JY Dashboard', tenant: 'JY', isAirline: true, freshnessDomain: 'Airline CPI \u2013 JY' },
-  '2': { title: 'Airline CPI PW Dashboard', tenant: 'PW', isAirline: true, freshnessDomain: 'Airline CPI \u2013 PW' },
-  '3': { title: 'Cruise/Ferry CPI Dashboard', tenant: 'FJL', isAirline: false, freshnessDomain: 'Cruise/Ferry CPI \u2013 FJL' },
+  '1': { title: 'JY Dashboard', tenant: 'JY', isAirline: true, freshnessDomain: 'Airline CPI \u2013 JY' },
+  '2': { title: 'PW Dashboard', tenant: 'PW', isAirline: true, freshnessDomain: 'Airline CPI \u2013 PW' },
+  '3': { title: 'FJL Dashboard', tenant: 'FJL', isAirline: false, freshnessDomain: 'Cruise/Ferry CPI \u2013 FJL' },
 };
 
 // Superset Embedded SDK type (UMD bundle loaded via CDN in index.html)
@@ -56,8 +65,59 @@ export default function DashboardViewerPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dataDate, setDataDate] = useState<string | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const meta = id ? DASHBOARD_META[id] : undefined;
+
+  // ── Slice & dice: chart selector + isolated chart view (additive) ──
+  // viewMode toggles the right pane between the embedded dashboard SDK iframe
+  // (existing) and a single-chart standalone iframe (new).  selectedSliceId
+  // tracks which analytics chart the user picked.
+  const [viewMode, setViewMode] = useState<'dashboard' | 'chart'>('dashboard');
+  const [selectedSliceId, setSelectedSliceId] = useState<number | null>(null);
+
+  const { analyticsCharts, loading: chartsLoading, error: chartsError, refetch: refetchCharts } =
+    useDashboardCharts(id);
+
+  // Narrow viewport → collapse selector into a horizontal chip rail
+  const isNarrow = useMediaQuery((t: Theme) => t.breakpoints.down('md'));
+
+  // Default selection: first analytics chart once they load
+  useEffect(() => {
+    if (selectedSliceId === null && analyticsCharts.length > 0) {
+      setSelectedSliceId(analyticsCharts[0].slice_id);
+    }
+  }, [analyticsCharts, selectedSliceId]);
+
+  // Reset selection when the user navigates to a different dashboard
+  useEffect(() => {
+    setSelectedSliceId(null);
+    setViewMode('dashboard');
+  }, [id]);
+
+  const selectedIndex = useMemo(
+    () => analyticsCharts.findIndex(c => c.slice_id === selectedSliceId),
+    [analyticsCharts, selectedSliceId],
+  );
+
+  const handleSelectChart = (sliceId: number) => {
+    setSelectedSliceId(sliceId);
+    setViewMode('chart');     // clicking a chart name auto-switches to chart view
+  };
+
+  const handlePrev = () => {
+    if (analyticsCharts.length === 0) return;
+    const idx = selectedIndex < 0 ? 0 : selectedIndex;
+    const next = (idx - 1 + analyticsCharts.length) % analyticsCharts.length;
+    setSelectedSliceId(analyticsCharts[next].slice_id);
+  };
+
+  const handleNext = () => {
+    if (analyticsCharts.length === 0) return;
+    const idx = selectedIndex < 0 ? 0 : selectedIndex;
+    const next = (idx + 1) % analyticsCharts.length;
+    setSelectedSliceId(analyticsCharts[next].slice_id);
+  };
 
   useEffect(() => {
     if (!id || !mountRef.current || !meta) return;
@@ -137,7 +197,7 @@ export default function DashboardViewerPage() {
     embed();
 
     return () => { unmount?.(); };
-  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const LoadingIcon = meta?.isAirline ? Flight : DirectionsBoat;
   const loadingLabel = meta?.isAirline ? 'Loading Airline Analytics...' : 'Preparing Maritime Insights...';
@@ -153,71 +213,162 @@ export default function DashboardViewerPage() {
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header bar */}
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-        {isSuperAdmin(session) && (
+        <Tooltip title="Back to dashboards">
           <IconButton onClick={() => navigate('/dashboards')} sx={{ mr: 1 }}>
             <ArrowBack />
           </IconButton>
-        )}
+        </Tooltip>
         <Typography variant="h5" component="h1" fontWeight={600}>
           {meta?.title ?? 'Dashboard'}
         </Typography>
         {formattedDate && (
           <Chip
             icon={<CalendarMonth sx={{ fontSize: 16 }} />}
-            label={`Data as of ${formattedDate}`}
+            label={`Latest data: ${formattedDate}`}
             size="small"
             variant="outlined"
             color="primary"
             sx={{ ml: 2, fontWeight: 500 }}
           />
         )}
+        <Box sx={{ flexGrow: 1 }} />
+
+        {/* View mode toggle (additive) */}
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          value={viewMode}
+          onChange={(_, v) => { if (v) setViewMode(v); }}
+          sx={{ mr: 1, '& .MuiToggleButton-root': { px: 1.5, py: 0.5, textTransform: 'none' } }}
+        >
+          <ToggleButton value="dashboard" aria-label="Full dashboard view">
+            <DashboardIcon fontSize="small" sx={{ mr: 0.75 }} />
+            Dashboard
+          </ToggleButton>
+          <ToggleButton value="chart" aria-label="Single chart view" disabled={analyticsCharts.length === 0}>
+            <BarChartIcon fontSize="small" sx={{ mr: 0.75 }} />
+            Chart view
+          </ToggleButton>
+        </ToggleButtonGroup>
+
+        <Tooltip title="Refresh dashboard">
+          <IconButton
+            size="small"
+            onClick={() => setRefreshKey(k => k + 1)}
+            disabled={isLoading}
+            aria-label="Refresh dashboard"
+            sx={{ border: '1px solid', borderColor: 'divider', borderRadius: 1 }}
+          >
+            <Refresh fontSize="small" />
+          </IconButton>
+        </Tooltip>
       </Box>
 
-      {/* Dashboard container */}
-      <Paper
-        variant="outlined"
-        sx={{
-          flexGrow: 1,
-          overflow: 'hidden',
+      {/* ── Slice & dice row: selector panel + dashboard/chart pane ────── */}
+      <Box sx={{
+        flexGrow: 1,
+        display: 'flex',
+        flexDirection: isNarrow ? 'column' : 'row',
+        minHeight: 0,        // allow inner flex children to shrink
+      }}>
+        <Box sx={{
+          // Keep selector above the dashboard Paper's negative-margin bleed
+          // so the iframe never visually crosses the sidebar's right edge.
           position: 'relative',
-          bgcolor: 'background.paper',
-          // The SDK injects an <iframe> inside mountRef
-          '& iframe': { width: '100%', height: '100%', border: 'none' },
-        }}
-      >
-        {/* Loading overlay */}
-        <Fade in={isLoading} unmountOnExit>
+          zIndex: 1,
+          ...(isNarrow
+            ? { width: '100%' }
+            : { display: 'flex', flexShrink: 0 }),
+        }}>
+          <ChartSelectorPanel
+            charts={analyticsCharts}
+            selectedSliceId={selectedSliceId}
+            onSelectChart={handleSelectChart}
+            loading={chartsLoading}
+            error={chartsError}
+            onRetry={refetchCharts}
+            horizontal={isNarrow}
+          />
+        </Box>
+
+        {/* Right pane — dashboard (existing Paper, untouched) or single chart */}
+        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, position: 'relative' }}>
+          {/* Dashboard pane: kept mounted across mode toggles so the SDK
+              iframe survives the round-trip without re-fetching guest tokens. */}
           <Box sx={{
-            position: 'absolute', inset: 0, display: 'flex',
-            flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            bgcolor: 'background.paper', zIndex: 10,
+            display: viewMode === 'dashboard' ? 'flex' : 'none',
+            flexDirection: 'column',
+            flex: 1,
+            minHeight: 0,
           }}>
-            <LoadingIcon sx={{ fontSize: 56, color: 'primary.main', mb: 2, animation: `${pulse} 2s infinite ease-in-out` }} />
-            <Typography variant="h6" color="text.secondary">{loadingLabel}</Typography>
-          </Box>
-        </Fade>
+            {/* Dashboard container */}
+            <Paper
+              variant="outlined"
+              sx={{
+                flexGrow: 1,
+                overflow: 'hidden',
+                position: 'relative',
+                bgcolor: 'background.paper',
+                // Bleed past <main>'s p:3 horizontal padding so the embedded dashboard
+                // gets the full available width — prevents right-edge clipping of the
+                // last X-axis tick / legend items inside the iframe.
+                mx: -3,
+                borderRadius: 0,
+                borderLeft: 'none',
+                borderRight: 'none',
+                // The SDK injects an <iframe> inside mountRef
+                '& iframe': { width: '100%', height: '100%', border: 'none' },
+              }}
+            >
+              {/* Loading overlay */}
+              <Fade in={isLoading} unmountOnExit>
+                <Box sx={{
+                  position: 'absolute', inset: 0, display: 'flex',
+                  flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  bgcolor: 'background.paper', zIndex: 10,
+                }}>
+                  <LoadingIcon sx={{ fontSize: 56, color: 'primary.main', mb: 2, animation: `${pulse} 2s infinite ease-in-out` }} />
+                  <Typography variant="h6" color="text.secondary">{loadingLabel}</Typography>
+                </Box>
+              </Fade>
 
-        {/* Error state */}
-        {error && (
-          <Box sx={{ p: 4, textAlign: 'center' }}>
-            <Typography color="error" variant="h6" gutterBottom>{error}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Check that Superset is running and the dashboard exists.
-            </Typography>
-          </Box>
-        )}
+              {/* Error state */}
+              {error && (
+                <Box sx={{ p: 4, textAlign: 'center' }}>
+                  <Typography color="error" variant="h6" gutterBottom>{error}</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Check that Superset is running and the dashboard exists.
+                  </Typography>
+                </Box>
+              )}
 
-        {/* SDK mount point — must stay in the DOM even while loading */}
-        <Box
-          ref={mountRef}
-          sx={{
-            width: '100%',
-            height: '100%',
-            visibility: isLoading ? 'hidden' : 'visible',
-            '& > iframe': { height: 'calc(100vh - 140px) !important' },
-          }}
-        />
-      </Paper>
+              {/* SDK mount point — must stay in the DOM even while loading */}
+              <Box
+                ref={mountRef}
+                sx={{
+                  width: '100%',
+                  height: '100%',
+                  visibility: isLoading ? 'hidden' : 'visible',
+                  '& > iframe': { height: 'calc(100vh - 140px) !important' },
+                }}
+              />
+            </Paper>
+          </Box>
+
+          {/* Chart pane */}
+          {viewMode === 'chart' && selectedSliceId !== null && analyticsCharts.length > 0 && (
+            <SingleChartViewer
+              sliceId={selectedSliceId}
+              sliceName={analyticsCharts[Math.max(0, selectedIndex)]?.slice_name ?? `Chart ${selectedSliceId}`}
+              supersetBaseUrl={SUPERSET_URL}
+              currentIndex={Math.max(0, selectedIndex)}
+              total={analyticsCharts.length}
+              onPrev={handlePrev}
+              onNext={handleNext}
+            />
+          )}
+        </Box>
+      </Box>
     </Box>
   );
 }

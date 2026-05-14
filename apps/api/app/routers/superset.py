@@ -247,3 +247,139 @@ async def fetch_guest_token(
         "embedded_uuid": dash["embedded_uuid"],      # for Superset Embedded SDK id
         "dashboard_title": dash["title"],
     }
+
+
+# ── Chart manifest endpoint (chart-selector panel + isolated chart view) ────
+
+def _walk_layout(layout: dict, node_id: str, out: list[int]) -> None:
+    """Depth-first walk of the dashboard layout to collect chart IDs in render order."""
+    node = layout.get(node_id) or {}
+    if node.get("type") == "CHART":
+        cid = (node.get("meta") or {}).get("chartId")
+        if cid is not None:
+            try:
+                out.append(int(cid))
+            except (TypeError, ValueError):
+                pass
+    for child_id in node.get("children", []) or []:
+        _walk_layout(layout, child_id, out)
+
+
+def _extract_chart_order(position_json_str: str | None) -> list[int]:
+    """Return slice_ids in dashboard-layout order (top-to-bottom, left-to-right).
+
+    position_json is a flat dict keyed by component id; ROOT contains a tree
+    of GRID -> ROW -> CHART nodes whose `children` arrays preserve order.
+    """
+    if not position_json_str:
+        return []
+    import json as _json
+    try:
+        layout = _json.loads(position_json_str)
+    except Exception:
+        return []
+    root_id = next(
+        (k for k, v in layout.items() if isinstance(v, dict) and v.get("type") == "ROOT"),
+        None,
+    )
+    if not root_id:
+        return []
+    out: list[int] = []
+    _walk_layout(layout, root_id, out)
+    return out
+
+
+def _is_kpi(viz_type: str | None) -> bool:
+    """KPI = big_number / big_number_total / big_number_with_trendline."""
+    return bool(viz_type and viz_type.startswith("big_number"))
+
+
+@router.get("/dashboards/{dashboard_id}/charts")
+async def list_dashboard_charts(
+    dashboard_id: str,
+    user_identity: str = Depends(get_user_identity),
+    user_roles: list[str] = Depends(get_user_roles),
+):
+    """Return the chart manifest (KPIs + analytics) for a Superset dashboard.
+
+    Used by the dashboard chart-selector panel and isolated chart view.
+
+    Implementation note: we authenticate to Superset via admin **session
+    cookies**, not the JWT bearer token.  The JWT login returns a Gamma-scoped
+    token (PUBLIC_ROLE_LIKE = Gamma) for which `/api/v1/dashboard/` returns
+    `count: 0`.  The existing `SupersetClient._login_session()` flow already
+    establishes an admin session — we reuse it here.
+    """
+    # 1. Lookup dashboard (reuses the existing registry)
+    dash = DASHBOARDS.get(dashboard_id)
+    if not dash:
+        raise HTTPException(404, detail={
+            "message": f"Unknown dashboard_id '{dashboard_id}'. Valid IDs: {list(DASHBOARDS.keys())}",
+        })
+
+    # 2. Access control — mirror the guest-token endpoint
+    is_admin = "TENANT_ADMIN" in user_roles
+    if not is_admin and user_identity != dash["tenant"]:
+        raise HTTPException(403, detail={
+            "message": f"Access denied: '{dash['title']}' is restricted to {dash['tenant']} users.",
+        })
+
+    superset_id = dash["superset_id"]
+
+    # 3. Fetch charts + dashboard detail via admin session cookies
+    try:
+        cookies = await superset_client._session_cookies_safe()
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            charts_resp = await c.get(
+                f"{superset_client.base_url}/api/v1/dashboard/{superset_id}/charts",
+                cookies=cookies,
+            )
+            if charts_resp.status_code == 401:
+                await superset_client._login_session()
+                cookies = superset_client._session_cookies  # type: ignore
+                charts_resp = await c.get(
+                    f"{superset_client.base_url}/api/v1/dashboard/{superset_id}/charts",
+                    cookies=cookies,
+                )
+            charts_resp.raise_for_status()
+            charts_data = charts_resp.json().get("result", []) or []
+
+            detail_resp = await c.get(
+                f"{superset_client.base_url}/api/v1/dashboard/{superset_id}",
+                cookies=cookies,
+            )
+            position_json = ""
+            if detail_resp.status_code == 200:
+                position_json = (detail_resp.json().get("result") or {}).get("position_json") or ""
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chart manifest fetch failed for dashboard {dashboard_id}: {e}")
+        raise HTTPException(502, detail={"message": f"Could not fetch chart list from Superset: {e}"})
+
+    # 4. Build chart records, sorted by layout position (fallback: slice_id asc)
+    order = _extract_chart_order(position_json)
+    order_index = {cid: idx for idx, cid in enumerate(order)}
+
+    items: list[dict] = []
+    for ch in charts_data:
+        slice_id = ch.get("id")
+        if slice_id is None:
+            continue
+        viz_type = (ch.get("form_data") or {}).get("viz_type")
+        items.append({
+            "slice_id": int(slice_id),
+            "slice_name": ch.get("slice_name") or f"Chart {slice_id}",
+            "viz_type": viz_type,
+            "description": ch.get("description"),
+            "is_kpi": _is_kpi(viz_type),
+        })
+
+    items.sort(key=lambda x: (order_index.get(x["slice_id"], 10_000), x["slice_id"]))
+
+    return {
+        "dashboard_id": int(superset_id),
+        "dashboard_app_id": dashboard_id,
+        "dashboard_title": dash["title"],
+        "charts": items,
+    }

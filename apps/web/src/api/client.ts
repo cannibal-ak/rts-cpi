@@ -16,6 +16,22 @@ import type {
   PlatformHealthResponse, TenantSummaryResponse,
 } from '../types';
 
+// ── Superset chart manifest ────────────────
+export interface DashboardChart {
+  slice_id: number;
+  slice_name: string;
+  viz_type: string | null;
+  description: string | null;
+  is_kpi: boolean;
+}
+
+export interface DashboardChartsResponse {
+  dashboard_id: number;
+  dashboard_app_id: string;
+  dashboard_title: string;
+  charts: DashboardChart[];
+}
+
 // ── Query params ────────────────────────────
 export interface JobQuery {
   page?: number;
@@ -120,6 +136,7 @@ export interface CpiApiClient {
         embedded_uuid: string;
         dashboard_title: string;
     }>;
+    getDashboardCharts(dashboardId: string): Promise<DashboardChartsResponse>;
   };
   ingestion: {
     listJobs(q?: JobQuery): Promise<Paginated<IngestionJob>>;

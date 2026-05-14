@@ -1,7 +1,7 @@
 /**
  * In-memory mock API client — for offline demos without a backend.
  */
-import type { CpiApiClient, SnapshotQuery, JobQuery } from './client';
+import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse } from './client';
 import type {
   Paginated,
   AlertRule,
@@ -390,6 +390,18 @@ export const mockClient: CpiApiClient = {
         dashboard_title: dashboardId === '1' ? 'Airline CPI JY Dashboard'
                        : dashboardId === '2' ? 'Airline CPI PW Dashboard'
                        : 'Cruise/Ferry CPI Dashboard',
+    }),
+    getDashboardCharts: (dashboardId: string): Promise<DashboardChartsResponse> => delay({
+      dashboard_id: Number(dashboardId),
+      dashboard_app_id: dashboardId,
+      dashboard_title: dashboardId === '1' ? 'Airline CPI JY Dashboard'
+                     : dashboardId === '2' ? 'Airline CPI PW Dashboard'
+                     : 'Cruise/Ferry CPI Dashboard',
+      charts: [
+        { slice_id: 1, slice_name: 'Total Records',     viz_type: 'big_number_total',       description: null, is_kpi: true  },
+        { slice_id: 2, slice_name: 'Trend by Date',     viz_type: 'echarts_timeseries_line', description: null, is_kpi: false },
+        { slice_id: 3, slice_name: 'Breakdown by Type', viz_type: 'pie',                     description: null, is_kpi: false },
+      ],
     }),
   },
 };
