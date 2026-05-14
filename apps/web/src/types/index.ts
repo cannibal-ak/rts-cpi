@@ -178,7 +178,7 @@ export interface CflSnapshot {
   id: string;
   cap_date: string;
   cap_time: string;
-  trip_type: 'ONE_WAY' | 'ROUND_TRIP';
+  trip_type: string;
   source: string;
   org: string;
   dest: string;
