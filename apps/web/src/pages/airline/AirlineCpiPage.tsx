@@ -25,9 +25,11 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
 
   const [freshness, setFreshness] = useState<DataFreshness | null>(null);
 
-  // Pricing tab populates this each render so the toolbar Export button
-  // can invoke the current handleExportCsv (closes over current filteredData).
+  // Each tab populates its own ref every render so the toolbar Export
+  // button can invoke the active tab's handler (closing over its current
+  // filtered rows). Initialised to no-op so the ref is always callable.
   const pricingExportRef = useRef<() => void>(() => {});
+  const velocityExportRef = useRef<() => void>(() => {});
 
   const pageTitle = TENANT_LABELS[tenantCode] || `Airline CPI – ${tenantCode}`;
   const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW'];
@@ -46,7 +48,14 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
     });
   }, [tenantCode]);
 
-  const showPricingExport = !showTabs || tab === 0;
+  const isVelocityActive = showTabs && tab === 1;
+  const exportTooltip = isVelocityActive
+    ? 'Download filtered velocity rows as CSV (13 dictionary-named columns)'
+    : 'Download filtered rows as CSV (76 dictionary-named columns)';
+  const handleToolbarExport = () => {
+    if (isVelocityActive) velocityExportRef.current();
+    else pricingExportRef.current();
+  };
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -106,25 +115,23 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
         ) : (
           <Box />
         )}
-        {showPricingExport && (
-          <Tooltip title="Download filtered rows as CSV (76 dictionary-named columns)">
-            <Button
-              size="small"
-              startIcon={<FileDownload sx={{ fontSize: 14 }} />}
-              onClick={() => pricingExportRef.current()}
-              sx={{
-                fontSize: 11.5,
-                textTransform: 'none',
-                minHeight: 26,
-                py: 0.25,
-                px: 1,
-                mb: 0.25,
-              }}
-            >
-              Export
-            </Button>
-          </Tooltip>
-        )}
+        <Tooltip title={exportTooltip}>
+          <Button
+            size="small"
+            startIcon={<FileDownload sx={{ fontSize: 14 }} />}
+            onClick={handleToolbarExport}
+            sx={{
+              fontSize: 11.5,
+              textTransform: 'none',
+              minHeight: 26,
+              py: 0.25,
+              px: 1,
+              mb: 0.25,
+            }}
+          >
+            Export
+          </Button>
+        </Tooltip>
       </Box>
 
       {/* ── Tab content ────────────────────────────────────────────── */}
@@ -141,6 +148,7 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
           tenantCode={tenantCode}
           filters={velocityFilters}
           onFiltersChange={setVelocityFilters}
+          exportRef={velocityExportRef}
         />
       )}
     </Box>
