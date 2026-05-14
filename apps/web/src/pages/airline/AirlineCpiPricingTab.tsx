@@ -1,315 +1,452 @@
-import { useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
+import { useState, useEffect, useCallback, useMemo, type ReactNode, type MutableRefObject } from 'react';
 import {
-  Box, Paper, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Chip, CircularProgress, TablePagination, Tooltip,
-  Button, Menu, MenuList, MenuItem, ListSubheader, Checkbox, ListItemText, Divider,
+  Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+  CircularProgress, Button, Collapse, Chip, IconButton, Autocomplete, TextField,
+  FormControl, Select, MenuItem, Stack, Divider,
 } from '@mui/material';
-import { Flight, ViewColumn } from '@mui/icons-material';
-import FilterPanel from '../../components/filters/FilterPanel';
-import ActionBar from '../../components/filters/ActionBar';
+import {
+  Flight, KeyboardArrowDown, KeyboardArrowUp, RestartAlt, CalendarToday,
+  ChevronLeft, ChevronRight, FirstPage, LastPage,
+} from '@mui/icons-material';
 import EmptyState from '../../components/common/EmptyState';
 import { api } from '../../api';
-import { formatCurrency } from '../../utils/format';
-import type { AirlineSnapshot, FilterMetadata, Paginated } from '../../types';
+import type { AirlineSnapshot, FilterMetadata } from '../../types';
 
 interface AirlineCpiPricingTabProps {
   tenantCode: 'JY' | 'PW';
   filters: Record<string, string>;
   onFiltersChange: (f: Record<string, string>) => void;
+  /** Parent populates this ref so the page toolbar's Export button can fire CSV. */
+  exportRef?: MutableRefObject<() => void>;
 }
 
-// ── Column-definition framework ──────────────────────────────────────────
-//
-// Phase 2F lands the 47 new dictionary columns from migration 022 in the
-// frontend. The full set is 77 dict-aligned columns (id + 76 data fields).
-// 16 are visible by default; the remaining 61 are reachable via a column-
-// picker menu and grouped by cluster.
-//
-// Default-visible 16:
-//   route, trip_type, ref_cab_code, ref_al, ref_tot_fare,
-//   comp_al, comp_tot_fare, delta, pos, cap_date, ref_dep_date,
-//   ref_equip_code, comp_equip_code, ref_ff_code, comp_ff_code, ref_stops
-
-type ColumnCluster =
-  | 'core'
-  | 'ref_outbound'
-  | 'ref_return'
-  | 'comp_outbound'
-  | 'comp_return'
-  | 'point_of'
-  | 'provenance';
-
-const CLUSTER_LABELS: Record<ColumnCluster, string> = {
-  core: 'Core',
-  ref_outbound: 'Reference flight — outbound',
-  ref_return: 'Reference flight — return',
-  comp_outbound: 'Competitor — outbound',
-  comp_return: 'Competitor — return',
-  point_of: 'Point-of-*',
-  provenance: 'Provenance',
+// ── Formatters ──────────────────────────────────────────────────────────
+const DASH = '—';
+const isEmpty = (v: unknown) => v == null || v === '';
+const fmtText = (v: unknown): string => isEmpty(v) ? DASH : String(v);
+const fmtCurrency = (v: unknown): string => {
+  if (isEmpty(v)) return DASH;
+  const n = Number(v);
+  return Number.isNaN(n) ? String(v) : n.toFixed(2);
+};
+const fmtSignedCurrency = (n: number): string => (n > 0 ? '+' : n < 0 ? '-' : '') + Math.abs(n).toFixed(2);
+const fmtSignedPercent = (n: number): string => (n > 0 ? '+' : n < 0 ? '-' : '') + Math.abs(n).toFixed(2) + '%';
+const fmtDate = (v: unknown): string => {
+  if (isEmpty(v)) return DASH;
+  const s = String(v);
+  return s.length >= 10 ? s.substring(0, 10) : s;
+};
+const fmtTime = (v: unknown): string => {
+  if (isEmpty(v)) return DASH;
+  const s = String(v);
+  return s.length >= 5 ? s.substring(0, 5) : s;
 };
 
-interface ColumnDef {
-  key: string;
-  label: string;
-  cluster: ColumnCluster;
-  defaultVisible: boolean;
-  align?: 'left' | 'right';
-  /** Custom renderer (defaults to plain text of row[key]). */
-  render?: (row: AirlineSnapshot) => ReactNode;
+// ── Fare delta computation ──────────────────────────────────────────────
+function getFareDelta(row: AirlineSnapshot): number | null {
+  if (row.fare_delta != null) {
+    const n = Number(row.fare_delta);
+    if (!Number.isNaN(n)) return n;
+  }
+  if (row.ref_tot_fare != null && row.comp_tot_fare != null) {
+    const a = Number(row.ref_tot_fare);
+    const b = Number(row.comp_tot_fare);
+    if (!Number.isNaN(a) && !Number.isNaN(b)) return a - b;
+  }
+  return null;
 }
 
-/** Format a date-ish value for display. */
-const fmtDate = (v: unknown): ReactNode =>
-  v == null || v === '' ? '—' : String(v);
+function getFareDeltaPct(row: AirlineSnapshot): number | null {
+  if (row.fare_delta_pct != null) {
+    const n = Number(row.fare_delta_pct);
+    if (!Number.isNaN(n)) return n;
+  }
+  const d = getFareDelta(row);
+  const c = row.comp_tot_fare == null ? null : Number(row.comp_tot_fare);
+  if (d == null || c == null || c === 0 || Number.isNaN(c)) return null;
+  return (d / c) * 100;
+}
 
-/** Format a plain text/number cell with a "—" fallback for null/empty. */
-const fmtText = (v: unknown): ReactNode =>
-  v == null || v === '' ? <Typography variant="body2" color="text.disabled">—</Typography>
-                        : <Typography variant="body2">{String(v)}</Typography>;
+function deltaColor(d: number | null): 'success.main' | 'error.main' | 'text.primary' {
+  if (d == null) return 'text.primary';
+  if (d < 0) return 'success.main';
+  if (d > 0) return 'error.main';
+  return 'text.primary';
+}
 
-const fmtCaption = (v: unknown): ReactNode =>
-  v == null || v === '' ? '—' : <Typography variant="caption">{String(v)}</Typography>;
+// ── Summary columns (compact labels + fixed widths) ─────────────────────
+interface SummaryColumn {
+  label: string;
+  align?: 'left' | 'right';
+  width: number;
+  render: (row: AirlineSnapshot) => ReactNode;
+}
 
-const fmtInteger = (v: unknown): ReactNode =>
-  v == null || v === '' ? <Typography variant="body2" color="text.disabled">—</Typography>
-                        : <Typography variant="body2">{String(v)}</Typography>;
-
-const fmtFareRef = (row: AirlineSnapshot, key: keyof AirlineSnapshot): ReactNode =>
-  <Typography variant="body2" fontFamily="monospace">
-    {formatCurrency(row[key] as number | null | undefined, row.ref_curr)}
-  </Typography>;
-
-const fmtFareComp = (row: AirlineSnapshot, key: keyof AirlineSnapshot): ReactNode =>
-  <Typography variant="body2" fontFamily="monospace">
-    {formatCurrency(row[key] as number | null | undefined, row.comp_curr)}
-  </Typography>;
-
-const COLUMNS: ColumnDef[] = [
-  // ── core (default visible) ──
-  { key: 'route', label: 'Route', cluster: 'core', defaultVisible: true,
-    render: (r) => <Typography variant="body2" fontWeight={600}>{r.ref_org}–{r.ref_dst}</Typography> },
-  { key: 'trip_type', label: 'Trip', cluster: 'core', defaultVisible: true,
-    render: (r) => <Chip label={r.trip_type} size="small" variant="outlined" /> },
-  { key: 'ref_al', label: 'Ref Airline', cluster: 'core', defaultVisible: true,
-    render: (r) => <Tooltip title={r.ref_flt_num}><Chip label={r.ref_al} size="small" /></Tooltip> },
-  { key: 'ref_cab_code', label: 'Cabin', cluster: 'core', defaultVisible: true,
-    render: (r) => <Chip label={r.ref_cab_code} size="small" variant="outlined" /> },
-  { key: 'ref_tot_fare', label: 'Ref Fare', cluster: 'core', defaultVisible: true, align: 'right',
-    render: (r) => fmtFareRef(r, 'ref_tot_fare') },
-  { key: 'comp_al', label: 'Comp Airline', cluster: 'core', defaultVisible: true,
-    render: (r) => <Tooltip title={r.comp_flt_num}><Chip label={r.comp_al} size="small" color="secondary" /></Tooltip> },
-  { key: 'comp_tot_fare', label: 'Comp Fare', cluster: 'core', defaultVisible: true, align: 'right',
-    render: (r) => fmtFareComp(r, 'comp_tot_fare') },
-  { key: 'delta', label: 'Delta', cluster: 'core', defaultVisible: true, align: 'right',
-    render: (r) => {
-      const delta = r.ref_tot_fare > 0
-        ? ((r.comp_tot_fare - r.ref_tot_fare) / r.ref_tot_fare * 100)
-        : null;
-      if (delta === null) {
-        return <Typography variant="body2" color="text.disabled">—</Typography>;
-      }
-      return (
-        <Typography
-          variant="body2"
-          fontWeight={600}
-          sx={{ color: delta < 0 ? 'success.main' : delta > 0 ? 'error.main' : 'text.primary' }}
-        >
-          {delta > 0 ? '+' : ''}{delta.toFixed(1)}%
-        </Typography>
-      );
-    } },
-  { key: 'pos', label: 'POS', cluster: 'core', defaultVisible: true,
-    render: (r) => fmtCaption(r.pos) },
-  { key: 'cap_date', label: 'Cap Date', cluster: 'core', defaultVisible: true,
-    render: (r) => fmtCaption(r.cap_date) },
-  { key: 'ref_dep_date', label: 'Dep Date', cluster: 'core', defaultVisible: true,
-    render: (r) => fmtCaption(r.ref_dep_date) },
-
-  // ── reference flight outbound additions (default visible 5; rest in picker) ──
-  { key: 'ref_equip_code', label: 'Ref Equipment', cluster: 'ref_outbound', defaultVisible: true,
-    render: (r) => fmtText(r.ref_equip_code) },
-  { key: 'ref_ff_code', label: 'Ref FF Code', cluster: 'ref_outbound', defaultVisible: true,
-    render: (r) => fmtText(r.ref_ff_code) },
-  { key: 'ref_stops', label: 'Ref Stops', cluster: 'ref_outbound', defaultVisible: true, align: 'right',
-    render: (r) => fmtInteger(r.ref_stops) },
-  { key: 'ref_dep_time', label: 'Ref Dep Time', cluster: 'ref_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.ref_dep_time) },
-  { key: 'ref_arr_time', label: 'Ref Arr Time', cluster: 'ref_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.ref_arr_time) },
-  { key: 'ref_via', label: 'Ref Via', cluster: 'ref_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.ref_via) },
-  { key: 'ref_cab_name', label: 'Ref Cabin Name', cluster: 'ref_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.ref_cab_name) },
-  { key: 'ref_bkg_class', label: 'Ref Bkg Class', cluster: 'ref_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.ref_bkg_class) },
-  { key: 'ref_yr', label: 'Ref YR', cluster: 'ref_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtFareRef(r, 'ref_yr') },
-  { key: 'ref_anc_price', label: 'Ref Anc Price', cluster: 'ref_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtFareRef(r, 'ref_anc_price') },
-  { key: 'ref_anc_type', label: 'Ref Anc Type', cluster: 'ref_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.ref_anc_type) },
-
-  // ── reference flight return-leg (all in picker) ──
-  { key: 'ref_ret_flt_num', label: 'Ref Ret Flt#', cluster: 'ref_return', defaultVisible: false,
-    render: (r) => fmtText(r.ref_ret_flt_num) },
-  { key: 'ref_ret_dep_date', label: 'Ref Ret Dep Date', cluster: 'ref_return', defaultVisible: false,
-    render: (r) => fmtDate(r.ref_ret_dep_date) },
-  { key: 'ref_ret_dep_time', label: 'Ref Ret Dep Time', cluster: 'ref_return', defaultVisible: false,
-    render: (r) => fmtText(r.ref_ret_dep_time) },
-  { key: 'ref_ret_arr_time', label: 'Ref Ret Arr Time', cluster: 'ref_return', defaultVisible: false,
-    render: (r) => fmtText(r.ref_ret_arr_time) },
-  { key: 'ref_ret_stops', label: 'Ref Ret Stops', cluster: 'ref_return', defaultVisible: false, align: 'right',
-    render: (r) => fmtInteger(r.ref_ret_stops) },
-  { key: 'ref_ret_via', label: 'Ref Ret Via', cluster: 'ref_return', defaultVisible: false,
-    render: (r) => fmtText(r.ref_ret_via) },
-  { key: 'ref_ret_cab_name', label: 'Ref Ret Cabin Name', cluster: 'ref_return', defaultVisible: false,
-    render: (r) => fmtText(r.ref_ret_cab_name) },
-  { key: 'ref_ret_cab_code', label: 'Ref Ret Cabin Code', cluster: 'ref_return', defaultVisible: false,
-    render: (r) => fmtText(r.ref_ret_cab_code) },
-  { key: 'ref_ret_bkg_class', label: 'Ref Ret Bkg Class', cluster: 'ref_return', defaultVisible: false,
-    render: (r) => fmtText(r.ref_ret_bkg_class) },
-  { key: 'ref_ret_seats', label: 'Ref Ret Seats', cluster: 'ref_return', defaultVisible: false, align: 'right',
-    render: (r) => fmtInteger(r.ref_ret_seats) },
-  { key: 'ref_ret_equip_code', label: 'Ref Ret Equipment', cluster: 'ref_return', defaultVisible: false,
-    render: (r) => fmtText(r.ref_ret_equip_code) },
-
-  // ── competitor outbound additions (default visible 2; rest in picker) ──
-  { key: 'comp_equip_code', label: 'Comp Equipment', cluster: 'comp_outbound', defaultVisible: true,
-    render: (r) => fmtText(r.comp_equip_code) },
-  { key: 'comp_ff_code', label: 'Comp FF Code', cluster: 'comp_outbound', defaultVisible: true,
-    render: (r) => fmtText(r.comp_ff_code) },
-  { key: 'comp_dep_time', label: 'Comp Dep Time', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.comp_dep_time) },
-  { key: 'comp_arr_time', label: 'Comp Arr Time', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.comp_arr_time) },
-  { key: 'comp_stops', label: 'Comp Stops', cluster: 'comp_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtInteger(r.comp_stops) },
-  { key: 'comp_via', label: 'Comp Via', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.comp_via) },
-  { key: 'comp_cab_name', label: 'Comp Cabin Name', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.comp_cab_name) },
-  { key: 'comp_bkg_class', label: 'Comp Bkg Class', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.comp_bkg_class) },
-  { key: 'comp_yr', label: 'Comp YR', cluster: 'comp_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtFareComp(r, 'comp_yr') },
-  { key: 'comp_anc_price', label: 'Comp Anc Price', cluster: 'comp_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtFareComp(r, 'comp_anc_price') },
-  { key: 'comp_anc_type', label: 'Comp Anc Type', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.comp_anc_type) },
-
-  // ── competitor return-leg (all in picker) ──
-  { key: 'comp_ret_flt_num', label: 'Comp Ret Flt#', cluster: 'comp_return', defaultVisible: false,
-    render: (r) => fmtText(r.comp_ret_flt_num) },
-  { key: 'comp_ret_dep_date', label: 'Comp Ret Dep Date', cluster: 'comp_return', defaultVisible: false,
-    render: (r) => fmtDate(r.comp_ret_dep_date) },
-  { key: 'comp_ret_dep_time', label: 'Comp Ret Dep Time', cluster: 'comp_return', defaultVisible: false,
-    render: (r) => fmtText(r.comp_ret_dep_time) },
-  { key: 'comp_ret_arr_time', label: 'Comp Ret Arr Time', cluster: 'comp_return', defaultVisible: false,
-    render: (r) => fmtText(r.comp_ret_arr_time) },
-  { key: 'comp_ret_stops', label: 'Comp Ret Stops', cluster: 'comp_return', defaultVisible: false, align: 'right',
-    render: (r) => fmtInteger(r.comp_ret_stops) },
-  { key: 'comp_ret_via', label: 'Comp Ret Via', cluster: 'comp_return', defaultVisible: false,
-    render: (r) => fmtText(r.comp_ret_via) },
-  { key: 'comp_ret_cab_name', label: 'Comp Ret Cabin Name', cluster: 'comp_return', defaultVisible: false,
-    render: (r) => fmtText(r.comp_ret_cab_name) },
-  { key: 'comp_ret_cab_code', label: 'Comp Ret Cabin Code', cluster: 'comp_return', defaultVisible: false,
-    render: (r) => fmtText(r.comp_ret_cab_code) },
-  { key: 'comp_ret_bkg_class', label: 'Comp Ret Bkg Class', cluster: 'comp_return', defaultVisible: false,
-    render: (r) => fmtText(r.comp_ret_bkg_class) },
-  { key: 'comp_ret_seats', label: 'Comp Ret Seats', cluster: 'comp_return', defaultVisible: false, align: 'right',
-    render: (r) => fmtInteger(r.comp_ret_seats) },
-  { key: 'comp_ret_equip_code', label: 'Comp Ret Equipment', cluster: 'comp_return', defaultVisible: false,
-    render: (r) => fmtText(r.comp_ret_equip_code) },
-
-  // ── point-of-* (POS is core; poa/pod/poc in picker) ──
-  { key: 'poa', label: 'POA', cluster: 'point_of', defaultVisible: false,
-    render: (r) => fmtText(r.poa) },
-  { key: 'pod', label: 'POD', cluster: 'point_of', defaultVisible: false,
-    render: (r) => fmtText(r.pod) },
-  { key: 'poc', label: 'POC', cluster: 'point_of', defaultVisible: false,
-    render: (r) => fmtText(r.poc) },
-
-  // ── provenance ──
-  { key: 'path', label: 'Path', cluster: 'provenance', defaultVisible: false,
-    render: (r) => fmtText(r.path) },
-
-  // ── pre-existing dict columns not in default-16 (picker) ──
-  { key: 'id', label: 'ID', cluster: 'core', defaultVisible: false,
-    render: (r) => fmtCaption(r.id) },
-  { key: 'cap_time', label: 'Cap Time', cluster: 'core', defaultVisible: false,
-    render: (r) => fmtCaption(r.cap_time) },
-  { key: 'ref_flt_num', label: 'Ref Flt#', cluster: 'ref_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.ref_flt_num) },
-  { key: 'ref_base_fare', label: 'Ref Base Fare', cluster: 'ref_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtFareRef(r, 'ref_base_fare') },
-  { key: 'ref_tax', label: 'Ref Tax', cluster: 'ref_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtFareRef(r, 'ref_tax') },
-  { key: 'ref_yq', label: 'Ref YQ', cluster: 'ref_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtFareRef(r, 'ref_yq') },
-  { key: 'ref_seats', label: 'Ref Seats', cluster: 'ref_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtInteger(r.ref_seats) },
-  { key: 'ref_curr', label: 'Ref Currency', cluster: 'ref_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.ref_curr) },
-  { key: 'comp_flt_num', label: 'Comp Flt#', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.comp_flt_num) },
-  { key: 'comp_org', label: 'Comp Org', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.comp_org) },
-  { key: 'comp_dst', label: 'Comp Dst', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.comp_dst) },
-  { key: 'comp_dep_date', label: 'Comp Dep Date', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtCaption(r.comp_dep_date) },
-  { key: 'comp_cab_code', label: 'Comp Cabin Code', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.comp_cab_code) },
-  { key: 'comp_base_fare', label: 'Comp Base Fare', cluster: 'comp_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtFareComp(r, 'comp_base_fare') },
-  { key: 'comp_tax', label: 'Comp Tax', cluster: 'comp_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtFareComp(r, 'comp_tax') },
-  { key: 'comp_yq', label: 'Comp YQ', cluster: 'comp_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtFareComp(r, 'comp_yq') },
-  { key: 'comp_seats', label: 'Comp Seats', cluster: 'comp_outbound', defaultVisible: false, align: 'right',
-    render: (r) => fmtInteger(r.comp_seats) },
-  { key: 'comp_curr', label: 'Comp Currency', cluster: 'comp_outbound', defaultVisible: false,
-    render: (r) => fmtText(r.comp_curr) },
+const SUMMARY_COLUMNS: SummaryColumn[] = [
+  { label: 'Org',       align: 'left',  width: 44, render: r => fmtText(r.ref_org) },
+  { label: 'Dst',       align: 'left',  width: 44, render: r => fmtText(r.ref_dst) },
+  { label: 'Trip',      align: 'left',  width: 40, render: r => r.trip_type
+      ? <Chip label={r.trip_type} size="small" variant="outlined"
+              sx={{ height: 16, fontSize: 10, '& .MuiChip-label': { px: 0.5 } }} />
+      : DASH },
+  { label: 'AL',        align: 'left',  width: 36, render: r => fmtText(r.ref_al) },
+  { label: 'Flt',       align: 'left',  width: 60, render: r => fmtText(r.ref_flt_num) },
+  { label: 'Dep',       align: 'left',  width: 84, render: r => fmtDate(r.ref_dep_date) },
+  { label: 'Cab',       align: 'left',  width: 40, render: r => fmtText(r.ref_cab_code) },
+  { label: 'Ref fare',  align: 'right', width: 76, render: r => (
+      <Box component="span" sx={{ fontFamily: 'monospace', fontSize: 11 }}>{fmtCurrency(r.ref_tot_fare)}</Box>
+  )},
+  { label: 'Comp',      align: 'left',  width: 40, render: r => fmtText(r.comp_al) },
+  { label: 'C.Flt',     align: 'left',  width: 60, render: r => fmtText(r.comp_flt_num) },
+  { label: 'C.Dep',     align: 'left',  width: 84, render: r => fmtDate(r.comp_dep_date) },
+  { label: 'C.Cab',     align: 'left',  width: 40, render: r => fmtText(r.comp_cab_code) },
+  { label: 'Comp fare', align: 'right', width: 76, render: r => (
+      <Box component="span" sx={{ fontFamily: 'monospace', fontSize: 11 }}>{fmtCurrency(r.comp_tot_fare)}</Box>
+  )},
+  { label: 'Delta',     align: 'right', width: 72, render: r => {
+      const d = getFareDelta(r);
+      return <Box component="span" sx={{ color: deltaColor(d), fontFamily: 'monospace', fontSize: 11, fontWeight: 500 }}>
+        {d == null ? DASH : fmtSignedCurrency(d)}
+      </Box>;
+  }},
+  { label: 'Δ%',        align: 'right', width: 56, render: r => {
+      const p = getFareDeltaPct(r);
+      const d = getFareDelta(r);
+      return <Box component="span" sx={{ color: deltaColor(d), fontFamily: 'monospace', fontSize: 11, fontWeight: 500 }}>
+        {p == null ? DASH : fmtSignedPercent(p)}
+      </Box>;
+  }},
+  { label: 'POS',       align: 'left',  width: 44, render: r => fmtText(r.pos) },
 ];
 
-const DEFAULT_VISIBLE = new Set(COLUMNS.filter(c => c.defaultVisible).map(c => c.key));
+const CHEVRON_COL_WIDTH = 28;
 
-export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersChange }: AirlineCpiPricingTabProps) {
-  const [filterOpen, setFilterOpen] = useState(true);
+// ── Detail-panel groups ─────────────────────────────────────────────────
+type DetailFieldType = 'text' | 'currency' | 'date' | 'time';
+interface DetailField {
+  key: keyof AirlineSnapshot;
+  label: string;
+  type?: DetailFieldType;
+}
+interface DetailGroup {
+  title: string;
+  rtOnly?: boolean;
+  faded?: boolean;
+  fields: DetailField[];
+}
+
+const DETAIL_GROUPS: DetailGroup[] = [
+  {
+    title: 'Reference outbound',
+    fields: [
+      { key: 'ref_dep_time',   label: 'Dep Time',       type: 'time' },
+      { key: 'ref_arr_time',   label: 'Arr Time',       type: 'time' },
+      { key: 'ref_stops',      label: 'Stops' },
+      { key: 'ref_via',        label: 'Via' },
+      { key: 'ref_equip_code', label: 'Equipment Code' },
+      { key: 'ref_equip_name', label: 'Aircraft' },
+      { key: 'ref_cab_name',   label: 'Cabin Name' },
+      { key: 'ref_bkg_class',  label: 'Booking Class' },
+      { key: 'ref_seats',      label: 'Seats' },
+    ],
+  },
+  {
+    title: 'Reference return',
+    rtOnly: true,
+    fields: [
+      { key: 'ref_ret_flt_num',    label: 'Return Flight #' },
+      { key: 'ref_ret_dep_date',   label: 'Return Dep Date', type: 'date' },
+      { key: 'ref_ret_dep_time',   label: 'Return Dep Time', type: 'time' },
+      { key: 'ref_ret_arr_time',   label: 'Return Arr Time', type: 'time' },
+      { key: 'ref_ret_stops',      label: 'Return Stops' },
+      { key: 'ref_ret_via',        label: 'Return Via' },
+      { key: 'ref_ret_equip_code', label: 'Return Equip Code' },
+      { key: 'ref_ret_cab_name',   label: 'Return Cabin Name' },
+      { key: 'ref_ret_cab_code',   label: 'Return Cabin Code' },
+      { key: 'ref_ret_bkg_class',  label: 'Return Bkg Class' },
+      { key: 'ref_ret_seats',      label: 'Return Seats' },
+    ],
+  },
+  {
+    title: 'Reference fare breakdown',
+    fields: [
+      { key: 'ref_base_fare', label: 'Base Fare',  type: 'currency' },
+      { key: 'ref_tax',       label: 'Tax',        type: 'currency' },
+      { key: 'ref_yq',        label: 'YQ',         type: 'currency' },
+      { key: 'ref_yr',        label: 'YR',         type: 'currency' },
+      { key: 'ref_anc_price', label: 'Anc Price',  type: 'currency' },
+      { key: 'ref_anc_type',  label: 'Anc Type' },
+      { key: 'ref_tot_fare',  label: 'Total Fare', type: 'currency' },
+      { key: 'ref_curr',      label: 'Currency' },
+    ],
+  },
+  {
+    title: 'Competitor outbound',
+    fields: [
+      { key: 'comp_dep_time',   label: 'Dep Time',       type: 'time' },
+      { key: 'comp_arr_time',   label: 'Arr Time',       type: 'time' },
+      { key: 'comp_stops',      label: 'Stops' },
+      { key: 'comp_via',        label: 'Via' },
+      { key: 'comp_equip_code', label: 'Equipment Code' },
+      { key: 'comp_cab_name',   label: 'Cabin Name' },
+      { key: 'comp_bkg_class',  label: 'Booking Class' },
+      { key: 'comp_seats',      label: 'Seats' },
+    ],
+  },
+  {
+    title: 'Competitor return',
+    rtOnly: true,
+    fields: [
+      { key: 'comp_ret_flt_num',    label: 'Return Flight #' },
+      { key: 'comp_ret_dep_date',   label: 'Return Dep Date', type: 'date' },
+      { key: 'comp_ret_dep_time',   label: 'Return Dep Time', type: 'time' },
+      { key: 'comp_ret_arr_time',   label: 'Return Arr Time', type: 'time' },
+      { key: 'comp_ret_stops',      label: 'Return Stops' },
+      { key: 'comp_ret_via',        label: 'Return Via' },
+      { key: 'comp_ret_equip_code', label: 'Return Equip Code' },
+      { key: 'comp_ret_cab_name',   label: 'Return Cabin Name' },
+      { key: 'comp_ret_cab_code',   label: 'Return Cabin Code' },
+      { key: 'comp_ret_bkg_class',  label: 'Return Bkg Class' },
+      { key: 'comp_ret_seats',      label: 'Return Seats' },
+    ],
+  },
+  {
+    title: 'Competitor fare breakdown',
+    fields: [
+      { key: 'comp_base_fare', label: 'Base Fare',  type: 'currency' },
+      { key: 'comp_tax',       label: 'Tax',        type: 'currency' },
+      { key: 'comp_yq',        label: 'YQ',         type: 'currency' },
+      { key: 'comp_yr',        label: 'YR',         type: 'currency' },
+      { key: 'comp_anc_price', label: 'Anc Price',  type: 'currency' },
+      { key: 'comp_anc_type',  label: 'Anc Type' },
+      { key: 'comp_tot_fare',  label: 'Total Fare', type: 'currency' },
+      { key: 'comp_curr',      label: 'Currency' },
+    ],
+  },
+  {
+    title: 'Additional info',
+    fields: [
+      { key: 'ref_ff_code',  label: 'Ref FF Code' },
+      { key: 'comp_ff_code', label: 'Comp FF Code' },
+      { key: 'ref_channel',  label: 'Ref Channel' },
+      { key: 'comp_channel', label: 'Comp Channel' },
+      { key: 'ref_pos',      label: 'Ref POS' },
+      { key: 'comp_pos',     label: 'Comp POS' },
+      { key: 'pos',          label: 'POS' },
+    ],
+  },
+  {
+    title: 'Capture metadata',
+    faded: true,
+    fields: [
+      { key: 'cap_date',      label: 'Capture Date', type: 'date' },
+      { key: 'cap_time',      label: 'Capture Time', type: 'time' },
+      { key: 'file_date',     label: 'File Date',    type: 'date' },
+      { key: 'source_file',   label: 'Source File' },
+      { key: 'report_date',   label: 'Report Date',  type: 'date' },
+      { key: 'ingested_at',   label: 'Ingested At' },
+      { key: 'loaded_at',     label: 'Loaded At' },
+      { key: 'tenant_code',   label: 'Tenant' },
+      { key: 'business_type', label: 'Business Type' },
+    ],
+  },
+];
+
+function renderDetailValue(row: AirlineSnapshot, field: DetailField): string {
+  const v = row[field.key];
+  switch (field.type) {
+    case 'currency': return fmtCurrency(v);
+    case 'date':     return fmtDate(v);
+    case 'time':     return fmtTime(v);
+    default:         return fmtText(v);
+  }
+}
+
+// ── Export columns (76 data-dictionary headers) ─────────────────────────
+const EXPORT_COLUMNS: Array<{ header: string; key: keyof AirlineSnapshot }> = [
+  { header: 'CapDate',          key: 'cap_date' },
+  { header: 'CapTime',          key: 'cap_time' },
+  { header: 'RefAL',            key: 'ref_al' },
+  { header: 'RefFltNum',        key: 'ref_flt_num' },
+  { header: 'RefRetFltNum',     key: 'ref_ret_flt_num' },
+  { header: 'RefOrg',           key: 'ref_org' },
+  { header: 'RefDst',           key: 'ref_dst' },
+  { header: 'RefDepDate',       key: 'ref_dep_date' },
+  { header: 'RefRetDepDate',    key: 'ref_ret_dep_date' },
+  { header: 'RefDepTime',       key: 'ref_dep_time' },
+  { header: 'RefRetDepTime',    key: 'ref_ret_dep_time' },
+  { header: 'RefArrTime',       key: 'ref_arr_time' },
+  { header: 'RefRetArrTime',    key: 'ref_ret_arr_time' },
+  { header: 'RefStops',         key: 'ref_stops' },
+  { header: 'RefVia',           key: 'ref_via' },
+  { header: 'RefRetVia',        key: 'ref_ret_via' },
+  { header: 'RefRetStops',      key: 'ref_ret_stops' },
+  { header: 'TripType',         key: 'trip_type' },
+  { header: 'RefCurr',          key: 'ref_curr' },
+  { header: 'RefBaseFare',      key: 'ref_base_fare' },
+  { header: 'RefTax',           key: 'ref_tax' },
+  { header: 'RefYQ',            key: 'ref_yq' },
+  { header: 'RefYR',            key: 'ref_yr' },
+  { header: 'RefFFCode',        key: 'ref_ff_code' },
+  { header: 'RefAncPrice',      key: 'ref_anc_price' },
+  { header: 'RefAncType',       key: 'ref_anc_type' },
+  { header: 'RefTotFare',       key: 'ref_tot_fare' },
+  { header: 'RefCabName',       key: 'ref_cab_name' },
+  { header: 'RefRetCabName',    key: 'ref_ret_cab_name' },
+  { header: 'RefCabCode',       key: 'ref_cab_code' },
+  { header: 'RefRetCabCode',    key: 'ref_ret_cab_code' },
+  { header: 'RefBkgClass',      key: 'ref_bkg_class' },
+  { header: 'RefRetBkgClass',   key: 'ref_ret_bkg_class' },
+  { header: 'RefSeats',         key: 'ref_seats' },
+  { header: 'RefRetSeats',      key: 'ref_ret_seats' },
+  { header: 'RefEquipCode',     key: 'ref_equip_code' },
+  { header: 'RefRetEquipCode',  key: 'ref_ret_equip_code' },
+  { header: 'RefAircraft',      key: 'ref_equip_name' },
+  { header: 'RefPOS',           key: 'ref_pos' },
+  { header: 'RefChannel',       key: 'ref_channel' },
+  { header: 'CompAL',           key: 'comp_al' },
+  { header: 'CompFltNum',       key: 'comp_flt_num' },
+  { header: 'CompRetFltNum',    key: 'comp_ret_flt_num' },
+  { header: 'CompOrg',          key: 'comp_org' },
+  { header: 'CompDst',          key: 'comp_dst' },
+  { header: 'CompDepDate',      key: 'comp_dep_date' },
+  { header: 'CompRetDepDate',   key: 'comp_ret_dep_date' },
+  { header: 'CompDepTime',      key: 'comp_dep_time' },
+  { header: 'CompRetDepTime',   key: 'comp_ret_dep_time' },
+  { header: 'CompArrTime',      key: 'comp_arr_time' },
+  { header: 'CompRetArrTime',   key: 'comp_ret_arr_time' },
+  { header: 'CompStops',        key: 'comp_stops' },
+  { header: 'CompVia',          key: 'comp_via' },
+  { header: 'CompRetVia',       key: 'comp_ret_via' },
+  { header: 'CompRetStops',     key: 'comp_ret_stops' },
+  { header: 'CompCurr',         key: 'comp_curr' },
+  { header: 'CompBaseFare',     key: 'comp_base_fare' },
+  { header: 'CompTax',          key: 'comp_tax' },
+  { header: 'CompYQ',           key: 'comp_yq' },
+  { header: 'CompYR',           key: 'comp_yr' },
+  { header: 'CompAncPrice',     key: 'comp_anc_price' },
+  { header: 'CompAncType',      key: 'comp_anc_type' },
+  { header: 'CompTotFare',      key: 'comp_tot_fare' },
+  { header: 'POS',              key: 'pos' },
+  { header: 'CompCabName',      key: 'comp_cab_name' },
+  { header: 'CompRetCabName',   key: 'comp_ret_cab_name' },
+  { header: 'CompCabCode',      key: 'comp_cab_code' },
+  { header: 'CompRetCabCode',   key: 'comp_ret_cab_code' },
+  { header: 'CompBkgClass',     key: 'comp_bkg_class' },
+  { header: 'CompRetBkgClass',  key: 'comp_ret_bkg_class' },
+  { header: 'CompSeats',        key: 'comp_seats' },
+  { header: 'CompRetSeats',     key: 'comp_ret_seats' },
+  { header: 'CompEquipCode',    key: 'comp_equip_code' },
+  { header: 'CompRetEquipCode', key: 'comp_ret_equip_code' },
+  { header: 'CompPOS',          key: 'comp_pos' },
+  { header: 'CompChannel',      key: 'comp_channel' },
+];
+
+// ── Page walker (load all rows for selected file_date) ──────────────────
+const PAGE_FETCH_SIZE = 100;
+const FETCH_CONCURRENCY = 10;
+
+async function fetchAllRows(
+  baseQuery: Record<string, string>,
+  tenantCode: 'JY' | 'PW',
+  onProgress?: (loaded: number, total: number) => void,
+): Promise<AirlineSnapshot[]> {
+  const first = await api.airline.listSnapshots({
+    ...baseQuery,
+    tenant: tenantCode,
+    page: 1,
+    page_size: PAGE_FETCH_SIZE,
+  });
+  const total = first.page_info.total;
+  const numPages = Math.max(1, Math.ceil(total / PAGE_FETCH_SIZE));
+  onProgress?.(first.items.length, total);
+  if (numPages <= 1) return first.items;
+
+  const rest: number[] = [];
+  for (let p = 2; p <= numPages; p++) rest.push(p);
+
+  const collected: AirlineSnapshot[] = [...first.items];
+  for (let i = 0; i < rest.length; i += FETCH_CONCURRENCY) {
+    const batch = rest.slice(i, i + FETCH_CONCURRENCY);
+    const results = await Promise.all(batch.map(p =>
+      api.airline.listSnapshots({
+        ...baseQuery,
+        tenant: tenantCode,
+        page: p,
+        page_size: PAGE_FETCH_SIZE,
+      }).then(r => r.items)
+    ));
+    for (const items of results) collected.push(...items);
+    onProgress?.(collected.length, total);
+  }
+  return collected;
+}
+
+// ── CSV helpers ─────────────────────────────────────────────────────────
+function csvEscape(v: unknown): string {
+  if (v == null) return '';
+  const s = String(v);
+  if (s.includes(',') || s.includes('"') || s.includes('\n') || s.includes('\r')) {
+    return '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ────────────────────────────────────────────────────────────────────────
+export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersChange, exportRef }: AirlineCpiPricingTabProps) {
   const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<Paginated<AirlineSnapshot> | null>(null);
+  const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
+  const [allData, setAllData] = useState<AirlineSnapshot[]>([]);
   const [meta, setMeta] = useState<FilterMetadata[]>([]);
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [rowsPerPage, setRowsPerPage] = useState(30);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  // Column-picker state
-  const [visibleColumns, setVisibleColumns] = useState<Set<string>>(new Set(DEFAULT_VISIBLE));
-  const [colMenuAnchor, setColMenuAnchor] = useState<HTMLElement | null>(null);
+  // Client-side filters (operate on already-loaded `allData`)
+  const [routes, setRoutes] = useState<string[]>([]);
+  const [competitors, setCompetitors] = useState<string[]>([]);
+  const [tripTypeFilter, setTripTypeFilter] = useState<'all' | 'OW' | 'RT'>('all');
+  const [cabins, setCabins] = useState<string[]>([]);
+  const [posList, setPosList] = useState<string[]>([]);
+  const [depFrom, setDepFrom] = useState<string>('');
+  const [depTo, setDepTo] = useState<string>('');
 
-  // Load filter metadata on mount / tenant switch
+  // ── Load filter metadata once per tenant ────────────────────────────
   useEffect(() => {
     api.airline.getFilterMetadata(tenantCode).then(setMeta);
   }, [tenantCode]);
 
-  const fetchData = useCallback(async (f?: Record<string, string>, p?: number) => {
+  // ── Data fetcher (walks all pages for the chosen file_date) ─────────
+  const fetchData = useCallback(async (q: Record<string, string>) => {
     setLoading(true);
+    setProgress(null);
+    setExpandedId(null);
     try {
-      const q = f || filters;
-      const result = await api.airline.listSnapshots({
-        ...q,
-        tenant: tenantCode,
-        page: (p ?? page) + 1,
-        page_size: rowsPerPage,
+      const rows = await fetchAllRows(q, tenantCode, (loaded, total) => {
+        setProgress({ loaded, total });
       });
-      setData(result);
+      setAllData(rows);
+    } catch (err) {
+      console.error('Failed to load airline pricing snapshots:', err);
+      setAllData([]);
     } finally {
       setLoading(false);
+      setProgress(null);
     }
-  }, [filters, page, rowsPerPage, tenantCode]);
+  }, [tenantCode]);
 
-  // When metadata is loaded, auto-select latest file_date if filters are empty,
-  // then fire the initial fetch.
+  // ── Default filter wiring (file_date = latest, airline if locked) ───
   useEffect(() => {
     if (meta.length === 0) return;
     if (Object.keys(filters).length === 0) {
@@ -324,180 +461,547 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
       }
       if (Object.keys(defaults).length > 0) {
         onFiltersChange(defaults);
-        fetchData(defaults, 0);
+        fetchData(defaults);
         return;
       }
     }
-    fetchData(filters, 0);
+    fetchData(filters);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta]);
 
-  const handleApply = () => {
+  // ── Reset page on any client filter change ──────────────────────────
+  useEffect(() => {
     setPage(0);
-    fetchData(filters, 0);
-  };
+    setExpandedId(null);
+  }, [routes, competitors, tripTypeFilter, cabins, posList, depFrom, depTo]);
 
-  const handleReset = () => {
-    const defaultFilters: Record<string, string> = {};
-    const fileDateMeta = meta.find(m => m.field === 'file_date');
-    if (fileDateMeta && fileDateMeta.values.length > 0 && fileDateMeta.values[0] !== 'No file dates available') {
-      defaultFilters.file_date = fileDateMeta.values[0];
+  // ── Derived option lists from loaded data ───────────────────────────
+  const routeOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of allData) {
+      if (r.ref_org && r.ref_dst) set.add(`${r.ref_org}–${r.ref_dst}`);
     }
-    const airlineMeta = meta.find(m => m.field === 'airline');
-    if (airlineMeta && airlineMeta.values.length === 1) {
-      defaultFilters.airline = airlineMeta.values[0];
-    }
-    onFiltersChange(defaultFilters);
-    setPage(0);
-    fetchData(defaultFilters, 0);
-  };
+    return Array.from(set).sort();
+  }, [allData]);
 
-  const handlePageChange = (_: unknown, p: number) => {
-    setPage(p);
-    fetchData(filters, p);
-  };
+  const competitorOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of allData) if (r.comp_al) set.add(r.comp_al);
+    return Array.from(set).sort();
+  }, [allData]);
 
-  const allFields = meta.map(m => {
-    const isRestricted = m.field === 'airline' && m.values.length === 1;
-    const isNoDates = m.field === 'file_date' && m.values[0] === 'No file dates available';
-    return {
-      key: m.field,
-      label: m.label,
-      type: 'select' as const,
-      options: m.values.map(v => ({ value: v, label: v })),
-      disabled: isRestricted || isNoDates,
-      placeholder: m.values.slice(0, 3).join(', ') + '...',
-    };
-  });
+  const cabinOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of allData) if (r.ref_cab_code) set.add(r.ref_cab_code);
+    return Array.from(set).sort();
+  }, [allData]);
 
-  const displayedFields = allFields
-    .filter(f => f.key === 'file_date')
-    .map(f => ({ ...f, required: true }));
+  const posOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of allData) if (r.pos) set.add(r.pos);
+    return Array.from(set).sort();
+  }, [allData]);
 
-  const toggleColumn = (key: string) => {
-    setVisibleColumns(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
+  // ── File-date options (from metadata) ───────────────────────────────
+  const fileDateOptions = useMemo(() => {
+    const fdMeta = meta.find(m => m.field === 'file_date');
+    if (!fdMeta || fdMeta.values[0] === 'No file dates available') return [];
+    return fdMeta.values;
+  }, [meta]);
+
+  // ── Filtered view ───────────────────────────────────────────────────
+  const filteredData = useMemo(() => {
+    return allData.filter(r => {
+      if (routes.length > 0 && !routes.includes(`${r.ref_org}–${r.ref_dst}`)) return false;
+      if (competitors.length > 0 && !competitors.includes(r.comp_al)) return false;
+      if (tripTypeFilter !== 'all' && r.trip_type !== tripTypeFilter) return false;
+      if (cabins.length > 0 && !cabins.includes(r.ref_cab_code)) return false;
+      if (posList.length > 0 && (r.pos == null || !posList.includes(r.pos))) return false;
+      if (depFrom && (!r.ref_dep_date || r.ref_dep_date < depFrom)) return false;
+      if (depTo && (!r.ref_dep_date || r.ref_dep_date > depTo)) return false;
+      return true;
     });
+  }, [allData, routes, competitors, tripTypeFilter, cabins, posList, depFrom, depTo]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredData.length / rowsPerPage));
+  const safePage = Math.min(page, totalPages - 1);
+  const pagedData = useMemo(() => {
+    return filteredData.slice(safePage * rowsPerPage, (safePage + 1) * rowsPerPage);
+  }, [filteredData, safePage, rowsPerPage]);
+
+  const hasClientFilters =
+    routes.length > 0 || competitors.length > 0 || tripTypeFilter !== 'all' ||
+    cabins.length > 0 || posList.length > 0 || depFrom !== '' || depTo !== '';
+
+  // ── Handlers ────────────────────────────────────────────────────────
+  const handleFileDateChange = (v: string) => {
+    const next: Record<string, string> = { ...filters, file_date: v };
+    onFiltersChange(next);
+    setPage(0);
+    fetchData(next);
   };
 
-  const resetColumns = () => setVisibleColumns(new Set(DEFAULT_VISIBLE));
+  const handleResetClientFilters = () => {
+    setRoutes([]);
+    setCompetitors([]);
+    setTripTypeFilter('all');
+    setCabins([]);
+    setPosList([]);
+    setDepFrom('');
+    setDepTo('');
+  };
 
-  // Visible columns in their declared order
-  const renderedColumns = useMemo(
-    () => COLUMNS.filter(c => visibleColumns.has(c.key)),
-    [visibleColumns],
-  );
+  const handleRowToggle = (id: string) => {
+    setExpandedId(prev => (prev === id ? null : id));
+  };
 
-  // Picker entries grouped by cluster (in cluster declaration order)
-  const pickerByCluster = useMemo(() => {
-    const groups: Record<ColumnCluster, ColumnDef[]> = {
-      core: [], ref_outbound: [], ref_return: [], comp_outbound: [],
-      comp_return: [], point_of: [], provenance: [],
-    };
-    for (const col of COLUMNS) groups[col.cluster].push(col);
-    return groups;
-  }, []);
+  // ── Export (CSV only) ───────────────────────────────────────────────
+  const handleExportCsv = useCallback(() => {
+    if (filteredData.length === 0) return;
+    const headers = EXPORT_COLUMNS.map(c => c.header);
+    const lines: string[] = [headers.join(',')];
+    for (const row of filteredData) {
+      lines.push(EXPORT_COLUMNS.map(c => csvEscape(row[c.key])).join(','));
+    }
+    const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const fileDate = filters.file_date || new Date().toISOString().slice(0, 10);
+    downloadBlob(blob, `${tenantCode}_CPI_Pricing_${fileDate}.csv`);
+  }, [filteredData, filters.file_date, tenantCode]);
 
-  const orderedClusters: ColumnCluster[] = [
-    'core', 'ref_outbound', 'ref_return', 'comp_outbound', 'comp_return', 'point_of', 'provenance',
-  ];
+  // Re-bind the export trigger every render so the page toolbar's button
+  // closes over the latest filteredData.
+  if (exportRef) exportRef.current = handleExportCsv;
 
+  // ── Render ──────────────────────────────────────────────────────────
   return (
     <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <ActionBar onExport={() => api.airline.exportSnapshots({ ...filters, tenant: tenantCode })}>
+      {/* ── Inline filter strip ─────────────────────────────────── */}
+      <Box sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 0.75,
+        flexWrap: 'wrap',
+        rowGap: 0.75,
+        px: 2,
+        py: 0.5,
+        borderBottom: 1,
+        borderColor: 'divider',
+        bgcolor: 'background.paper',
+        flexShrink: 0,
+      }}>
+        {/* File Date — server-side */}
+        <CompactSingleSelect
+          icon={<CalendarToday sx={{ fontSize: 12, color: 'text.secondary' }} />}
+          label="File"
+          value={filters.file_date || ''}
+          options={fileDateOptions.map(d => ({ value: d, label: d }))}
+          onChange={handleFileDateChange}
+          minWidth={150}
+          disabled={loading || fileDateOptions.length === 0}
+        />
+        <Divider orientation="vertical" flexItem sx={{ mx: 0.5, my: 0.5 }} />
+
+        {/* Client-side filters */}
+        <CompactMultiSelect label="Route"      value={routes}      onChange={setRoutes}      options={routeOptions} />
+        <CompactMultiSelect label="Comp"       value={competitors} onChange={setCompetitors} options={competitorOptions} />
+        <CompactSingleSelect label="Trip"
+          value={tripTypeFilter}
+          options={[
+            { value: 'all', label: 'All' },
+            { value: 'OW',  label: 'OW' },
+            { value: 'RT',  label: 'RT' },
+          ]}
+          onChange={(v) => setTripTypeFilter(v as 'all' | 'OW' | 'RT')}
+          minWidth={80}
+        />
+        <CompactMultiSelect label="Cab" value={cabins}  onChange={setCabins}  options={cabinOptions} />
+        <CompactMultiSelect label="POS" value={posList} onChange={setPosList} options={posOptions} />
+        <CompactDateInput label="Dep from" value={depFrom} onChange={setDepFrom} />
+        <CompactDateInput label="Dep to"   value={depTo}   onChange={setDepTo}   />
+
+        <Box sx={{ flexGrow: 1 }} />
+
+        <Typography sx={{ fontSize: 11, color: 'text.secondary', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+          {loading && progress
+            ? `Loading ${progress.loaded.toLocaleString()} / ${progress.total.toLocaleString()}`
+            : hasClientFilters
+              ? `${filteredData.length.toLocaleString()} of ${allData.length.toLocaleString()} rows`
+              : `${allData.length.toLocaleString()} rows`}
+        </Typography>
         <Button
           size="small"
-          startIcon={<ViewColumn />}
-          onClick={(e) => setColMenuAnchor(e.currentTarget)}
-          aria-haspopup="true"
-          aria-expanded={Boolean(colMenuAnchor)}
+          startIcon={<RestartAlt sx={{ fontSize: 13 }} />}
+          onClick={handleResetClientFilters}
+          disabled={!hasClientFilters}
+          sx={{ fontSize: 11, textTransform: 'none', minHeight: 26, py: 0.25, px: 0.75 }}
         >
-          Columns ({renderedColumns.length})
+          Reset
         </Button>
-        <Menu
-          anchorEl={colMenuAnchor}
-          open={Boolean(colMenuAnchor)}
-          onClose={() => setColMenuAnchor(null)}
-          slotProps={{ paper: { sx: { maxHeight: 480, minWidth: 280 } } }}
-        >
-          <MenuItem dense onClick={resetColumns}>
-            <ListItemText primary="Reset to defaults (16)" />
-          </MenuItem>
-          <Divider />
-          {orderedClusters.map(cluster => (
-            <MenuList key={cluster} dense subheader={
-              <ListSubheader sx={{ lineHeight: '32px' }}>{CLUSTER_LABELS[cluster]}</ListSubheader>
-            }>
-              {pickerByCluster[cluster].map(col => (
-                <MenuItem key={col.key} dense onClick={() => toggleColumn(col.key)}>
-                  <Checkbox edge="start" size="small" checked={visibleColumns.has(col.key)} tabIndex={-1} disableRipple />
-                  <ListItemText primary={col.label} />
-                </MenuItem>
-              ))}
-            </MenuList>
-          ))}
-        </Menu>
-      </ActionBar>
+      </Box>
 
-      <Box sx={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
-        <FilterPanel
-          title={`${tenantCode} Pricing Filters`}
-          fields={displayedFields}
-          open={filterOpen}
-          onToggle={() => setFilterOpen(!filterOpen)}
-          values={filters}
-          onValuesChange={onFiltersChange}
-          onApply={handleApply}
-          onReset={handleReset}
-        />
-
-        <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0, p: 2 }}>
-          {loading ? (
-            <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}><CircularProgress /></Box>
-          ) : !data || data.items.length === 0 ? (
-            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <EmptyState icon={<Flight sx={{ fontSize: 64 }} />} title={`No ${tenantCode} Data`} description={`Apply filters to search ${tenantCode} airline CPI snapshots.`} actionLabel="Load All" onAction={() => fetchData({}, 0)} />
-            </Box>
-          ) : (
-            <>
-              <TableContainer component={Paper} variant="outlined" sx={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
-                <Table size="small" stickyHeader aria-label={`${tenantCode} Airline CPI snapshots`}>
-                  <TableHead>
-                    <TableRow>
-                      {renderedColumns.map(col => (
-                        <TableCell key={col.key} align={col.align ?? 'left'}>{col.label}</TableCell>
-                      ))}
-                    </TableRow>
-                  </TableHead>
-                  <TableBody>
-                    {data.items.map(row => (
-                      <TableRow key={row.id} hover>
-                        {renderedColumns.map(col => (
-                          <TableCell key={col.key} align={col.align ?? 'left'}>
-                            {col.render ? col.render(row) : null}
-                          </TableCell>
-                        ))}
-                      </TableRow>
+      {/* ── Table area ──────────────────────────────────────────── */}
+      <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        {loading && allData.length === 0 ? (
+          <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+            <CircularProgress size={28} />
+          </Box>
+        ) : allData.length === 0 ? (
+          <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <EmptyState
+              icon={<Flight sx={{ fontSize: 48 }} />}
+              title={`No ${tenantCode} Data`}
+              description={`Pick a file date to load ${tenantCode} airline CPI snapshots.`}
+              actionLabel="Load All"
+              onAction={() => fetchData({})}
+            />
+          </Box>
+        ) : (
+          <>
+            <TableContainer sx={{ flex: 1, overflow: 'auto', minHeight: 0 }}>
+              <Table size="small" stickyHeader aria-label={`${tenantCode} Airline CPI snapshots`} sx={{ tableLayout: 'fixed' }}>
+                <colgroup>
+                  <col style={{ width: CHEVRON_COL_WIDTH }} />
+                  {SUMMARY_COLUMNS.map(c => <col key={c.label} style={{ width: c.width }} />)}
+                </colgroup>
+                <TableHead>
+                  <TableRow sx={{
+                    '& > th': {
+                      py: 0.5,
+                      px: 0.75,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      lineHeight: 1.2,
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      bgcolor: 'background.paper',
+                      borderBottom: '1px solid',
+                      borderColor: 'divider',
+                    },
+                  }}>
+                    <TableCell aria-label="Expand row" />
+                    {SUMMARY_COLUMNS.map(col => (
+                      <TableCell key={col.label} align={col.align ?? 'left'}>
+                        {col.label}
+                      </TableCell>
                     ))}
-                  </TableBody>
-                </Table>
-              </TableContainer>
-              <TablePagination
-                component="div"
-                count={data.page_info.total}
-                page={page}
-                onPageChange={handlePageChange}
-                rowsPerPage={rowsPerPage}
-                onRowsPerPageChange={(e: React.ChangeEvent<HTMLInputElement>) => { setRowsPerPage(parseInt(e.target.value)); setPage(0); fetchData(filters, 0); }}
-                rowsPerPageOptions={[10, 20, 50]}
-                sx={{ flexShrink: 0 }}
-              />
-            </>
-          )}
-        </Box>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {pagedData.map(row => (
+                    <PricingRow
+                      key={row.id}
+                      row={row}
+                      expanded={expandedId === row.id}
+                      onToggle={() => handleRowToggle(row.id)}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+
+            {/* ── Compact pagination ───────────────────────────── */}
+            <Box sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'flex-end',
+              gap: 1,
+              px: 2,
+              py: 0.5,
+              borderTop: 1,
+              borderColor: 'divider',
+              minHeight: 32,
+              flexShrink: 0,
+            }}>
+              <Typography sx={{ fontSize: 11, color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
+                Page {safePage + 1} of {totalPages.toLocaleString()}
+              </Typography>
+              <FormControl size="small">
+                <Select
+                  value={rowsPerPage}
+                  onChange={(e) => { setRowsPerPage(Number(e.target.value)); setPage(0); }}
+                  sx={{
+                    fontSize: 11,
+                    height: 24,
+                    '& .MuiSelect-select': { py: 0, pl: 1, pr: '24px !important' },
+                  }}
+                >
+                  {[20, 30, 50, 100].map(n => <MenuItem key={n} value={n} sx={{ fontSize: 11 }}>{n} / page</MenuItem>)}
+                </Select>
+              </FormControl>
+              <IconButton size="small" disabled={safePage === 0} onClick={() => setPage(0)} aria-label="First page">
+                <FirstPage sx={{ fontSize: 16 }} />
+              </IconButton>
+              <IconButton size="small" disabled={safePage === 0} onClick={() => setPage(p => Math.max(0, p - 1))} aria-label="Previous page">
+                <ChevronLeft sx={{ fontSize: 16 }} />
+              </IconButton>
+              <IconButton size="small" disabled={safePage >= totalPages - 1} onClick={() => setPage(p => p + 1)} aria-label="Next page">
+                <ChevronRight sx={{ fontSize: 16 }} />
+              </IconButton>
+              <IconButton size="small" disabled={safePage >= totalPages - 1} onClick={() => setPage(totalPages - 1)} aria-label="Last page">
+                <LastPage sx={{ fontSize: 16 }} />
+              </IconButton>
+            </Box>
+          </>
+        )}
       </Box>
     </Box>
+  );
+}
+
+// ── PricingRow ──────────────────────────────────────────────────────────
+interface PricingRowProps {
+  row: AirlineSnapshot;
+  expanded: boolean;
+  onToggle: () => void;
+}
+
+function PricingRow({ row, expanded, onToggle }: PricingRowProps) {
+  const isRT = row.trip_type === 'RT';
+  return (
+    <>
+      <TableRow
+        hover
+        onClick={onToggle}
+        sx={{
+          cursor: 'pointer',
+          height: 28,
+          '& > td': {
+            py: 0,
+            px: 0.75,
+            fontSize: 11.5,
+            lineHeight: 1.3,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            borderBottom: '1px solid',
+            borderColor: 'divider',
+          },
+          '&:last-child > td': expanded ? {} : { borderBottom: '1px solid', borderColor: 'divider' },
+        }}
+      >
+        <TableCell sx={{ p: 0, textAlign: 'center' }}>
+          <IconButton
+            size="small"
+            onClick={(e) => { e.stopPropagation(); onToggle(); }}
+            aria-label={expanded ? 'Collapse row' : 'Expand row'}
+            sx={{ p: 0.25 }}
+          >
+            {expanded ? <KeyboardArrowUp sx={{ fontSize: 14 }} /> : <KeyboardArrowDown sx={{ fontSize: 14 }} />}
+          </IconButton>
+        </TableCell>
+        {SUMMARY_COLUMNS.map(col => (
+          <TableCell key={col.label} align={col.align ?? 'left'}>
+            {col.render(row)}
+          </TableCell>
+        ))}
+      </TableRow>
+      <TableRow>
+        <TableCell sx={{ p: 0, border: 0 }} colSpan={SUMMARY_COLUMNS.length + 1}>
+          <Collapse in={expanded} timeout={150} unmountOnExit>
+            <Box sx={{
+              bgcolor: 'action.hover',
+              p: 1,
+              borderLeft: 3,
+              borderColor: 'primary.main',
+              maxHeight: 150,
+              overflowY: 'auto',
+            }}>
+              <Box sx={{
+                display: 'grid',
+                gap: 1,
+                gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, 1fr)', md: 'repeat(3, 1fr)', lg: 'repeat(4, 1fr)' },
+              }}>
+                {DETAIL_GROUPS.map(group => {
+                  if (group.rtOnly && !isRT) return null;
+                  return (
+                    <Box key={group.title}>
+                      <Typography sx={{
+                        display: 'block',
+                        fontSize: 9.5,
+                        fontWeight: 700,
+                        textTransform: 'uppercase',
+                        letterSpacing: 0.5,
+                        color: group.faded ? 'text.disabled' : 'text.secondary',
+                        mb: 0.25,
+                        lineHeight: 1.4,
+                      }}>
+                        {group.title}
+                      </Typography>
+                      <Stack spacing={0}>
+                        {group.fields.map(field => (
+                          <Box
+                            key={field.key as string}
+                            sx={{ display: 'flex', justifyContent: 'space-between', gap: 0.5, py: '1px' }}
+                          >
+                            <Typography sx={{ fontSize: 10.5, color: 'text.secondary', lineHeight: 1.3 }}>
+                              {field.label}
+                            </Typography>
+                            <Typography sx={{
+                              fontSize: 10.5,
+                              color: group.faded ? 'text.disabled' : 'text.primary',
+                              fontFamily: field.type === 'currency' ? 'monospace' : undefined,
+                              textAlign: 'right',
+                              lineHeight: 1.3,
+                              wordBreak: 'break-word',
+                            }}>
+                              {renderDetailValue(row, field)}
+                            </Typography>
+                          </Box>
+                        ))}
+                      </Stack>
+                    </Box>
+                  );
+                })}
+              </Box>
+            </Box>
+          </Collapse>
+        </TableCell>
+      </TableRow>
+    </>
+  );
+}
+
+// ── Compact filter primitives ───────────────────────────────────────────
+interface CompactSingleSelectProps {
+  label: string;
+  value: string;
+  options: Array<{ value: string; label: string }>;
+  onChange: (v: string) => void;
+  minWidth?: number;
+  disabled?: boolean;
+  icon?: ReactNode;
+}
+
+function CompactSingleSelect({ label, value, options, onChange, minWidth = 90, disabled, icon }: CompactSingleSelectProps) {
+  return (
+    <FormControl size="small" sx={{ minWidth }}>
+      <Select
+        value={value}
+        onChange={(e) => onChange(e.target.value as string)}
+        displayEmpty
+        disabled={disabled}
+        renderValue={(selected) => {
+          const display = options.find(o => o.value === selected)?.label || (selected ? String(selected) : '');
+          return (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
+              {icon}
+              <Typography component="span" sx={{ fontSize: 11, color: 'text.secondary', flexShrink: 0 }}>
+                {label}:
+              </Typography>
+              <Typography component="span" sx={{
+                fontSize: 11,
+                color: 'text.primary',
+                fontVariantNumeric: 'tabular-nums',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}>
+                {display || '—'}
+              </Typography>
+            </Box>
+          );
+        }}
+        sx={{
+          height: 26,
+          fontSize: 11,
+          '& .MuiSelect-select': { py: 0, pl: 1, pr: '24px !important' },
+        }}
+      >
+        {options.map(o => (
+          <MenuItem key={o.value} value={o.value} sx={{ fontSize: 11.5 }}>{o.label}</MenuItem>
+        ))}
+      </Select>
+    </FormControl>
+  );
+}
+
+interface CompactMultiSelectProps {
+  label: string;
+  value: string[];
+  options: string[];
+  onChange: (v: string[]) => void;
+  minWidth?: number;
+}
+
+function CompactMultiSelect({ label, value, options, onChange, minWidth = 110 }: CompactMultiSelectProps) {
+  return (
+    <Autocomplete
+      multiple
+      size="small"
+      disableCloseOnSelect
+      options={options}
+      value={value}
+      onChange={(_, v) => onChange(v)}
+      renderTags={(values) => (
+        <Typography component="span" sx={{
+          fontSize: 11,
+          color: 'text.primary',
+          ml: 0.5,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          maxWidth: 90,
+        }}>
+          {values.length === 1 ? values[0] : `${values.length} sel.`}
+        </Typography>
+      )}
+      sx={{
+        minWidth,
+        maxWidth: 200,
+        '& .MuiOutlinedInput-root': {
+          py: '0 !important',
+          minHeight: 26,
+          fontSize: 11,
+          paddingRight: '32px !important',
+        },
+        '& .MuiAutocomplete-input': {
+          py: '2px !important',
+          fontSize: 11,
+        },
+        '& .MuiInputLabel-root': {
+          fontSize: 11,
+          transform: 'translate(8px, 6px) scale(1)',
+          '&.MuiInputLabel-shrink': {
+            transform: 'translate(8px, -7px) scale(0.85)',
+          },
+        },
+      }}
+      slotProps={{
+        paper: { sx: { fontSize: 11.5 } },
+      }}
+      renderInput={(params) => (
+        <TextField
+          {...params}
+          label={label}
+          placeholder={value.length === 0 ? 'Any' : ''}
+        />
+      )}
+    />
+  );
+}
+
+interface CompactDateInputProps {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}
+
+function CompactDateInput({ label, value, onChange }: CompactDateInputProps) {
+  return (
+    <TextField
+      size="small"
+      label={label}
+      type="date"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      InputLabelProps={{ shrink: true, sx: { fontSize: 11 } }}
+      sx={{
+        width: 140,
+        '& .MuiInputBase-root': { fontSize: 11, height: 26 },
+        '& .MuiInputBase-input': { py: 0.25, px: 1, fontSize: 11 },
+        '& .MuiInputLabel-shrink': { transform: 'translate(8px, -7px) scale(0.85)' },
+      }}
+    />
   );
 }
