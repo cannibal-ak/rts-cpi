@@ -29,7 +29,9 @@ export default function SingleChartViewer({
   sliceId, sliceName, supersetBaseUrl, currentIndex, total, onPrev, onNext,
 }: Props) {
   // Standalone explore mode strips Superset chrome (nav, menus) from the page.
-  const src = `${supersetBaseUrl}/superset/explore/?slice_id=${sliceId}&standalone=1`;
+  // Uses the canonical `/explore/` route — the legacy `/superset/explore/` path
+  // returns a 302 redirect to this one, so going direct saves a round-trip.
+  const src = `${supersetBaseUrl}/explore/?slice_id=${sliceId}&standalone=1`;
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', height: '100%', minWidth: 0 }}>
