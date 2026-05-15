@@ -10,13 +10,20 @@ interface ProtectedRouteProps {
   requiredModules?: ModuleCode[];
   requiredCapabilities?: Capability[];
   requireSuperAdmin?: boolean;
+  // Hard-blocks the Skywave platform admin from a route. Used for tenant-only
+  // surfaces (analytics dashboards) where the admin has no business being.
+  denyForSuperAdmin?: boolean;
 }
 
-export default function ProtectedRoute({ children, requiredRoles, requiredModules, requiredCapabilities, requireSuperAdmin }: ProtectedRouteProps) {
+export default function ProtectedRoute({ children, requiredRoles, requiredModules, requiredCapabilities, requireSuperAdmin, denyForSuperAdmin }: ProtectedRouteProps) {
   const { hasAccess, session } = useSession();
 
   if (requireSuperAdmin && !isSuperAdmin(session)) {
     return <Navigate to="/not-authorized" replace />;
+  }
+
+  if (denyForSuperAdmin && isSuperAdmin(session)) {
+    return <Navigate to="/" replace />;
   }
 
   const allowed = hasAccess({

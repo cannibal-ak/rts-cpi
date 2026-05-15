@@ -8,6 +8,9 @@ export interface TenantSession {
   tenant_name: string;
   enabled_modules: ModuleCode[];
   enabled_capabilities: Capability[];
+  // True for the Skywave platform admin tenant. The backend equivalent is
+  // is_platform_admin() in deps.py (identity-based, not role-based).
+  is_super_admin?: boolean;
   user: { id: string; name: string; email: string; roles: UserRole[]; avatar_url?: string };
 }
 

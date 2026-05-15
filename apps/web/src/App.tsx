@@ -91,9 +91,19 @@ export default function App() {
                   </ProtectedRoute>
                 } />
 
-                {/* Analytics Dashboards - Simplified Absolute Paths */}
-                <Route path="/dashboards" element={<SupersetPage />} />
-                <Route path="/dashboards/:id" element={<DashboardViewerPage />} />
+                {/* Analytics Dashboards — tenant-only. Platform admin is
+                    redirected home; tenant users still see only the dashboards
+                    their enabled_modules permit (see canAccessDashboard). */}
+                <Route path="/dashboards" element={
+                  <ProtectedRoute denyForSuperAdmin>
+                    <SupersetPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/dashboards/:id" element={
+                  <ProtectedRoute denyForSuperAdmin>
+                    <DashboardViewerPage />
+                  </ProtectedRoute>
+                } />
 
                 {/* Status pages */}
                 <Route path="/not-authorized" element={<NotAuthorizedPage />} />

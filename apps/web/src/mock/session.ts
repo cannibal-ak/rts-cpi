@@ -10,8 +10,12 @@ interface HomeIngestionJob {
 export const mockSession: TenantSession = {
   tenant_id: import.meta.env.VITE_TENANT_ID || 'a0000000-0000-0000-0000-000000000001',
   tenant_name: 'SkyWave Airlines Group',
-  enabled_modules: ['airline_jy', 'airline_pw', 'cfl_fjl'],
+  // Platform admin owns the tenant/pipeline management surfaces, not the
+  // tenant analytics dashboards. Modules are intentionally empty so
+  // canAccessDashboard() returns false for every tenant dashboard.
+  enabled_modules: [],
   enabled_capabilities: ['alerts', 'exports', 'saved_views', 'contracts'],
+  is_super_admin: true,
   user: {
     id: 'user-001',
     name: 'Alex Rivera',
@@ -27,6 +31,7 @@ export const mockRolePresets: Record<string, TenantSession> = {
     tenant_id: 'a0000000-0000-0000-0000-000000000001',
     tenant_name: 'Acme Airways - JY',
     enabled_modules: ['airline_jy'],
+    is_super_admin: false,
     user: { id: 'user-jy', name: 'Airline_JY', email: 'jy@airline.com', roles: ['TENANT_ADMIN'] },
   },
   airline_pw: {
@@ -34,6 +39,7 @@ export const mockRolePresets: Record<string, TenantSession> = {
     tenant_id: 'bb000000-0000-0000-0000-000000000001',
     tenant_name: 'Skybound - PW',
     enabled_modules: ['airline_pw'],
+    is_super_admin: false,
     user: { id: 'user-pw', name: 'Airline_PW', email: 'pw@airline.com', roles: ['TENANT_ADMIN'] },
   },
   cruise_fjl: {
@@ -41,6 +47,7 @@ export const mockRolePresets: Record<string, TenantSession> = {
     tenant_id: 'cc000000-0000-0000-0000-000000000001',
     tenant_name: 'Baltic Ferries - FJL',
     enabled_modules: ['cfl_fjl'],
+    is_super_admin: false,
     user: { id: 'user-fjl', name: 'Cruise_FJL', email: 'fjl@cruise.com', roles: ['TENANT_ADMIN'] },
   },
 };
