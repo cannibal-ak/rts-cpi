@@ -73,9 +73,6 @@ TENANT_TABLES = {
     "FJL": ["vw_cfl_cpi_fjl_snapshot"],
 }
 
-# Legacy combined tables are no longer supported
-DOMAIN_TABLES = {}
-
 
 # ── Superset client ─────────────────────────────────────────
 
@@ -228,7 +225,7 @@ async def fetch_guest_token(
     #    so by this point we always have a tenant user whose identity matches
     #    the dashboard's tenant.
     rls_rules: list[dict] = []
-    table_names = TENANT_TABLES.get(dash["tenant"], DOMAIN_TABLES.get(dash["domain"], []))
+    table_names = TENANT_TABLES.get(dash["tenant"], [])
     try:
         dataset_ids = await superset_client.resolve_dataset_ids(table_names)
     except Exception as e:
