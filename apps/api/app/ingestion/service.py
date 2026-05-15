@@ -250,7 +250,7 @@ class IngestionService:
 
         date_field = self._date_field_for(job.domain)
 
-        for row in read_data_file(str(staged_file)):
+        for row in read_data_file(str(staged_file), domain=job.domain):
             total += 1
             raw_date = (row.get(date_field) or "").strip()
             parsed_dt = (
@@ -650,7 +650,7 @@ class IngestionService:
             """
         )
         inserted = 0
-        for row in read_data_file(str(staged_file)):
+        for row in read_data_file(str(staged_file), domain=job.domain):
             dep_date = parse_velocity_date(row.get("DepDate"))
             if not dep_date:
                 continue

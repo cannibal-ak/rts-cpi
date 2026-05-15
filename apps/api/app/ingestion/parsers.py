@@ -9,8 +9,34 @@ valid based on critical fields.
 from __future__ import annotations
 
 import csv
+import logging
 from datetime import date, datetime, time
 from typing import Iterator
+
+# App-level loggers don't propagate in this container (see main.py:27);
+# route through "uvicorn.error" so the auto-detect notice reaches stderr.
+log = logging.getLogger("uvicorn.error")
+
+# Canonical 13-column header for VELOCITY CSV files. When a velocity
+# upload arrives without a header row (some airline exports omit it),
+# read_data_file injects these names so DictReader yields rows keyed
+# the same way as a headed file. Order matches the on-disk column
+# layout — do not reorder without confirming exporter output.
+_VELOCITY_CANONICAL_HEADERS: list[str] = [
+    "DepDate",
+    "DepTime",
+    "DepCode",
+    "CityPair",
+    "Eqp",
+    "LegsegType",
+    "LegSegOrder",
+    "Days_Left",
+    "Compartment",
+    "Current_Booking",
+    "Capacity",
+    "Actual_Seat_Factor",
+    "Forecasted_Seat_Factor",
+]
 
 
 def parse_date(value: str | None) -> date | None:
@@ -119,11 +145,17 @@ def safe_int_nullable(value: object) -> int | None:
         return None
 
 
-def read_data_file(file_path: str) -> Iterator[dict]:
+def read_data_file(
+    file_path: str, domain: str | None = None
+) -> Iterator[dict]:
     """Yield rows from a CSV or XLSX file as ``dict``s keyed by header.
 
     Auto-detects format by extension. The XLSX path uses openpyxl in
     read-only mode so memory stays bounded for large workbooks.
+
+    When ``domain == "VELOCITY"`` and the file is CSV, peeks at line 1
+    and injects the canonical 13-column header if the file is detected
+    as headerless. Other domains and the XLSX path are unchanged.
     """
     if file_path.lower().endswith(".xlsx"):
         from openpyxl import load_workbook
@@ -152,7 +184,33 @@ def read_data_file(file_path: str) -> Iterator[dict]:
             wb.close()
         return
 
+    inject_velocity_header = False
+    if domain == "VELOCITY":
+        with open(file_path, "r", encoding="utf-8-sig") as fh:
+            first_line = fh.readline()
+        if first_line:
+            first_row = next(csv.reader([first_line]), [])
+            first_field = first_row[0].strip() if first_row else ""
+            n_fields = len(first_row)
+            if first_field != "DepDate":
+                if n_fields != 13:
+                    raise ValueError(
+                        f"Headerless velocity file has {n_fields} "
+                        "columns, expected 13"
+                    )
+                inject_velocity_header = True
+                log.info(
+                    "Auto-detected headerless velocity file; injecting "
+                    "canonical 13-column header (file=%s)",
+                    file_path,
+                )
+
     with open(file_path, "r", encoding="utf-8-sig") as fh:
-        reader = csv.DictReader(fh)
+        if inject_velocity_header:
+            reader = csv.DictReader(
+                fh, fieldnames=_VELOCITY_CANONICAL_HEADERS
+            )
+        else:
+            reader = csv.DictReader(fh)
         for row in reader:
             yield row
