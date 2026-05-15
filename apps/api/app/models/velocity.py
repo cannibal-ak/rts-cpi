@@ -1,4 +1,4 @@
-"""JY Velocity snapshot — flight booking/load factor data with tenant isolation."""
+"""Velocity snapshot — flight booking/load factor data, multi-tenant (airline_code)."""
 
 import uuid
 from sqlalchemy import Column, String, Integer, Date, DateTime, ForeignKey
@@ -7,8 +7,8 @@ from sqlalchemy.sql import func
 from app.core.database import Base
 
 
-class JyVelocitySnapshot(Base):
-    __tablename__ = "jy_velocity_snapshot"
+class VelocitySnapshot(Base):
+    __tablename__ = "velocity_snapshot"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenant.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -35,7 +35,8 @@ class JyVelocitySnapshot(Base):
     actual_seat_factor = Column(Integer, nullable=False, default=0)
     forecasted_seat_factor = Column(Integer, nullable=False, default=0)
 
-    # Tenant segregation & metadata
+    # Tenant + airline discrimination & metadata
+    airline_code = Column(String(8), nullable=False, index=True)
     data_owner = Column(String(32), nullable=True, index=True)
     tenant_code = Column(String(16), nullable=True, index=True)
     business_type = Column(String(16), nullable=True, index=True)

@@ -20,6 +20,7 @@ Design notes:
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import shutil
 import uuid
@@ -53,6 +54,8 @@ from app.ingestion.parsers import (
 )
 from app.models.ingestion import IngestionAuditLog, IngestionJob
 
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_STAGING_ROOT = Path("/app/data/staging")
 
@@ -141,6 +144,11 @@ class IngestionService:
         file_size = len(file_content)
         basename = os.path.basename(filename)
 
+        # Dedup gate: an identical file (same SHA-256) that is already
+        # COMMITTED is rejected outright with HTTP 409. FAILED / REJECTED
+        # prior jobs are silently allowed (the user is retrying after a
+        # parser fix). STAGED / VALIDATED with the same hash is allowed
+        # too but logged so operators can spot accidental duplicates.
         existing_committed = (
             self.db.query(IngestionJob)
             .filter(
@@ -150,11 +158,34 @@ class IngestionService:
             .first()
         )
         if existing_committed:
-            return UploadResult(
-                job=existing_committed,
-                duplicate=True,
-                conflict=False,
-                existing_job_id=existing_committed.id,
+            committed_at = existing_committed.committed_at
+            committed_label = (
+                committed_at.strftime("%Y-%m-%d")
+                if committed_at is not None
+                else "unknown date"
+            )
+            raise IngestionConflictError(
+                f"Duplicate file: this exact file was already committed "
+                f"on {committed_label} as job {existing_committed.id}",
+                existing_job_id=str(existing_committed.id),
+            )
+
+        existing_inflight = (
+            self.db.query(IngestionJob)
+            .filter(
+                IngestionJob.file_hash == file_hash,
+                IngestionJob.status.in_(("STAGED", "VALIDATED")),
+            )
+            .first()
+        )
+        if existing_inflight:
+            logger.warning(
+                "ingestion.upload_file: a %s copy of file_hash=%s already "
+                "exists as job %s (filename=%r). Proceeding with re-stage.",
+                existing_inflight.status,
+                file_hash,
+                existing_inflight.id,
+                basename,
             )
 
         conflict_job = (
@@ -248,6 +279,16 @@ class IngestionService:
         rejection_reasons: list[dict[str, str]] = []
 
         date_field = self._date_field_for(job.domain)
+        schema_variant: Optional[str] = None
+        if job.domain == "AIRLINE":
+            schema_variant = self._airline_schema_variant(staged_file)
+            if schema_variant == "NEW":
+                date_field = "CaptureDate"
+            elif schema_variant == "LEGACY":
+                date_field = "CapDate"
+            # UNKNOWN: leave date_field at "CapDate"; every row will fail
+            # the date gate and the post-loop branch tags the job with a
+            # schema-specific error_message instead of the generic one.
 
         for row in read_data_file(str(staged_file)):
             total += 1
@@ -279,15 +320,23 @@ class IngestionService:
             "rejection_reasons_sample": rejection_reasons,
             "date_field_checked": date_field,
         }
+        if schema_variant is not None:
+            summary["schema_variant"] = schema_variant
 
         if total == 0:
             job.status = "REJECTED"
             job.error_message = "Staged file contains zero data rows"
         elif valid == 0:
             job.status = "REJECTED"
-            job.error_message = (
-                f"All {total} rows rejected during validation"
-            )
+            if schema_variant == "UNKNOWN":
+                job.error_message = (
+                    "Unrecognized AIRLINE schema: expected a 'CapDate' "
+                    "(legacy ~80-col) or 'CaptureDate' (new 45-col) header"
+                )
+            else:
+                job.error_message = (
+                    f"All {total} rows rejected during validation"
+                )
         else:
             job.status = "VALIDATED"
             job.error_message = None
@@ -479,6 +528,23 @@ class IngestionService:
             return "DepDate"
         return "CapDate"
 
+    @staticmethod
+    def _airline_schema_variant(staged_file: Path) -> str:
+        # Two AIRLINE feed schemas exist in the wild: the LEGACY ~80-column
+        # variant (header includes "CapDate") and the NEW 45-column variant
+        # introduced post-2026-05 (header includes "CaptureDate"). We peek
+        # at the first data row's keys (which mirror the header row for
+        # both CSV and XLSX via read_data_file) to pick the path.
+        first = next(read_data_file(str(staged_file)), None)
+        if first is None:
+            return "UNKNOWN"
+        headers = {str(k).strip() for k in first.keys() if k is not None}
+        if "CapDate" in headers:
+            return "LEGACY"
+        if "CaptureDate" in headers:
+            return "NEW"
+        return "UNKNOWN"
+
     def _find_prior_committed(self, job: IngestionJob) -> Optional[IngestionJob]:
         return (
             self.db.query(IngestionJob)
@@ -513,7 +579,7 @@ class IngestionService:
         elif prior.domain == "VELOCITY":
             self.db.execute(
                 text(
-                    "DELETE FROM jy_velocity_snapshot "
+                    "DELETE FROM velocity_snapshot "
                     "WHERE tenant_code = :tc AND report_date = :rd"
                 ),
                 {"tc": prior.tenant_code, "rd": prior.file_date},
@@ -558,6 +624,23 @@ class IngestionService:
     def _insert_airline_rows(
         self, job: IngestionJob, staged_file: Path
     ) -> int:
+        # Dispatch on header shape. Migration 023 already dropped the
+        # legacy `pos`/`poa`/`pod`/`poc` columns and added `ref_pos` /
+        # `comp_pos` / `ref_channel` / `comp_channel`, so both branches
+        # write the post-023 column set.
+        variant = self._airline_schema_variant(staged_file)
+        if variant == "NEW":
+            return self._insert_airline_rows_new(job, staged_file)
+        if variant == "LEGACY":
+            return self._insert_airline_rows_legacy(job, staged_file)
+        raise IngestionValidationError(
+            f"Unrecognized AIRLINE schema in {staged_file.name}: "
+            "expected a 'CapDate' (legacy) or 'CaptureDate' (new) header"
+        )
+
+    def _insert_airline_rows_legacy(
+        self, job: IngestionJob, staged_file: Path
+    ) -> int:
         sql = text(
             """
             INSERT INTO airline_cpi_snapshot (
@@ -568,7 +651,7 @@ class IngestionService:
                 comp_al, comp_flt_num, comp_org, comp_dst, comp_dep_date,
                 comp_cab_code, comp_tot_fare, comp_base_fare, comp_tax,
                 comp_yq, comp_seats,
-                pos, poa, data_owner, tenant_code, business_type,
+                ref_pos, comp_pos, data_owner, tenant_code, business_type,
                 report_date, source_file, loaded_at,
                 -- Phase 2C: 47 new dictionary columns (migration 022)
                 ref_dep_time, ref_arr_time, ref_stops, ref_via,
@@ -585,7 +668,7 @@ class IngestionService:
                 comp_ret_arr_time, comp_ret_stops, comp_ret_via,
                 comp_ret_cab_name, comp_ret_cab_code, comp_ret_bkg_class,
                 comp_ret_seats, comp_ret_equip_code,
-                pod, poc, path
+                path
             ) VALUES (
                 :id, :tid, :cd, :ct, :tt,
                 :ra, :rf, :ro, :rd, :rdd,
@@ -594,7 +677,7 @@ class IngestionService:
                 :ca, :cf, :co, :cdst, :cdd,
                 :ccc, :ctf, :cbf, :ctax,
                 :cyq, :cs,
-                :pos, :poa, :owner, :tcode, :btype,
+                :ref_pos, :comp_pos, :owner, :tcode, :btype,
                 :rdate, :sfile, now(),
                 :ref_dep_time, :ref_arr_time, :ref_stops, :ref_via,
                 :ref_ff_code, :ref_cab_name, :ref_bkg_class, :ref_yr,
@@ -610,7 +693,7 @@ class IngestionService:
                 :comp_ret_arr_time, :comp_ret_stops, :comp_ret_via,
                 :comp_ret_cab_name, :comp_ret_cab_code, :comp_ret_bkg_class,
                 :comp_ret_seats, :comp_ret_equip_code,
-                :pod, :poc, :path
+                :path
             )
             """
         )
@@ -647,10 +730,12 @@ class IngestionService:
                 "ctax": safe_float(row.get("CompTax")),
                 "cyq": safe_float(row.get("CompYQ")),
                 "cs": safe_int(row.get("CompSeats") or 9),
-                # pos/poa: read from source (PW carries them); fall back to "US"
-                # so JY rows (no POS/POA in source) still satisfy NOT NULL.
-                "pos": (row.get("POS") or "US")[:4],
-                "poa": (row.get("POA") or "US")[:4],
+                # ref_pos: post-023 nullable point-of-sale (the host carrier's
+                # POS). PW source carries POS; JY legacy source does not.
+                # The legacy POA field has no post-023 column; comp_pos is
+                # left NULL because the legacy feed had no comp-side POS.
+                "ref_pos": ((row.get("POS") or "").strip()[:4] or None),
+                "comp_pos": None,
                 "owner": job.tenant_code,
                 "tcode": job.tenant_code,
                 "btype": _business_type_for(job.domain),
@@ -715,11 +800,172 @@ class IngestionService:
                     (row.get("CompRetAircraft") or row.get("CompRetEquipCode") or "")
                     .strip()[:32] or None
                 ),
-                # Point-of-* (PW source carries pod/poc)
-                "pod": ((row.get("POD") or "").strip()[:4] or None),
-                "poc": ((row.get("POC") or "").strip()[:4] or None),
-                # Provenance (no source carries today)
+                # Provenance (no source carries today).
+                # POD/POC dropped in migration 023 — no DB target remains.
                 "path": ((row.get("Path") or "").strip()[:50] or None),
+            }
+            self.db.execute(sql, params)
+            inserted += 1
+        return inserted
+
+    def _insert_airline_rows_new(
+        self, job: IngestionJob, staged_file: Path
+    ) -> int:
+        # New 45-column JY airline feed (post-2026-05). Column mapping
+        # from file header → airline_cpi_snapshot column:
+        #
+        #   CaptureDate            → cap_date             (NOT NULL)
+        #   CaptureTime            → cap_time             (NOT NULL)
+        #   DepCode                → ref_flt_num          (NOT NULL, [:10])
+        #   Org                    → ref_org              (NOT NULL)
+        #   Dest                   → ref_dst              (NOT NULL)
+        #   DepDate                → ref_dep_date         (NOT NULL)
+        #   DepTime                → ref_dep_time         (nullable)
+        #   ArrTime                → ref_arr_time         (nullable)
+        #   HostFare               → ref_tot_fare,        (NOT NULL)
+        #                            ref_base_fare        (feed does not split)
+        #   itinerary_type         → ref_stops            (Nonstop→0 else 1)
+        #   host_marketing_carrier → ref_al               (NOT NULL)
+        #   leg_sequence           → path                 (nullable, [:50])
+        #   connection_points      → ref_via              (nullable)
+        #   CompCode / competitor_operating_carrier
+        #                          → comp_al              (NOT NULL)
+        #   CompDepCode            → comp_flt_num         (NOT NULL, [:10])
+        #   CompDepOrg             → comp_org             (NOT NULL)
+        #   CompDepDest            → comp_dst             (NOT NULL)
+        #   CompDepDate            → comp_dep_date        (NOT NULL)
+        #   CompDepTime            → comp_dep_time        (nullable)
+        #   CompArrTime            → comp_arr_time        (nullable)
+        #   CompFare               → comp_tot_fare,       (NOT NULL)
+        #                            comp_base_fare       (feed does not split)
+        #   comp_itinerary_type    → comp_stops           (Nonstop→0 else 1)
+        #   cabin                  → ref_cab_code/code,   (NOT NULL [:4])
+        #                            ref_cab_name/name    (full string [:20])
+        #   comp_connection_points → comp_via             (nullable)
+        #   pos_country            → ref_pos, comp_pos    (nullable)
+        #   channel                → ref_channel, comp_channel (nullable)
+        #   currency               → ref_curr, comp_curr  (nullable)
+        #   competitor_seats_left_hint → comp_seats       (NOT NULL int)
+        #
+        # Fields with no DB equivalent (intentionally skipped, not warnings
+        # per row to avoid log spam): ID, num_legs, through_flight_flag,
+        # comp_leg_sequence, fare_tax_included_flag, competitor_sold_out_flag,
+        # days_to_departure, dow, ingest_batch_id, source_record_id,
+        # data_source, created_ts, user_action_flag, action_by,
+        # before_json, after_json.
+        #
+        # NOT NULL DB columns with no source field (defaulted): trip_type='OW'
+        # (the feed compares one-way pairs per row), ref_tax=0, ref_yq=0,
+        # ref_seats=9, comp_tax=0, comp_yq=0.
+        sql = text(
+            """
+            INSERT INTO airline_cpi_snapshot (
+                id, tenant_id, cap_date, cap_time, trip_type,
+                ref_al, ref_flt_num, ref_org, ref_dst, ref_dep_date,
+                ref_cab_code, ref_tot_fare, ref_base_fare, ref_tax,
+                ref_yq, ref_seats, ref_curr,
+                comp_al, comp_flt_num, comp_org, comp_dst, comp_dep_date,
+                comp_cab_code, comp_tot_fare, comp_base_fare, comp_tax,
+                comp_yq, comp_seats, comp_curr,
+                ref_dep_time, ref_arr_time, ref_stops, ref_via,
+                ref_cab_name,
+                comp_dep_time, comp_arr_time, comp_stops, comp_via,
+                comp_cab_name,
+                ref_pos, ref_channel, comp_pos, comp_channel,
+                path,
+                data_owner, tenant_code, business_type,
+                report_date, source_file, loaded_at
+            ) VALUES (
+                :id, :tid, :cd, :ct, :tt,
+                :ra, :rf, :ro, :rd, :rdd,
+                :rcc, :rtf, :rbf, :rtax,
+                :ryq, :rs, :rcur,
+                :ca, :cf, :co, :cdst, :cdd,
+                :ccc, :ctf, :cbf, :ctax,
+                :cyq, :cs, :ccur,
+                :ref_dep_time, :ref_arr_time, :ref_stops, :ref_via,
+                :ref_cab_name,
+                :comp_dep_time, :comp_arr_time, :comp_stops, :comp_via,
+                :comp_cab_name,
+                :ref_pos, :ref_channel, :comp_pos, :comp_channel,
+                :path,
+                :owner, :tcode, :btype,
+                :rdate, :sfile, now()
+            )
+            """
+        )
+        inserted = 0
+        for row in read_data_file(str(staged_file)):
+            cap_date = parse_date(row.get("CaptureDate"))
+            if not cap_date:
+                continue
+            cabin_name = (row.get("cabin") or "").strip()
+            cabin_code = (cabin_name or "Y")[:4]
+
+            def _stops_from(itin: str) -> Optional[int]:
+                t = (itin or "").strip().lower()
+                if not t:
+                    return None
+                return 0 if t == "nonstop" else 1
+
+            host_al = (row.get("host_marketing_carrier") or job.tenant_code or "").strip()[:3]
+            comp_al_val = (
+                (row.get("CompCode") or row.get("competitor_operating_carrier") or "").strip()[:3]
+                or "XX"
+            )
+            currency = (row.get("currency") or "").strip()[:4] or None
+            pos_country = (row.get("pos_country") or "").strip()[:4] or None
+            channel = (row.get("channel") or "").strip()[:20] or None
+            params = {
+                "id": uuid.uuid4(),
+                "tid": job.tenant_id,
+                "cd": cap_date,
+                "ct": parse_time(row.get("CaptureTime")) or datetime.now().time(),
+                "tt": "OW",
+                "ra": host_al or job.tenant_code[:3],
+                "rf": (row.get("DepCode") or "").strip()[:10],
+                "ro": (row.get("Org") or "").strip()[:4],
+                "rd": (row.get("Dest") or "").strip()[:4],
+                "rdd": parse_date(row.get("DepDate")) or cap_date,
+                "rcc": cabin_code,
+                "rtf": safe_float(row.get("HostFare")),
+                "rbf": safe_float(row.get("HostFare")),
+                "rtax": 0.0,
+                "ryq": 0.0,
+                "rs": 9,
+                "rcur": currency,
+                "ca": comp_al_val,
+                "cf": (row.get("CompDepCode") or "").strip()[:10],
+                "co": (row.get("CompDepOrg") or row.get("Org") or "").strip()[:4],
+                "cdst": (row.get("CompDepDest") or row.get("Dest") or "").strip()[:4],
+                "cdd": parse_date(row.get("CompDepDate")) or cap_date,
+                "ccc": cabin_code,
+                "ctf": safe_float(row.get("CompFare")),
+                "cbf": safe_float(row.get("CompFare")),
+                "ctax": 0.0,
+                "cyq": 0.0,
+                "cs": safe_int(row.get("competitor_seats_left_hint") or 9),
+                "ccur": currency,
+                "ref_dep_time": ((row.get("DepTime") or "").strip()[:4] or None),
+                "ref_arr_time": ((row.get("ArrTime") or "").strip()[:4] or None),
+                "ref_stops": _stops_from(row.get("itinerary_type") or ""),
+                "ref_via": ((row.get("connection_points") or "").strip()[:4] or None),
+                "ref_cab_name": (cabin_name[:20] or None),
+                "comp_dep_time": ((row.get("CompDepTime") or "").strip()[:4] or None),
+                "comp_arr_time": ((row.get("CompArrTime") or "").strip()[:4] or None),
+                "comp_stops": _stops_from(row.get("comp_itinerary_type") or ""),
+                "comp_via": ((row.get("comp_connection_points") or "").strip()[:4] or None),
+                "comp_cab_name": (cabin_name[:20] or None),
+                "ref_pos": pos_country,
+                "ref_channel": channel,
+                "comp_pos": pos_country,
+                "comp_channel": channel,
+                "path": ((row.get("leg_sequence") or "").strip()[:50] or None),
+                "owner": job.tenant_code,
+                "tcode": job.tenant_code,
+                "btype": _business_type_for(job.domain),
+                "rdate": job.file_date,
+                "sfile": job.filename,
             }
             self.db.execute(sql, params)
             inserted += 1
@@ -730,19 +976,19 @@ class IngestionService:
     ) -> int:
         sql = text(
             """
-            INSERT INTO jy_velocity_snapshot (
+            INSERT INTO velocity_snapshot (
                 id, tenant_id, dep_date, dep_time, dep_code, city_pair,
                 origin, destination, eqp, legseg_type, leg_seg_order,
                 days_left, compartment, current_booking, capacity,
                 actual_seat_factor, forecasted_seat_factor,
-                data_owner, tenant_code, business_type, report_date,
+                data_owner, tenant_code, airline_code, business_type, report_date,
                 source_file, loaded_at
             ) VALUES (
                 :id, :tid, :dd, :dt, :dc, :cp,
                 :org, :dst, :eqp, :lst, :lso,
                 :dl, :comp, :cb, :cap,
                 :asf, :fsf,
-                :owner, :tcode, :btype, :rdate,
+                :owner, :tcode, :ac, :btype, :rdate,
                 :sfile, now()
             )
             """
@@ -775,6 +1021,7 @@ class IngestionService:
                 "fsf": safe_int(row.get("Forecasted_Seat_Factor") or 0),
                 "owner": job.tenant_code,
                 "tcode": job.tenant_code,
+                "ac": job.tenant_code,
                 "btype": _business_type_for(job.domain),
                 "rdate": job.file_date,
                 "sfile": job.filename,
