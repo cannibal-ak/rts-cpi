@@ -19,7 +19,7 @@ import logging
 from typing import Dict, Any
 from fastapi import APIRouter, Depends, HTTPException
 from app.core.config import settings
-from app.core.deps import get_user_identity, get_user_roles
+from app.core.deps import get_user_identity, get_user_roles, is_platform_admin
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +72,6 @@ TENANT_TABLES = {
     "PW":  ["vw_airline_cpi_pw_snapshot"],
     "FJL": ["vw_cfl_cpi_fjl_snapshot"],
 }
-
-# Legacy combined tables are no longer supported
-DOMAIN_TABLES = {}
 
 
 # ── Superset client ─────────────────────────────────────────
@@ -207,28 +204,36 @@ async def fetch_guest_token(
         })
 
     # 2. Access control
-    is_admin = "TENANT_ADMIN" in user_roles
-    if not is_admin and user_identity != dash["tenant"]:
+    #    Platform admins (skywave tenant) manage pipelines and tenants — they
+    #    do not consume tenant dashboards. Tenant users only access their own
+    #    dashboard.  Note: the previous ``is_admin = "TENANT_ADMIN" in user_roles``
+    #    check was structurally broken — every authenticated user receives
+    #    TENANT_ADMIN via get_user_roles (deps.py), so the bypass fired for
+    #    everyone. Use is_platform_admin() which is identity-based.
+    if is_platform_admin(user_identity, user_roles):
+        raise HTTPException(403, detail={
+            "message": "Platform administrators do not have access to tenant dashboards. Sign in as the tenant to view its dashboard.",
+        })
+    if user_identity != dash["tenant"]:
         raise HTTPException(403, detail={
             "message": f"Access denied: '{dash['title']}' is restricted to {dash['tenant']} users.",
         })
 
-    # 3. Build RLS rules (tenant-level row filtering for non-admins)
+    # 3. Build RLS rules (tenant-level row filtering).
     #    Per-tenant views already filter by tenant_code, so RLS rules are a
-    #    defense-in-depth measure.  We resolve the per-tenant dataset first,
-    #    falling back to the combined domain dataset if the tenant-specific
-    #    one hasn't been registered in Superset yet.
+    #    defense-in-depth measure. Platform admins were short-circuited above,
+    #    so by this point we always have a tenant user whose identity matches
+    #    the dashboard's tenant.
     rls_rules: list[dict] = []
-    if not is_admin:
-        table_names = TENANT_TABLES.get(dash["tenant"], DOMAIN_TABLES.get(dash["domain"], []))
-        try:
-            dataset_ids = await superset_client.resolve_dataset_ids(table_names)
-        except Exception as e:
-            logger.error(f"Dataset resolution failed: {e}")
-            dataset_ids = []
+    table_names = TENANT_TABLES.get(dash["tenant"], [])
+    try:
+        dataset_ids = await superset_client.resolve_dataset_ids(table_names)
+    except Exception as e:
+        logger.error(f"Dataset resolution failed: {e}")
+        dataset_ids = []
 
-        for ds_id in dataset_ids:
-            rls_rules.append({"dataset": ds_id, "clause": f"tenant_code = '{user_identity}'"})
+    for ds_id in dataset_ids:
+        rls_rules.append({"dataset": ds_id, "clause": f"tenant_code = '{user_identity}'"})
 
     # 4. Get guest token (use numeric Superset ID – see create_guest_token docstring)
     try:
@@ -317,9 +322,16 @@ async def list_dashboard_charts(
             "message": f"Unknown dashboard_id '{dashboard_id}'. Valid IDs: {list(DASHBOARDS.keys())}",
         })
 
-    # 2. Access control — mirror the guest-token endpoint
-    is_admin = "TENANT_ADMIN" in user_roles
-    if not is_admin and user_identity != dash["tenant"]:
+    # 2. Access control — mirror the guest-token endpoint.
+    #    is_platform_admin() is identity-based (skywave tenant), not role-based.
+    #    Every authenticated user gets TENANT_ADMIN via get_user_roles (deps.py),
+    #    so a role-based admin check would let every tenant bypass tenant
+    #    isolation — see the equivalent fix on fetch_guest_token().
+    if is_platform_admin(user_identity, user_roles):
+        raise HTTPException(403, detail={
+            "message": "Platform administrators do not have access to tenant dashboards. Sign in as the tenant to view its dashboard.",
+        })
+    if user_identity != dash["tenant"]:
         raise HTTPException(403, detail={
             "message": f"Access denied: '{dash['title']}' is restricted to {dash['tenant']} users.",
         })

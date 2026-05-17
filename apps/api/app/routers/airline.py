@@ -183,10 +183,9 @@ def export_snapshots(
 
     # Headers
     headers = [
-        "Capture Date", "Capture Time", "Trip Type", 
+        "Capture Date", "Capture Time", "Trip Type",
         "Ref Airline", "Ref Flt Num", "Ref Org", "Ref Dst", "Ref Dep Date", "Ref Cabin", "Ref Fare",
         "Comp Airline", "Comp Flt Num", "Comp Org", "Comp Dst", "Comp Dep Date", "Comp Cabin", "Comp Fare",
-        "POS", "POA"
     ]
     ws.append(headers)
 
@@ -196,7 +195,6 @@ def export_snapshots(
             r.cap_date.isoformat(), r.cap_time.isoformat(), r.trip_type,
             r.ref_al, r.ref_flt_num, r.ref_org, r.ref_dst, r.ref_dep_date.isoformat(), r.ref_cab_code, float(r.ref_tot_fare),
             r.comp_al, r.comp_flt_num, r.comp_org, r.comp_dst, r.comp_dep_date.isoformat(), r.comp_cab_code, float(r.comp_tot_fare),
-            r.pos, r.poa
         ])
 
     output = io.BytesIO()
@@ -221,13 +219,15 @@ VELOCITY_TENANTS = set(VELOCITY_VIEW_MAP.keys())
 
 
 def _resolve_velocity_tenant(user_identity: str, user_roles: list[str], tenant: str | None) -> str:
-    """Validate scope and return effective tenant for velocity (JY or PW)."""
+    """Validate scope and return effective tenant code for velocity."""
     if is_platform_admin(user_identity, user_roles):
-        effective = tenant or "JY"  # platform admin can pick, defaults to JY
+        effective = tenant or "JY"
     else:
         if user_identity not in VELOCITY_TENANTS:
             raise HTTPException(status_code=403, detail="Not Authorized")
-        effective = user_identity  # locked to own tenant; ignore ?tenant
+        if tenant and tenant != user_identity:
+            raise HTTPException(status_code=400, detail="Tenant scope mismatch")
+        effective = user_identity
     if effective not in VELOCITY_TENANTS:
         raise HTTPException(status_code=400, detail="Invalid tenant for velocity module")
     return effective

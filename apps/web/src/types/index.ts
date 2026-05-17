@@ -8,6 +8,9 @@ export interface TenantSession {
   tenant_name: string;
   enabled_modules: ModuleCode[];
   enabled_capabilities: Capability[];
+  // True for the Skywave platform admin tenant. The backend equivalent is
+  // is_platform_admin() in deps.py (identity-based, not role-based).
+  is_super_admin?: boolean;
   user: { id: string; name: string; email: string; roles: UserRole[]; avatar_url?: string };
 }
 
@@ -44,6 +47,9 @@ export interface SavedView {
 }
 
 // ──────── Airline snapshot ────────
+// Mirrors apps/api/app/schemas/airline.py AirlineSnapshotOut.
+// All non-core fields are Optional in Pydantic — declared optional here so
+// the UI can render '—' for missing values without TS complaints.
 export interface AirlineSnapshot {
   id: string;
   cap_date: string;
@@ -75,6 +81,78 @@ export interface AirlineSnapshot {
   poa: string;
   fare_delta?: number;
   fare_delta_pct?: number;
+
+  // Reference outbound additions
+  ref_dep_time?: string | null;
+  ref_arr_time?: string | null;
+  ref_stops?: number | null;
+  ref_via?: string | null;
+  ref_ff_code?: string | null;
+  ref_cab_name?: string | null;
+  ref_bkg_class?: string | null;
+  ref_yr?: number | null;
+  ref_anc_price?: number | null;
+  ref_anc_type?: string | null;
+  ref_equip_code?: string | null;
+  ref_equip_name?: string | null;
+
+  // Reference return leg
+  ref_ret_flt_num?: string | null;
+  ref_ret_dep_date?: string | null;
+  ref_ret_dep_time?: string | null;
+  ref_ret_arr_time?: string | null;
+  ref_ret_stops?: number | null;
+  ref_ret_via?: string | null;
+  ref_ret_cab_name?: string | null;
+  ref_ret_cab_code?: string | null;
+  ref_ret_bkg_class?: string | null;
+  ref_ret_seats?: number | null;
+  ref_ret_equip_code?: string | null;
+
+  // Competitor outbound additions
+  comp_dep_time?: string | null;
+  comp_arr_time?: string | null;
+  comp_stops?: number | null;
+  comp_via?: string | null;
+  comp_ff_code?: string | null;
+  comp_cab_name?: string | null;
+  comp_bkg_class?: string | null;
+  comp_yr?: number | null;
+  comp_anc_price?: number | null;
+  comp_anc_type?: string | null;
+  comp_equip_code?: string | null;
+  comp_equip_name?: string | null;
+
+  // Competitor return leg
+  comp_ret_flt_num?: string | null;
+  comp_ret_dep_date?: string | null;
+  comp_ret_dep_time?: string | null;
+  comp_ret_arr_time?: string | null;
+  comp_ret_stops?: number | null;
+  comp_ret_via?: string | null;
+  comp_ret_cab_name?: string | null;
+  comp_ret_cab_code?: string | null;
+  comp_ret_bkg_class?: string | null;
+  comp_ret_seats?: number | null;
+  comp_ret_equip_code?: string | null;
+
+  // Provenance and dictionary additions
+  path?: string | null;
+  ref_pos?: string | null;
+  ref_channel?: string | null;
+  comp_pos?: string | null;
+  comp_channel?: string | null;
+
+  // Infra / metadata
+  ref_curr?: string | null;
+  comp_curr?: string | null;
+  tenant_code?: string | null;
+  report_date?: string | null;
+  file_date?: string | null;
+  source_file?: string | null;
+  business_type?: string | null;
+  ingested_at?: string | null;
+  loaded_at?: string | null;
 }
 
 // ──────── JY velocity snapshot ────────
@@ -114,7 +192,7 @@ export interface CflSnapshot {
   id: string;
   cap_date: string;
   cap_time: string;
-  trip_type: 'ONE_WAY' | 'ROUND_TRIP';
+  trip_type: string;
   source: string;
   org: string;
   dest: string;

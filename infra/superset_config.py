@@ -55,3 +55,85 @@ SQLALCHEMY_EXAMPLES_URI = None     # Don't load example data
 #   {"connect_args": {"options": "-c app.current_tenant=<tenant_uuid>"}}
 # This is documented in the SupersetPage setup guide.
 
+
+# ── Custom categorical color palettes (RTS CPI brand) ──
+EXTRA_CATEGORICAL_COLOR_SCHEMES = [
+    {
+        "id": "rts_cpi_palette",
+        "description": "RTS CPI Brand Palette",
+        "label": "RTS CPI",
+        "isDefault": False,
+        "colors": [
+            "#0070C0",
+            "#0E9AA7",
+            "#3DC1D3",
+            "#5B6C8A",
+            "#95AABE",
+            "#CBD5E1",
+        ],
+    },
+]
+
+
+# ── Cache-bust for bind-mounted patched JS chunks ─────────────────────
+# Superset serves /static/assets/* with Cache-Control: public, max-age=31536000
+# (1 year). When we bind-mount a patched chunk at the same filename, the hash
+# in the URL is unchanged, so browsers serve the cached old content forever.
+# This after_request hook overrides Cache-Control for the specific patched
+# files only — every other asset keeps its long cache for performance.
+_PATCHED_CHUNK_PATHS = {
+    "/static/assets/3871.c687a6d83eaaee71a216.entry.js",
+}
+
+def _no_cache_for_patched_chunks(response):
+    from flask import request
+    if request.path in _PATCHED_CHUNK_PATHS:
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        response.headers.pop("Expires", None)
+    return response
+
+def FLASK_APP_MUTATOR(app):
+    app.after_request(_no_cache_for_patched_chunks)
+
+
+# ── interCaribbean + RTS branded palette (chart series colors) ──
+EXTRA_CATEGORICAL_COLOR_SCHEMES = EXTRA_CATEGORICAL_COLOR_SCHEMES + [
+    {
+        "id": "ic_branded",
+        "description": "interCaribbean Airways branded palette",
+        "label": "interCaribbean Branded",
+        "isDefault": False,
+        "colors": [
+            "#049CFC",  # ocean near — JY reference
+            "#E4049C",  # heritage magenta
+            "#8CD404",  # fertile green
+            "#04049C",  # ocean deep
+            "#F59E0B",  # amber
+            "#06B6D4",  # cyan
+            "#8B5CF6",  # purple
+            "#64748B",  # slate
+        ],
+    },
+]
+
+# ── Fjord Line branded palette (FJL dashboard) ──
+EXTRA_CATEGORICAL_COLOR_SCHEMES = EXTRA_CATEGORICAL_COLOR_SCHEMES + [
+    {
+        "id": "fjl_branded",
+        "description": "Fjord Line branded red palette",
+        "label": "Fjord Line Branded",
+        "isDefault": False,
+        "colors": [
+            "#E53935",  # vibrant red — primary
+            "#FF7043",  # coral
+            "#EF5350",  # medium red
+            "#F44336",  # standard red
+            "#FF8A65",  # peach
+            "#FFAB91",  # light salmon
+            "#D32F2F",  # deeper red — contrast
+            "#FF5252",  # bright red accent
+            "#78909C",  # blue-gray — Sold Out etc.
+            "#B0BEC5",  # light gray
+        ],
+    },
+]

@@ -17,9 +17,9 @@ import type {
   PlatformHealthResponse, TenantSummaryResponse,
   IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionAuditLog, IngestionPreview,
 } from '../types';
+import { authStorage } from '../utils/authStorage';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const REFRESH_KEY = 'rts_cpi_refresh_token';
 
 // Access token is stored here and managed by AuthContext
 let _accessToken: string | null = null;
@@ -41,7 +41,7 @@ function headers(): Record<string, string> {
 }
 
 async function attemptRefresh(): Promise<boolean> {
-  const refreshToken = localStorage.getItem(REFRESH_KEY);
+  const refreshToken = authStorage.getRefreshToken();
   if (!refreshToken) return false;
 
   try {
@@ -126,7 +126,7 @@ async function fetchWithAuth<T>(url: string, init: RequestInit): Promise<T> {
       res = await fetch(url, newInit);
     } else {
       // Refresh failed — force logout by clearing state and redirecting
-      localStorage.removeItem(REFRESH_KEY);
+      authStorage.removeRefreshToken();
       _accessToken = null;
       window.location.href = '/login';
       throw new Error('Session expired');

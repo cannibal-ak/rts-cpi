@@ -23,13 +23,23 @@ import { useNavigate } from 'react-router-dom';
 import { useSession } from '../../context/SessionContext';
 import { useThemeMode } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import interCaribbeanLogo from '../../assets/logos/jy-logo-banner.png';
+import precisionAirLogo from '../../assets/logos/precisionair-logo.png';
 import fjordlineLogo from '../../assets/logos/fjordline-logo.png';
 
 interface AppBarProps {
   onToggleSidebar: () => void;
 }
 
+/**
+ * Display names shown in the AppBar tenant chip. Keyed by tenantCode
+ * derived from session.enabled_modules. Anything not in this map falls
+ * back to session.tenant_name (which is what Skywave admin and any
+ * unmapped tenant continue to see).
+ */
 const TENANT_DISPLAY_NAMES: Record<string, string> = {
+  JY: 'interCaribbean Airways',
+  PW: 'Precision Air',
   FJL: 'Fjord Line',
 };
 
@@ -40,12 +50,17 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
   const navigate = useNavigate();
   const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
 
-  // A single-module session identifies one tenant; multi-module is the
-  // Skywave admin and falls through to the RTS branding below.
-  const tenantCode: 'FJL' | null =
-    session.enabled_modules.length === 1 && session.enabled_modules[0] === 'cfl_fjl'
-      ? 'FJL'
+  // Derive a tenant code from enabled_modules. A single-module session
+  // identifies a tenant; multi-module is the Skywave admin.
+  const tenantCode: 'JY' | 'PW' | 'FJL' | null =
+    session.enabled_modules.length === 1
+      ? (session.enabled_modules[0] === 'airline_jy' ? 'JY'
+        : session.enabled_modules[0] === 'airline_pw' ? 'PW'
+        : session.enabled_modules[0] === 'cfl_fjl' ? 'FJL'
+        : null)
       : null;
+  const isJyTenant = tenantCode === 'JY';
+  const isPwTenant = tenantCode === 'PW';
   const isFjlTenant = tenantCode === 'FJL';
 
   const handleLogout = () => {
@@ -85,29 +100,47 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
             alt="Fjord Line"
             sx={{ height: 48, mr: 1.5 }}
           />
+        ) : isPwTenant ? (
+          <Box
+            component="img"
+            src={precisionAirLogo}
+            alt="Precision Air"
+            sx={{ height: 48, mr: 1.5 }}
+          />
+        ) : isJyTenant ? (
+          <Box
+            component="img"
+            src={interCaribbeanLogo}
+            alt="interCaribbean Airways"
+            sx={{
+              height: 48,
+              mr: 1.5,
+            }}
+          />
         ) : (
-          <>
-            {/* RTS Logo — tries PNG first, falls back to SVG */}
-            <Box
-              component="img"
-              src="/assets/RTS_Logo.png"
-              alt="RTS Logo"
-              onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
-                const img = e.currentTarget;
-                if (img.src.endsWith('.png')) {
-                  img.src = '/assets/RTS_Logo.svg';
-                } else {
-                  img.style.display = 'none';
-                }
-              }}
-              sx={{ height: 40, mr: 1.5 }}
-            />
-            <Typography variant="body2" noWrap sx={{ color: 'text.secondary', ml: 0.5, display: { xs: 'none', sm: 'block' }, fontWeight: 500 }}>
-              Competitor Pricing Intelligence
-            </Typography>
-          </>
+          /* RTS Logo — tries PNG first, falls back to SVG. Dark-mode
+             flips the navy artwork to white via CSS filter; PNG has a
+             real alpha channel so the background stays transparent. */
+          <Box
+            component="img"
+            src="/assets/RTS_Logo.png"
+            alt="RTS Logo"
+            onError={(e: React.SyntheticEvent<HTMLImageElement>) => {
+              const img = e.currentTarget;
+              if (img.src.endsWith('.png')) {
+                img.src = '/assets/RTS_Logo.svg';
+              } else {
+                img.style.display = 'none';
+              }
+            }}
+            sx={{
+              height: 48,
+              mr: 1.5,
+              filter: mode === 'dark' ? 'brightness(0) invert(1)' : 'none',
+              transition: 'filter 200ms ease',
+            }}
+          />
         )}
-
         <Box sx={{ flexGrow: 1 }} />
 
         <Chip

@@ -1,9 +1,9 @@
 import type { TenantSession } from '../types';
 
-// TEMPORARY: replace with a server-driven session.is_super_admin
-// boolean once the auth payload exposes one. Today the Skywave
-// super-admin is the only identity whose preset enables all three
-// per-tenant CPI modules; tenant users have exactly one each.
+// Backed by the session preset's `is_super_admin` flag (true only for the
+// Skywave platform-admin preset). Mirrors the backend's identity-based
+// is_platform_admin() check in deps.py — the prior length-=== 3 heuristic
+// silently broke the moment admin's enabled_modules changed.
 export function isSuperAdmin(session: TenantSession): boolean {
-  return session.enabled_modules.length === 3;
+  return session.is_super_admin === true;
 }

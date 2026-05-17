@@ -82,22 +82,35 @@ export default function DashboardViewerPage() {
   // Narrow viewport → collapse selector into a horizontal chip rail
   const isNarrow = useMediaQuery((t: Theme) => t.breakpoints.down('md'));
 
-  // Default selection: first analytics chart once they load
+  // When the chart list resolves (initial load OR dashboard switch), default
+  // to the first chart.  If the current selection still exists in the new
+  // list (e.g. an unrelated re-render), keep it — avoids snapping back to
+  // chart 1 every time the manifest re-resolves.
   useEffect(() => {
-    if (selectedSliceId === null && analyticsCharts.length > 0) {
-      setSelectedSliceId(analyticsCharts[0].slice_id);
+    if (analyticsCharts.length === 0) {
+      setSelectedSliceId(null);
+      return;
     }
-  }, [analyticsCharts, selectedSliceId]);
+    setSelectedSliceId(prev =>
+      prev !== null && analyticsCharts.some(c => c.slice_id === prev)
+        ? prev
+        : analyticsCharts[0].slice_id
+    );
+  }, [analyticsCharts]);
 
-  // Reset selection when the user navigates to a different dashboard
+  // Returning to a different dashboard always starts in Dashboard mode.
   useEffect(() => {
-    setSelectedSliceId(null);
     setViewMode('dashboard');
   }, [id]);
 
+  // Effective selection — falls back to the first chart if state hasn't
+  // settled yet.  Keeps the right pane non-blank in the brief window between
+  // viewMode='chart' and the default-selection effect committing.
+  const effectiveSliceId: number | null = selectedSliceId ?? analyticsCharts[0]?.slice_id ?? null;
+
   const selectedIndex = useMemo(
-    () => analyticsCharts.findIndex(c => c.slice_id === selectedSliceId),
-    [analyticsCharts, selectedSliceId],
+    () => analyticsCharts.findIndex(c => c.slice_id === effectiveSliceId),
+    [analyticsCharts, effectiveSliceId],
   );
 
   const handleSelectChart = (sliceId: number) => {
@@ -233,20 +246,56 @@ export default function DashboardViewerPage() {
         )}
         <Box sx={{ flexGrow: 1 }} />
 
-        {/* View mode toggle (additive) */}
+        {/* View mode toggle — segmented control */}
         <ToggleButtonGroup
           size="small"
           exclusive
           value={viewMode}
-          onChange={(_, v) => { if (v) setViewMode(v); }}
-          sx={{ mr: 1, '& .MuiToggleButton-root': { px: 1.5, py: 0.5, textTransform: 'none' } }}
+          onChange={(_, v) => {
+            if (!v) return;
+            // Defensive: if the user toggles into Chart view before the
+            // default-selection effect has settled, pick the first chart now
+            // so the right pane never renders blank.
+            if (v === 'chart' && selectedSliceId === null && analyticsCharts.length > 0) {
+              setSelectedSliceId(analyticsCharts[0].slice_id);
+            }
+            setViewMode(v);
+          }}
+          sx={{
+            mr: 1,
+            p: '3px',
+            gap: '2px',
+            bgcolor: 'action.hover',
+            borderRadius: 1,                  // 8px container
+            border: 0,
+            '& .MuiToggleButton-root': {
+              px: 1.5,
+              py: '5px',
+              fontSize: 12,
+              fontWeight: 500,
+              textTransform: 'none',
+              border: 0,
+              borderRadius: '6px',
+              color: 'text.secondary',
+              gap: 0.75,
+              '&:hover': { bgcolor: 'transparent' },
+              '&.Mui-selected': {
+                bgcolor: 'background.paper',
+                color: 'text.primary',
+                border: '0.5px solid',
+                borderColor: 'divider',
+                '&:hover': { bgcolor: 'background.paper' },
+              },
+              '&.Mui-disabled': { border: 0 },
+            },
+          }}
         >
           <ToggleButton value="dashboard" aria-label="Full dashboard view">
-            <DashboardIcon fontSize="small" sx={{ mr: 0.75 }} />
+            <DashboardIcon sx={{ fontSize: 14 }} />
             Dashboard
           </ToggleButton>
           <ToggleButton value="chart" aria-label="Single chart view" disabled={analyticsCharts.length === 0}>
-            <BarChartIcon fontSize="small" sx={{ mr: 0.75 }} />
+            <BarChartIcon sx={{ fontSize: 14 }} />
             Chart view
           </ToggleButton>
         </ToggleButtonGroup>
@@ -338,10 +387,18 @@ export default function DashboardViewerPage() {
           display: 'flex',
           flexDirection: isNarrow ? 'column' : 'row',
           minHeight: 0,
+          minWidth: 0,
+          // Match the dashboard Paper's edge-to-edge bleed past <main>'s p:3.
+          mx: -3,
+          // Clip any inner overflow so the page never shows a horizontal scrollbar.
+          overflow: 'hidden',
+          bgcolor: 'background.paper',
+          borderTop: '1px solid',
+          borderColor: 'divider',
         }}>
           <ChartSelectorPanel
             charts={analyticsCharts}
-            selectedSliceId={selectedSliceId}
+            selectedSliceId={effectiveSliceId}
             onSelectChart={handleSelectChart}
             loading={chartsLoading}
             error={chartsError}
@@ -349,11 +406,21 @@ export default function DashboardViewerPage() {
             horizontal={isNarrow}
           />
 
-          <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-            {selectedSliceId !== null && analyticsCharts.length > 0 && (
+          <Box sx={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            minWidth: 0,
+            minHeight: 0,
+            // No vertical scroll on the chart pane — the iframe is sized to
+            // fit the available height, and Superset re-renders the chart
+            // smaller to keep everything visible in a single frame.
+            overflow: 'hidden',
+          }}>
+            {effectiveSliceId !== null && analyticsCharts.length > 0 && (
               <SingleChartViewer
-                sliceId={selectedSliceId}
-                sliceName={analyticsCharts[Math.max(0, selectedIndex)]?.slice_name ?? `Chart ${selectedSliceId}`}
+                sliceId={effectiveSliceId}
+                sliceName={analyticsCharts[Math.max(0, selectedIndex)]?.slice_name ?? `Chart ${effectiveSliceId}`}
                 supersetBaseUrl={SUPERSET_URL}
                 currentIndex={Math.max(0, selectedIndex)}
                 total={analyticsCharts.length}

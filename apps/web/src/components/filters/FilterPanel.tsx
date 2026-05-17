@@ -11,7 +11,6 @@ import {
   IconButton,
   Stack,
   Divider,
-  Tooltip,
 } from '@mui/material';
 import {
   FilterList,
@@ -57,40 +56,28 @@ export default function FilterPanel({ title, fields, open, onToggle, onApply, va
     onApply?.();
   };
 
-  return (
-    <>
-      {/* Toggle button when closed */}
-      {!open && (
-        <Tooltip title="Open filters">
-          <Button
-            variant="outlined"
-            startIcon={<FilterList />}
-            onClick={onToggle}
-            size="small"
-            aria-label="Open filter panel"
-          >
-            Filters
-          </Button>
-        </Tooltip>
-      )}
+  // When closed, render nothing — the parent owns the "Filters" toggle button
+  // (rendered inside ActionBar) so no layout space is reserved here.
+  if (!open) return null;
 
-      {/* Filter drawer */}
-      <Drawer
-        variant="persistent"
-        anchor="left"
-        open={open}
-        sx={{
+  return (
+    <Drawer
+      variant="persistent"
+      anchor="left"
+      open={open}
+      sx={{
+        position: 'relative',
+        flexShrink: 0,
+        '& .MuiDrawer-paper': {
           position: 'relative',
-          '& .MuiDrawer-paper': {
-            position: 'relative',
-            width: 300,
-            border: 'none',
-            borderRight: 1,
-            borderColor: 'divider',
-            bgcolor: 'background.default',
-          },
-        }}
-      >
+          width: 300,
+          border: 'none',
+          borderRight: 1,
+          borderColor: 'divider',
+          bgcolor: 'background.default',
+        },
+      }}
+    >
         <Box sx={{ p: 2, height: '100%', display: 'flex', flexDirection: 'column' }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -179,7 +166,6 @@ export default function FilterPanel({ title, fields, open, onToggle, onApply, va
             </Button>
           </Stack>
         </Box>
-      </Drawer>
-    </>
+    </Drawer>
   );
 }

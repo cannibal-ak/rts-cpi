@@ -110,6 +110,13 @@ export default function App() {
                     <IngestionRunsPage />
                   </ProtectedRoute>
                 } />
+                <Route path="/admin/password-management" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <PasswordManagementPage />
+                  </ProtectedRoute>
+                } />
+
+                {/* Data Ops (platform admin only) */}
                 <Route path="/ingestion" element={
                   <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
                     <IngestionJobsPage />
@@ -120,15 +127,20 @@ export default function App() {
                     <UploadPage />
                   </ProtectedRoute>
                 } />
-                <Route path="/admin/password-management" element={
-                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
-                    <PasswordManagementPage />
+
+                {/* Analytics Dashboards — tenant-only. Platform admin is
+                    redirected home; tenant users still see only the dashboards
+                    their enabled_modules permit (see canAccessDashboard). */}
+                <Route path="/dashboards" element={
+                  <ProtectedRoute denyForSuperAdmin>
+                    <SupersetPage />
                   </ProtectedRoute>
                 } />
-
-                {/* Analytics Dashboards - Simplified Absolute Paths */}
-                <Route path="/dashboards" element={<SupersetPage />} />
-                <Route path="/dashboards/:id" element={<DashboardViewerPage />} />
+                <Route path="/dashboards/:id" element={
+                  <ProtectedRoute denyForSuperAdmin>
+                    <DashboardViewerPage />
+                  </ProtectedRoute>
+                } />
 
                 {/* Status pages */}
                 <Route path="/not-authorized" element={<NotAuthorizedPage />} />

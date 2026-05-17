@@ -14,7 +14,7 @@ TENANTS = {
         "id": uuid.UUID("a0000000-0000-0000-0000-000000000001"),
         "code": "JY",
         "business_type": "AIRLINE",
-        "name": "Acme Airways - JY"
+        "name": "interCaribbean Airways"
     },
     "PW": {
         "id": uuid.UUID("bb000000-0000-0000-0000-000000000001"),

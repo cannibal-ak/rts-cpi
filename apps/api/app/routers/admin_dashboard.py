@@ -1,3 +1,8 @@
+# NOTE: This module serves the System Overview page
+# (health checks, tenant summaries), NOT Superset dashboards.
+# File rename to admin_system.py deferred until branch
+# reconciliation.
+
 """Admin dashboard endpoints — platform health + per-tenant data summary.
 
 Both endpoints are guarded by ``RequirePlatformAdmin`` at the router level,

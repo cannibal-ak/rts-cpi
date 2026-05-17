@@ -1,0 +1,51 @@
+# superset-patches
+
+Bind-mounted patches applied to the official `apache/superset:3.1.0` image.
+
+Each file here overlays the same path inside `/app/superset/static/assets/` in
+the running container via a volume mount in `docker-compose.yml`.
+
+## Files
+
+### `3871.c687a6d83eaaee71a216.entry.js`
+
+ECharts time-series grid: right margin widened from `7*l.gridUnit` (28 px)
+to `18*l.gridUnit` (72 px) so the last X-axis tick label (and any right-edge
+legend overflow) renders inside the chart canvas.
+
+- **Applied**: 2026-05-11
+- **Scope**: every ECharts time-series chart in every Superset dashboard in
+  this install (not just JY).
+- **Single-byte change** in a 341 KB minified bundle — exact match on
+  `right:7*l.gridUnit` (only one occurrence in the file).
+
+## Upgrading Superset
+
+The chunk filename includes a content hash that changes between Superset
+versions. After upgrading the image:
+
+1. **Temporarily comment out** the bind mount line in `docker-compose.yml`
+   so the unpatched image asset is exposed.
+2. Recreate the container so the new image's assets are visible:
+   `docker compose up -d --force-recreate superset`
+3. Find the new chunk:
+   ```bash
+   docker exec cpi-superset-1 grep -l "right:7\\*l.gridUnit" \
+     /app/superset/static/assets/*.js
+   ```
+4. Apply the same edit to that file:
+   ```bash
+   docker exec cpi-superset-1 sed -i \
+     "s|right:7\\*l\\.gridUnit|right:18*l.gridUnit|" <new_file>
+   ```
+5. Copy the patched file out:
+   ```bash
+   docker cp cpi-superset-1:<new_file> ./superset-patches/<new_hash>.entry.js
+   ```
+6. Update the bind mount path in `docker-compose.yml` to the new filename
+   on both sides of the `:` and uncomment.
+7. `docker compose up -d superset` to re-mount.
+
+If the upstream code structure changes (no longer `7*l.gridUnit`), the
+pattern match in step 3 will return no results — in that case, inspect the
+new chunk's `grid:{...}` literals and find the analogous right-margin value.

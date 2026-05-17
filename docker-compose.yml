@@ -162,6 +162,8 @@ services:
     volumes:
       - ./infra/superset_config.py:/app/superset_config.py:ro
       - superset_home:/app/superset_home
+      # ECharts grid.right widened to prevent date/label clipping (see superset-patches/README)
+      - ./superset-patches/3871.c687a6d83eaaee71a216.entry.js:/app/superset/static/assets/3871.c687a6d83eaaee71a216.entry.js:ro
     depends_on:
       postgres:
         condition: service_healthy

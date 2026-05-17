@@ -1,8 +1,8 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef, ReactNode } from 'react';
 import { setHttpClientAccessToken } from '../api/httpClient';
+import { authStorage } from '../utils/authStorage';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
-const REFRESH_KEY = 'rts_cpi_refresh_token';
 
 /* ─── Types ─── */
 interface AuthUser {
@@ -57,7 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const refreshIn = Math.max(expiresIn - 60_000, 5_000); // 60s before expiry, min 5s
 
         refreshTimerRef.current = setTimeout(async () => {
-            const refreshToken = localStorage.getItem(REFRESH_KEY);
+            const refreshToken = authStorage.getRefreshToken();
             if (!refreshToken) return;
 
             try {
@@ -74,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     // Refresh failed — force logout
                     setUser(null);
                     setAccessToken(null);
-                    localStorage.removeItem(REFRESH_KEY);
+                    authStorage.removeRefreshToken();
                 }
             } catch {
                 // Network error — don't log out yet, retry on next interaction
@@ -84,7 +84,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // On mount: try to restore session from refresh token
     useEffect(() => {
-        const refreshToken = localStorage.getItem(REFRESH_KEY);
+        // One-time migration: copy any legacy refresh token still in
+        // localStorage (from before per-tab isolation) into sessionStorage
+        // so active users aren't bounced to /login on deploy day. Safe to
+        // remove after a few weeks once nobody has the old key lingering.
+        authStorage.migrateFromLocalStorage();
+
+        const refreshToken = authStorage.getRefreshToken();
         if (!refreshToken) {
             setIsLoading(false);
             return;
@@ -100,7 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 });
 
                 if (!refreshRes.ok) {
-                    localStorage.removeItem(REFRESH_KEY);
+                    authStorage.removeRefreshToken();
                     setIsLoading(false);
                     return;
                 }
@@ -114,7 +120,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 });
 
                 if (!meRes.ok) {
-                    localStorage.removeItem(REFRESH_KEY);
+                    authStorage.removeRefreshToken();
                     setIsLoading(false);
                     return;
                 }
@@ -132,7 +138,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setAccessToken(newAccessToken);
                 scheduleRefresh(newAccessToken);
             } catch {
-                localStorage.removeItem(REFRESH_KEY);
+                authStorage.removeRefreshToken();
             }
             setIsLoading(false);
         })();
@@ -158,9 +164,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             const data = await res.json();
 
-            // Store refresh token in localStorage
-            // Phase 2 compromise — Phase 7 will move to httpOnly cookies
-            localStorage.setItem(REFRESH_KEY, data.refresh_token);
+            // Store refresh token in sessionStorage (per-tab isolation).
+            // Phase 2 compromise — Phase 7 will move to httpOnly cookies.
+            authStorage.setRefreshToken(data.refresh_token);
 
             setAccessToken(data.access_token);
             setUser({
@@ -192,7 +198,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
         }
         if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
-        localStorage.removeItem(REFRESH_KEY);
+        authStorage.removeRefreshToken();
         setUser(null);
         setAccessToken(null);
     }, [accessToken]);
