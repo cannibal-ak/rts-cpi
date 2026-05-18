@@ -1,11 +1,28 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Box, Paper, IconButton, Typography, Fade, Chip, Tooltip } from '@mui/material';
-import { ArrowBack, Flight, DirectionsBoat, CalendarMonth, Refresh } from '@mui/icons-material';
+import {
+  Box, Paper, IconButton, Typography, Fade, Chip, Tooltip,
+  ToggleButton, ToggleButtonGroup, useMediaQuery,
+} from '@mui/material';
+import {
+  ArrowBack, Flight, DirectionsBoat, CalendarMonth, Refresh,
+  Dashboard as DashboardIcon, BarChart as BarChartIcon,
+} from '@mui/icons-material';
 import { keyframes } from '@mui/system';
+import type { Theme } from '@mui/material/styles';
 import { api } from '../../api';
+import type { DashboardDateFilter } from '../../api/client';
 import { useSession } from '../../context/SessionContext';
 import { canAccessDashboard } from './dashboardAccess';
+import { useDashboardCharts } from '../../hooks/useDashboardCharts';
+import ChartSelectorPanel from '../../components/dashboard/ChartSelectorPanel';
+import SingleChartViewer from '../../components/dashboard/SingleChartViewer';
+import DateFilterToggle from '../../components/dashboard/DateFilterToggle';
+
+// Which dashboards expose the React-side date filter toggle.
+// All three tenants — JY, PW, FJL — use the same RLS-via-guest-token flow,
+// driven by cap_date on each tenant's dedicated dataset view.
+const DATE_TOGGLE_DASHBOARDS = new Set(['1', '2', '3']);
 
 /**
  * Superset base URL — used by the Embedded SDK to construct the iframe src.
@@ -16,9 +33,9 @@ const SUPERSET_URL = 'http://192.168.101.10:8088';
 
 // Dashboard metadata (must match backend DASHBOARDS registry)
 const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline: boolean; freshnessDomain: string }> = {
-  '1': { title: 'Airline CPI JY Dashboard', tenant: 'JY', isAirline: true, freshnessDomain: 'Airline CPI \u2013 JY' },
-  '2': { title: 'Airline CPI PW Dashboard', tenant: 'PW', isAirline: true, freshnessDomain: 'Airline CPI \u2013 PW' },
-  '3': { title: 'Cruise/Ferry CPI Dashboard', tenant: 'FJL', isAirline: false, freshnessDomain: 'Cruise/Ferry CPI \u2013 FJL' },
+  '1': { title: 'JY Dashboard', tenant: 'JY', isAirline: true, freshnessDomain: 'Airline CPI \u2013 JY' },
+  '2': { title: 'PW Dashboard', tenant: 'PW', isAirline: true, freshnessDomain: 'Airline CPI \u2013 PW' },
+  '3': { title: 'FJL Dashboard', tenant: 'FJL', isAirline: false, freshnessDomain: 'Cruise/Ferry CPI \u2013 FJL' },
 };
 
 // Superset Embedded SDK type (UMD bundle loaded via CDN in index.html)
@@ -57,12 +74,111 @@ export default function DashboardViewerPage() {
   const [dataDate, setDataDate] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Date filter state (only meaningful when this dashboard is in DATE_TOGGLE_DASHBOARDS).
+  // null means "not yet initialised" — we wait for the available-dates fetch before embedding,
+  // so the very first guest token already carries the correct cap_date RLS clause.
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [dateFilter, setDateFilter] = useState<DashboardDateFilter | null>(null);
+
   const meta = id ? DASHBOARD_META[id] : undefined;
+  const dateToggleEnabled = id ? DATE_TOGGLE_DASHBOARDS.has(id) : false;
+
+  // Fetch available dates once per dashboard, then seed the date filter to "latest single day".
+  useEffect(() => {
+    if (!id || !dateToggleEnabled) {
+      setDateFilter(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { dates } = await api.superset.getAvailableDates(id);
+        if (cancelled) return;
+        setAvailableDates(dates);
+        // Seed to the most recent date — matches the prior Cap-Date-default behaviour.
+        setDateFilter({ mode: 'single', capDateEq: dates[0] });
+      } catch {
+        // Non-fatal — embed still works (just without a cap_date RLS clause).
+        if (!cancelled) setDateFilter({ mode: 'single' });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id, dateToggleEnabled]);
+
+  // ── Slice & dice: chart selector + isolated chart view (additive) ──
+  // viewMode toggles the right pane between the embedded dashboard SDK iframe
+  // (existing) and a single-chart standalone iframe (new).  selectedSliceId
+  // tracks which analytics chart the user picked.
+  const [viewMode, setViewMode] = useState<'dashboard' | 'chart'>('dashboard');
+  const [selectedSliceId, setSelectedSliceId] = useState<number | null>(null);
+
+  const { analyticsCharts, loading: chartsLoading, error: chartsError, refetch: refetchCharts } =
+    useDashboardCharts(id);
+
+  // Narrow viewport → collapse selector into a horizontal chip rail
+  const isNarrow = useMediaQuery((t: Theme) => t.breakpoints.down('md'));
+
+  // When the chart list resolves (initial load OR dashboard switch), default
+  // to the first chart.  If the current selection still exists in the new
+  // list (e.g. an unrelated re-render), keep it — avoids snapping back to
+  // chart 1 every time the manifest re-resolves.
+  useEffect(() => {
+    if (analyticsCharts.length === 0) {
+      setSelectedSliceId(null);
+      return;
+    }
+    setSelectedSliceId(prev =>
+      prev !== null && analyticsCharts.some(c => c.slice_id === prev)
+        ? prev
+        : analyticsCharts[0].slice_id
+    );
+  }, [analyticsCharts]);
+
+  // Returning to a different dashboard always starts in Dashboard mode.
+  useEffect(() => {
+    setViewMode('dashboard');
+  }, [id]);
+
+  // Effective selection — falls back to the first chart if state hasn't
+  // settled yet.  Keeps the right pane non-blank in the brief window between
+  // viewMode='chart' and the default-selection effect committing.
+  const effectiveSliceId: number | null = selectedSliceId ?? analyticsCharts[0]?.slice_id ?? null;
+
+  const selectedIndex = useMemo(
+    () => analyticsCharts.findIndex(c => c.slice_id === effectiveSliceId),
+    [analyticsCharts, effectiveSliceId],
+  );
+
+  const handleSelectChart = (sliceId: number) => {
+    setSelectedSliceId(sliceId);
+    setViewMode('chart');     // clicking a chart name auto-switches to chart view
+  };
+
+  const handlePrev = () => {
+    if (analyticsCharts.length === 0) return;
+    const idx = selectedIndex < 0 ? 0 : selectedIndex;
+    const next = (idx - 1 + analyticsCharts.length) % analyticsCharts.length;
+    setSelectedSliceId(analyticsCharts[next].slice_id);
+  };
+
+  const handleNext = () => {
+    if (analyticsCharts.length === 0) return;
+    const idx = selectedIndex < 0 ? 0 : selectedIndex;
+    const next = (idx + 1) % analyticsCharts.length;
+    setSelectedSliceId(analyticsCharts[next].slice_id);
+  };
 
   useEffect(() => {
     if (!id || !mountRef.current || !meta) return;
+    // On toggle-enabled dashboards, wait until the date filter has been seeded
+    // (initial available-dates fetch resolved) so the first guest token already
+    // carries the cap_date RLS clause — avoids a flash of unfiltered data.
+    if (dateToggleEnabled && dateFilter === null) return;
 
     let unmount: (() => void) | undefined;
+    // Snapshot the filter for this embed cycle so the SDK's fetchGuestToken
+    // closure (called for token refreshes) keeps using the right value.
+    const activeFilter = dateFilter ?? undefined;
 
     const embed = async () => {
       try {
@@ -85,7 +201,7 @@ export default function DashboardViewerPage() {
 
         // ── 3. Fetch embedded_uuid + initial guest token from backend ──
         setIsLoading(true);
-        const metadata = await api.superset.getGuestToken(id);
+        const metadata = await api.superset.getGuestToken(id, activeFilter);
 
         // ── 3b. Fetch data freshness to get the report date ──
         try {
@@ -107,7 +223,7 @@ export default function DashboardViewerPage() {
           supersetDomain: SUPERSET_URL,
           mountPoint: mountRef.current!,
           fetchGuestToken: async () => {
-            const { token } = await api.superset.getGuestToken(id);
+            const { token } = await api.superset.getGuestToken(id, activeFilter);
             return token;
           },
           dashboardUiConfig: {
@@ -137,7 +253,7 @@ export default function DashboardViewerPage() {
     embed();
 
     return () => { unmount?.(); };
-  }, [id, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [id, refreshKey, dateFilter, dateToggleEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const LoadingIcon = meta?.isAirline ? Flight : DirectionsBoat;
   const loadingLabel = meta?.isAirline ? 'Loading Airline Analytics...' : 'Preparing Maritime Insights...';
@@ -164,7 +280,7 @@ export default function DashboardViewerPage() {
         {formattedDate && (
           <Chip
             icon={<CalendarMonth sx={{ fontSize: 16 }} />}
-            label={`Data as of ${formattedDate}`}
+            label={`Latest data: ${formattedDate}`}
             size="small"
             variant="outlined"
             color="primary"
@@ -172,6 +288,61 @@ export default function DashboardViewerPage() {
           />
         )}
         <Box sx={{ flexGrow: 1 }} />
+
+        {/* View mode toggle — segmented control */}
+        <ToggleButtonGroup
+          size="small"
+          exclusive
+          value={viewMode}
+          onChange={(_, v) => {
+            if (!v) return;
+            // Defensive: if the user toggles into Chart view before the
+            // default-selection effect has settled, pick the first chart now
+            // so the right pane never renders blank.
+            if (v === 'chart' && selectedSliceId === null && analyticsCharts.length > 0) {
+              setSelectedSliceId(analyticsCharts[0].slice_id);
+            }
+            setViewMode(v);
+          }}
+          sx={{
+            mr: 1,
+            p: '3px',
+            gap: '2px',
+            bgcolor: 'action.hover',
+            borderRadius: 1,                  // 8px container
+            border: 0,
+            '& .MuiToggleButton-root': {
+              px: 1.5,
+              py: '5px',
+              fontSize: 12,
+              fontWeight: 500,
+              textTransform: 'none',
+              border: 0,
+              borderRadius: '6px',
+              color: 'text.secondary',
+              gap: 0.75,
+              '&:hover': { bgcolor: 'transparent' },
+              '&.Mui-selected': {
+                bgcolor: 'background.paper',
+                color: 'text.primary',
+                border: '0.5px solid',
+                borderColor: 'divider',
+                '&:hover': { bgcolor: 'background.paper' },
+              },
+              '&.Mui-disabled': { border: 0 },
+            },
+          }}
+        >
+          <ToggleButton value="dashboard" aria-label="Full dashboard view">
+            <DashboardIcon sx={{ fontSize: 14 }} />
+            Dashboard
+          </ToggleButton>
+          <ToggleButton value="chart" aria-label="Single chart view" disabled={analyticsCharts.length === 0}>
+            <BarChartIcon sx={{ fontSize: 14 }} />
+            Chart view
+          </ToggleButton>
+        </ToggleButtonGroup>
+
         <Tooltip title="Refresh dashboard">
           <IconButton
             size="small"
@@ -185,51 +356,139 @@ export default function DashboardViewerPage() {
         </Tooltip>
       </Box>
 
-      {/* Dashboard container */}
-      <Paper
-        variant="outlined"
-        sx={{
-          flexGrow: 1,
-          overflow: 'hidden',
-          position: 'relative',
-          bgcolor: 'background.paper',
-          // The SDK injects an <iframe> inside mountRef
-          '& iframe': { width: '100%', height: '100%', border: 'none' },
-        }}
-      >
-        {/* Loading overlay */}
-        <Fade in={isLoading} unmountOnExit>
-          <Box sx={{
-            position: 'absolute', inset: 0, display: 'flex',
-            flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            bgcolor: 'background.paper', zIndex: 10,
-          }}>
-            <LoadingIcon sx={{ fontSize: 56, color: 'primary.main', mb: 2, animation: `${pulse} 2s infinite ease-in-out` }} />
-            <Typography variant="h6" color="text.secondary">{loadingLabel}</Typography>
-          </Box>
-        </Fade>
-
-        {/* Error state */}
-        {error && (
-          <Box sx={{ p: 4, textAlign: 'center' }}>
-            <Typography color="error" variant="h6" gutterBottom>{error}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              Check that Superset is running and the dashboard exists.
-            </Typography>
-          </Box>
+      {/* ── Dashboard pane — kept mounted across mode toggles so the SDK
+          iframe (and its guest-token / fetch lifecycle) survives a switch
+          to Chart view and back without re-init.  In Chart view it is hidden
+          via display:none, NOT unmounted. ──────────────────────────────── */}
+      <Box sx={{
+        display: viewMode === 'dashboard' ? 'flex' : 'none',
+        flexDirection: 'column',
+        flexGrow: 1,
+        minHeight: 0,
+      }}>
+        {/* Date filter toggle (JY only for now — see DATE_TOGGLE_DASHBOARDS) */}
+        {dateToggleEnabled && dateFilter && (
+          <DateFilterToggle
+            availableDates={availableDates}
+            value={dateFilter}
+            onChange={(next) => setDateFilter(next)}
+            disabled={isLoading}
+          />
         )}
 
-        {/* SDK mount point — must stay in the DOM even while loading */}
-        <Box
-          ref={mountRef}
+        {/* Dashboard container */}
+        <Paper
+          variant="outlined"
           sx={{
-            width: '100%',
-            height: '100%',
-            visibility: isLoading ? 'hidden' : 'visible',
-            '& > iframe': { height: 'calc(100vh - 140px) !important' },
+            flexGrow: 1,
+            overflow: 'hidden',
+            position: 'relative',
+            bgcolor: 'background.paper',
+            // Bleed past <main>'s p:3 horizontal padding so the embedded dashboard
+            // gets the full available width — prevents right-edge clipping of the
+            // last X-axis tick / legend items inside the iframe.
+            mx: -3,
+            borderRadius: 0,
+            borderLeft: 'none',
+            borderRight: 'none',
+            // The SDK injects an <iframe> inside mountRef
+            '& iframe': { width: '100%', height: '100%', border: 'none' },
           }}
-        />
-      </Paper>
+        >
+          {/* Loading overlay */}
+          <Fade in={isLoading} unmountOnExit>
+            <Box sx={{
+              position: 'absolute', inset: 0, display: 'flex',
+              flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+              bgcolor: 'background.paper', zIndex: 10,
+            }}>
+              <LoadingIcon sx={{ fontSize: 56, color: 'primary.main', mb: 2, animation: `${pulse} 2s infinite ease-in-out` }} />
+              <Typography variant="h6" color="text.secondary">{loadingLabel}</Typography>
+            </Box>
+          </Fade>
+
+          {/* Error state */}
+          {error && (
+            <Box sx={{ p: 4, textAlign: 'center' }}>
+              <Typography color="error" variant="h6" gutterBottom>{error}</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Check that Superset is running and the dashboard exists.
+              </Typography>
+            </Box>
+          )}
+
+          {/* SDK mount point — must stay in the DOM even while loading */}
+          <Box
+            ref={mountRef}
+            sx={{
+              width: '100%',
+              height: '100%',
+              visibility: isLoading ? 'hidden' : 'visible',
+              // When the date toggle is shown, reserve ~40px more for its row.
+              '& > iframe': {
+                height: dateToggleEnabled
+                  ? 'calc(100vh - 180px) !important'
+                  : 'calc(100vh - 140px) !important',
+              },
+            }}
+          />
+        </Paper>
+      </Box>
+
+      {/* ── Chart view pane — selector sidebar + isolated chart iframe.
+          Conditionally rendered so the sidebar (and the flex row) do not
+          exist in the DOM during Dashboard mode — the dashboard view is
+          visually identical to the pre-feature state. ─────────────────── */}
+      {viewMode === 'chart' && (
+        <Box sx={{
+          flexGrow: 1,
+          display: 'flex',
+          flexDirection: isNarrow ? 'column' : 'row',
+          minHeight: 0,
+          minWidth: 0,
+          // Match the dashboard Paper's edge-to-edge bleed past <main>'s p:3.
+          mx: -3,
+          // Clip any inner overflow so the page never shows a horizontal scrollbar.
+          overflow: 'hidden',
+          bgcolor: 'background.paper',
+          borderTop: '1px solid',
+          borderColor: 'divider',
+        }}>
+          <ChartSelectorPanel
+            charts={analyticsCharts}
+            selectedSliceId={effectiveSliceId}
+            onSelectChart={handleSelectChart}
+            loading={chartsLoading}
+            error={chartsError}
+            onRetry={refetchCharts}
+            horizontal={isNarrow}
+          />
+
+          <Box sx={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            minWidth: 0,
+            minHeight: 0,
+            // No vertical scroll on the chart pane — the iframe is sized to
+            // fit the available height, and Superset re-renders the chart
+            // smaller to keep everything visible in a single frame.
+            overflow: 'hidden',
+          }}>
+            {effectiveSliceId !== null && analyticsCharts.length > 0 && (
+              <SingleChartViewer
+                sliceId={effectiveSliceId}
+                sliceName={analyticsCharts[Math.max(0, selectedIndex)]?.slice_name ?? `Chart ${effectiveSliceId}`}
+                supersetBaseUrl={SUPERSET_URL}
+                currentIndex={Math.max(0, selectedIndex)}
+                total={analyticsCharts.length}
+                onPrev={handlePrev}
+                onNext={handleNext}
+              />
+            )}
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 }
