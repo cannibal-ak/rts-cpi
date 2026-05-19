@@ -89,7 +89,6 @@ services:
       CPI_RABBITMQ_URL: ${CPI_RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672/}
       CPI_REDIS_URL: ${CPI_REDIS_URL:-redis://redis:6379/0}
       CPI_KEK: ${CPI_KEK}  # required — Fernet KEK for app-layer encryption (Phase 1 SFTP)
-      CPI_SMTP_ENCRYPTION_KEY: ${CPI_SMTP_ENCRYPTION_KEY}  # required — Fernet master key for smtp_config password at rest (added 2026-05-19)
       CPI_DEBUG: "true"
       # Superset Connection for Dynamic Resolution
       SUPERSET_URL: ${SUPERSET_URL:-http://superset:8088}
@@ -240,31 +239,6 @@ services:
       - ./dev-sftp-mount/jy:/home/jydev/upload
       - ./dev-sftp-mount/pw:/home/pwdev/upload
     command: jydev:jydev:1001:1001:upload pwdev:pwdev:1002:1002:upload
-
-  # ════════════════════════════════════════════
-  # Reverse proxy — Nginx with self-signed TLS
-  # ════════════════════════════════════════════
-
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: cpi-nginx-1
-    restart: unless-stopped
-    ports:
-      - "9444:9444"
-      - "8444:8444"
-      - "8488:8488"
-      - "15673:15673"
-    volumes:
-      - ./nginx/conf/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
-    depends_on:
-      - web
-      - api
-      - rabbitmq
-    # NOTE: superset is profile-gated (profiles: [superset]); omitted from depends_on
-    # to keep compose config valid without the profile. Nginx will reach it at
-    # request time on the cpi_default network whenever Superset is running.
-
 
 volumes:
   pgdata:

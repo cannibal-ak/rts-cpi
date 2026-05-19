@@ -19,6 +19,7 @@ from app.routers import (
     admin_sftp_connections,
     admin_password_management,
     admin_dashboard,
+    admin_smtp_config,
 )
 from app.api.v1 import ingestion as ingestion_v2
 from app.services import redbeat_sync
@@ -100,6 +101,11 @@ app.include_router(admin_password_management.router, dependencies=_protected)
 # admin Home page. Router-level RequirePlatformAdmin + _protected gate
 # match the other admin routers.
 app.include_router(admin_dashboard.router, dependencies=_protected)
+
+# Admin SMTP Settings — platform-wide outbound email config that backs
+# the forgot-password delivery path. Router-level RequirePlatformAdmin
+# + _protected gate match the other admin routers.
+app.include_router(admin_smtp_config.router, dependencies=_protected)
 
 # Phase A ingestion router — Data Ops (manual upload + jobs view).
 # Admin-only; uses _protected pattern like every other admin router.

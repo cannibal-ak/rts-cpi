@@ -356,6 +356,19 @@ export const mockClient: CpiApiClient = {
       forceReset: (_email: string, _newPassword: string, _forceChangeOnLogin: boolean) =>
         delay({ success: false, message: 'Not available in mock mode' }),
     },
+    // SMTP settings aren't exercised offline; stubs keep the interface satisfied.
+    settings: {
+      smtp: {
+        get: () => delay(null),
+        update: (_body: unknown) => Promise.reject(new Error('API 503: SMTP config not available in mock mode')),
+        test: (_body: unknown) => delay({
+          success: false,
+          message: 'Not available in mock mode',
+          latency_ms: null,
+        }),
+        delete: () => delay(undefined as unknown as void),
+      },
+    },
     // Dashboard isn't exercised offline; mocks return plausible data so the UI renders.
     dashboard: {
       getHealth: () => delay({
@@ -383,13 +396,19 @@ export const mockClient: CpiApiClient = {
     updateUserRoles: (roles, _tenant_id) => delay({ roles }),
   },
   superset: {
-    getGuestToken: (dashboardId: string) => delay({
+    getGuestToken: (dashboardId: string, _dateFilter?: unknown) => delay({
         token: `mock-token-${dashboardId}-${Date.now()}`,
         dashboard_uuid: `00000000-0000-0000-0000-00000000000${dashboardId}`,
         embedded_uuid: `11111111-1111-1111-1111-11111111111${dashboardId}`,
         dashboard_title: dashboardId === '1' ? 'Airline CPI JY Dashboard'
                        : dashboardId === '2' ? 'Airline CPI PW Dashboard'
                        : 'Cruise/Ferry CPI Dashboard',
+    }),
+    getAvailableDates: (dashboardId: string) => delay({
+        dashboard_id: dashboardId,
+        dates: [
+          '2026-05-17','2026-05-14','2026-05-12','2026-05-10','2026-05-07','2026-05-05','2026-05-03',
+        ],
     }),
     getDashboardCharts: (dashboardId: string): Promise<DashboardChartsResponse> => delay({
       dashboard_id: Number(dashboardId),

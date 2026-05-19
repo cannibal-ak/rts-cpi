@@ -7,6 +7,11 @@ Protection layers in lieu of auth:
   - 5-minute TTL on every code.
   - Email-enumeration resistance: identical generic response whether or
     not the user exists, and identical response when rate-limited.
+  - When SMTP is configured, the code is delivered by email; the
+    response NEVER carries the code (closes the prior debug-leak path).
+  - When SMTP is NOT configured, the code is still persisted and the
+    admin can pull it from the Recent Reset Codes table as a manual-
+    share fallback. The response still never carries the code.
 """
 
 import logging
@@ -25,12 +30,16 @@ from app.schemas.password_reset import (
     PasswordResetNewPassword,
     PasswordResetResponse,
 )
+from app.services import smtp_service
 from app.services.auth_service import (
     hash_password,
     validate_password_strength,
 )
 
-logger = logging.getLogger(__name__)
+# uvicorn.error so these lines are visible in `docker logs cpi-api-1`
+# (per the project's logging convention — app.* loggers are silent in
+# this container).
+logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/api/v1/auth", tags=["password-reset"])
 
@@ -124,11 +133,31 @@ def forgot_password(
         "Password reset code issued for %s (expires in %d min)", email, CODE_TTL_MINUTES
     )
 
+    # Email delivery. We deliberately swallow SMTP errors here so the
+    # response stays identical to the "no such user" / rate-limited
+    # paths — leaking whether SMTP is broken would also leak that the
+    # email exists. The admin can recover the code from the Recent
+    # Reset Codes table.
+    if smtp_service.get_smtp_config(db) is None:
+        logger.warning(
+            "Password reset for %s: smtp_config not configured — code is "
+            "only available via the admin Recent Reset Codes table.",
+            email,
+        )
+    else:
+        sent = smtp_service.send_password_reset_email(
+            db, to_email=email, code=code, expiry_minutes=CODE_TTL_MINUTES,
+        )
+        if not sent:
+            logger.error(
+                "Password reset for %s: SMTP delivery failed — code remains "
+                "available via the admin Recent Reset Codes table.",
+                email,
+            )
+
     return PasswordResetResponse(
         success=True,
         message=GENERIC_REQUEST_MESSAGE,
-        # TODO: REMOVE admin_debug_code when SMTP email delivery is implemented.
-        admin_debug_code=code,
     )
 
 

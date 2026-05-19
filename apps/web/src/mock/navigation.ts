@@ -49,7 +49,7 @@ export const navigationItems: NavItem[] = [
     requiredRoles: ['TENANT_ADMIN'],
   },
 
-  // ── Admin (Skywave platform admins only) ─────────────
+  // ── Admin (RTS platform admins only) ─────────────
   {
     label: 'SFTP Connections',
     path: '/admin/sftp-connections',
@@ -81,6 +81,16 @@ export const navigationItems: NavItem[] = [
     requiredRoles: ['TENANT_ADMIN'],
     requireSuperAdmin: true,
     category: 'Admin',
+  },
+
+  // ── Platform Settings (peer of ADMIN; renders as its own section) ─
+  {
+    label: 'Email',
+    path: '/admin/settings/email',
+    icon: 'Email',
+    requiredRoles: ['TENANT_ADMIN'],
+    requireSuperAdmin: true,
+    category: 'Settings',
   },
 
   // ── Data Ops (manual fallback alongside SFTP automation) ─────

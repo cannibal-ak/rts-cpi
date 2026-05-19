@@ -1,6 +1,6 @@
 """Admin Password Management — list users, reset queue, generate code, force reset.
 
-All endpoints require Skywave platform admin (RequirePlatformAdmin) at the
+All endpoints require RTS platform admin (RequirePlatformAdmin) at the
 router level; main.py also stacks the password-change gate via _protected,
 matching every other admin router.
 
@@ -88,6 +88,7 @@ def list_users(db: Session = Depends(get_db)):
                 id=user.id,
                 email=user.email,
                 tenant_name=tenant.display_name,
+                tenant_slug=tenant.slug,
                 role=roles[0] if roles else "",
                 is_active=bool(user.is_active),
                 is_locked=_is_locked(user),

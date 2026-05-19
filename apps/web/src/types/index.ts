@@ -8,7 +8,7 @@ export interface TenantSession {
   tenant_name: string;
   enabled_modules: ModuleCode[];
   enabled_capabilities: Capability[];
-  // True for the Skywave platform admin tenant. The backend equivalent is
+  // True for the RTS platform admin tenant. The backend equivalent is
   // is_platform_admin() in deps.py (identity-based, not role-based).
   is_super_admin?: boolean;
   user: { id: string; name: string; email: string; roles: UserRole[]; avatar_url?: string };
@@ -21,7 +21,7 @@ export interface NavItem {
   requiredModules?: ModuleCode[];
   requiredCapabilities?: Capability[];
   requiredRoles?: UserRole[];
-  // When true, only the Skywave super-admin sees this item, regardless of role list.
+  // When true, only the RTS super-admin sees this item, regardless of role list.
   requireSuperAdmin?: boolean;
   hideForSuperAdmin?: boolean;
   children?: NavItem[];
@@ -471,6 +471,7 @@ export interface AdminUserListItem {
   id: string;
   email: string;
   tenant_name: string;
+  tenant_slug: string;
   role: string;
   is_active: boolean;
   is_locked: boolean;

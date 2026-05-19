@@ -1,6 +1,6 @@
 /**
  * Admin Password Management — list users, reset code queue, generate code,
- * force-reset password. Skywave platform admin only.
+ * force-reset password. RTS platform admin only.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -17,9 +17,20 @@ import PageHeader from '../components/common/PageHeader';
 import { api } from '../api';
 import type { ApiErrorShape } from '../api/httpClient';
 import { useSession } from '../context/SessionContext';
+import { getTenantDisplayName } from '../utils/tenantConfig';
 import type {
   AdminUserListItem, AdminResetTokenItem,
 } from '../types';
+
+// Slug for the RTS platform tenant — its row shows orgName only (no " - SLUG"
+// suffix) because it doesn't represent an airline/cruise carrier code.
+const PLATFORM_TENANT_SLUG = 'rts';
+
+function formatTenantCell(user: AdminUserListItem): string {
+  const orgName = getTenantDisplayName(user.tenant_slug, user.tenant_name);
+  if (user.tenant_slug === PLATFORM_TENANT_SLUG) return orgName;
+  return `${orgName} - ${user.tenant_slug.toUpperCase()}`;
+}
 
 const REFRESH_INTERVAL_MS = 30_000;
 
@@ -46,6 +57,15 @@ interface ForceResetDialogState {
   showPassword: boolean;
   submitting: boolean;
   error: string;
+}
+
+// Self-action confirmation: extra speed-bump shown only when the admin is
+// about to generate a code for, or reset, their own account. Other rows
+// keep the existing flow (button click → main dialog).
+interface SelfConfirmState {
+  open: boolean;
+  action: 'generate' | 'reset' | null;
+  user: AdminUserListItem | null;
 }
 
 // ── Password strength ────────────────────────────
@@ -147,6 +167,9 @@ export default function PasswordManagementPage() {
     open: false, user: null, newPassword: '', confirmPassword: '',
     forceChange: true, showPassword: false, submitting: false, error: '',
   });
+  const [selfConfirm, setSelfConfirm] = useState<SelfConfirmState>({
+    open: false, action: null, user: null,
+  });
   const [snackbar, setSnackbar] = useState<SnackbarState>({ open: false, message: '', severity: 'info' });
 
   const showToast = (message: string, severity: SnackbarState['severity'] = 'info') => {
@@ -193,6 +216,36 @@ export default function PasswordManagementPage() {
     const id = window.setInterval(fetchTokens, REFRESH_INTERVAL_MS);
     return () => window.clearInterval(id);
   }, [fetchTokens]);
+
+  // ── Self-action confirmation ────────────────────
+
+  const requestGenerateCode = (user: AdminUserListItem) => {
+    if (user.email.toLowerCase() === adminEmail) {
+      setSelfConfirm({ open: true, action: 'generate', user });
+    } else {
+      openGenerateDialog(user);
+    }
+  };
+
+  const requestResetPassword = (user: AdminUserListItem) => {
+    if (user.email.toLowerCase() === adminEmail) {
+      setSelfConfirm({ open: true, action: 'reset', user });
+    } else {
+      openResetDialog(user);
+    }
+  };
+
+  const cancelSelfConfirm = () => {
+    setSelfConfirm({ open: false, action: null, user: null });
+  };
+
+  const proceedSelfConfirm = () => {
+    const { action, user } = selfConfirm;
+    setSelfConfirm({ open: false, action: null, user: null });
+    if (!user || !action) return;
+    if (action === 'generate') openGenerateDialog(user);
+    else openResetDialog(user);
+  };
 
   // ── Generate code flow ──────────────────────────
 
@@ -312,51 +365,40 @@ export default function PasswordManagementPage() {
                 </TableRow>
               </TableHead>
               <TableBody>
-                {users.map(user => {
-                  const isSelf = user.email.toLowerCase() === adminEmail;
-                  return (
-                    <TableRow key={user.id} hover>
-                      <TableCell sx={{ fontFamily: 'inherit' }}>{user.email}</TableCell>
-                      <TableCell>{user.tenant_name}</TableCell>
-                      <TableCell>
-                        <Chip size="small" label={user.role || '—'} variant="outlined" />
-                      </TableCell>
-                      <TableCell>{userStatusChip(user)}</TableCell>
-                      <TableCell sx={{ color: 'text.secondary', fontSize: 13 }}>
-                        {user.last_login ? formatTimestamp(user.last_login) : 'Never'}
-                      </TableCell>
-                      <TableCell align="right">
-                        {isSelf ? (
-                          <Tooltip title="Use the Profile page to change your own password">
-                            <Typography variant="caption" color="text.secondary">
-                              (your account)
-                            </Typography>
-                          </Tooltip>
-                        ) : (
-                          <Stack direction="row" spacing={1} justifyContent="flex-end">
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              startIcon={<VpnKey fontSize="small" />}
-                              onClick={() => openGenerateDialog(user)}
-                            >
-                              Generate Code
-                            </Button>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="warning"
-                              startIcon={<LockReset fontSize="small" />}
-                              onClick={() => openResetDialog(user)}
-                            >
-                              Reset Password
-                            </Button>
-                          </Stack>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                {users.map(user => (
+                  <TableRow key={user.id} hover>
+                    <TableCell sx={{ fontFamily: 'inherit' }}>{user.email}</TableCell>
+                    <TableCell>{formatTenantCell(user)}</TableCell>
+                    <TableCell>
+                      <Chip size="small" label={user.role || '—'} variant="outlined" />
+                    </TableCell>
+                    <TableCell>{userStatusChip(user)}</TableCell>
+                    <TableCell sx={{ color: 'text.secondary', fontSize: 13 }}>
+                      {user.last_login ? formatTimestamp(user.last_login) : 'Never'}
+                    </TableCell>
+                    <TableCell align="right">
+                      <Stack direction="row" spacing={1} justifyContent="flex-end">
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<VpnKey fontSize="small" />}
+                          onClick={() => requestGenerateCode(user)}
+                        >
+                          Generate Code
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="warning"
+                          startIcon={<LockReset fontSize="small" />}
+                          onClick={() => requestResetPassword(user)}
+                        >
+                          Reset Password
+                        </Button>
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                ))}
                 {users.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={6} align="center" sx={{ color: 'text.secondary', py: 3 }}>
@@ -642,6 +684,47 @@ export default function PasswordManagementPage() {
             startIcon={resetDialog.submitting ? <CircularProgress size={16} color="inherit" /> : <CheckCircle />}
           >
             {resetDialog.submitting ? 'Resetting...' : 'Reset Password'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Self-action confirmation dialog ── */}
+      <Dialog
+        open={selfConfirm.open}
+        onClose={cancelSelfConfirm}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>
+          {selfConfirm.action === 'reset'
+            ? 'Reset your own password?'
+            : 'Generate a reset code for yourself?'}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {selfConfirm.action === 'reset' ? (
+              <>
+                You are about to reset the password for your own account
+                {selfConfirm.user ? <> (<strong>{selfConfirm.user.email}</strong>)</> : null}.
+                Make sure you have access to the new password before continuing — you
+                will be required to log in again with the new value.
+              </>
+            ) : (
+              <>
+                This will generate a one-time reset code for your own account. Use it
+                carefully — only one code can be active at a time.
+              </>
+            )}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cancelSelfConfirm}>Cancel</Button>
+          <Button
+            onClick={proceedSelfConfirm}
+            variant="contained"
+            color={selfConfirm.action === 'reset' ? 'warning' : 'primary'}
+          >
+            {selfConfirm.action === 'reset' ? 'Reset My Password' : 'Generate Code'}
           </Button>
         </DialogActions>
       </Dialog>

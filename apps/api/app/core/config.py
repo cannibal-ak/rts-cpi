@@ -1,5 +1,4 @@
 from pydantic_settings import BaseSettings
-from pydantic import Field
 import os
 
 class Settings(BaseSettings):
@@ -21,11 +20,6 @@ class Settings(BaseSettings):
     superset_admin_user: str = os.environ.get("SUPERSET_ADMIN_USER", "admin")
     superset_admin_pass: str = os.environ.get("SUPERSET_ADMIN_PASS", "admin")
     
-    # Application-layer encryption (Phase 1 SFTP)
-    # Required: 32-byte URL-safe base64 (output of Fernet.generate_key()).
-    # Mapped from CPI_KEK env via case_sensitive=False.
-    cpi_kek: str = Field(..., description="Fernet KEK for at-rest encryption")
-
     # Authentication — JWT + Bcrypt (Phase 2)
     jwt_secret_key: str = os.environ.get("JWT_SECRET_KEY", "CHANGE-ME-IN-PRODUCTION")
     jwt_algorithm: str = os.environ.get("JWT_ALGORITHM", "HS256")
@@ -33,6 +27,12 @@ class Settings(BaseSettings):
     jwt_refresh_token_expire_days: int = int(os.environ.get("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7"))
     password_min_length: int = int(os.environ.get("PASSWORD_MIN_LENGTH", "12"))
     bcrypt_rounds: int = int(os.environ.get("BCRYPT_ROUNDS", "12"))
+
+    # Symmetric master key for secrets stored in the DB (smtp_config password).
+    # MUST be a valid Fernet key (base64-urlsafe, 32 bytes). Generate once with:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Losing this value forfeits the ability to decrypt anything stored under it.
+    smtp_encryption_key: str = os.environ.get("CPI_SMTP_ENCRYPTION_KEY", "")
 
     # Feature flags
     allow_legacy_header_auth: bool = os.environ.get("ALLOW_LEGACY_HEADER_AUTH", "false").lower() == "true"

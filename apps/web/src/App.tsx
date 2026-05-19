@@ -15,6 +15,7 @@ import SftpConnectionsPage from './pages/admin/SftpConnectionsPage';
 import IngestionSchedulesPage from './pages/admin/IngestionSchedulesPage';
 import IngestionRunsPage from './pages/admin/IngestionRunsPage';
 import PasswordManagementPage from './pages/PasswordManagementPage';
+import EmailSettingsPage from './pages/admin/settings/EmailSettingsPage';
 import IngestionJobsPage from './pages/ingestion/IngestionJobsPage';
 import UploadPage from './pages/ingestion/UploadPage';
 
@@ -94,7 +95,7 @@ export default function App() {
                 {/* Legacy redirects */}
                 <Route path="/airline" element={<Navigate to="/cpi/airline/jy" replace />} />
                 <Route path="/cfl" element={<Navigate to="/cpi/cruise/fjl" replace />} />
-                {/* Admin (Skywave platform admins only) */}
+                {/* Admin (RTS platform admins only) */}
                 <Route path="/admin/sftp-connections" element={
                   <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
                     <SftpConnectionsPage />
@@ -113,6 +114,11 @@ export default function App() {
                 <Route path="/admin/password-management" element={
                   <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
                     <PasswordManagementPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/admin/settings/email" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <EmailSettingsPage />
                   </ProtectedRoute>
                 } />
 

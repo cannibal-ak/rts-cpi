@@ -43,6 +43,29 @@ docker compose up -d
 2. Replace placeholder values with real credentials (see [docs/SECRETS.md](docs/SECRETS.md) for generation commands).
 3. Never commit `.env` to version control.
 
+### First-boot setup — SMTP encryption key
+
+The `smtp_config` table (introduced in migration 027) stores the SMTP
+password as Fernet ciphertext keyed by `CPI_SMTP_ENCRYPTION_KEY`. Generate
+the key once and place it in `.env` before the admin saves any SMTP
+credentials:
+
+```bash
+# Generate inside the running api container (uses the installed cryptography pkg)
+docker exec cpi-api-1 python -c \
+  "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+# Then append to .env:
+#   CPI_SMTP_ENCRYPTION_KEY=<the value printed above>
+```
+
+> **Back this key up.** Losing `CPI_SMTP_ENCRYPTION_KEY` permanently
+> forfeits the ability to decrypt every SMTP password stored under it —
+> the admin would have to delete the `smtp_config` row and re-enter the
+> credentials from scratch. Store it in the same place you keep
+> `POSTGRES_PASSWORD` and `JWT_SECRET_KEY` (password manager / KMS /
+> sealed envelope).
+
 ## Authentication
 
 Phase 2 uses real JWT authentication with bcrypt-hashed passwords and forced
@@ -57,7 +80,7 @@ special character).
 
 | Email | Tenant | Temp Password |
 |---|---|---|
-| `admin@skywave.com` | `skywave` | `admin123` |
+| `admin@rts.com` | `rts` | `admin123` |
 | `jy@airline.com` | `jy` | `airline123` |
 | `pw@airline.com` | `pw` | `airline123` |
 | `fjl@cruise.com` | `fjl` | `cruise123` |

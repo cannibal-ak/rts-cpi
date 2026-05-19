@@ -20,6 +20,7 @@ class AdminUserListItem(BaseModel):
     id: UUID
     email: str
     tenant_name: str
+    tenant_slug: str               # canonical key into the frontend TENANT_CONFIG map
     role: str
     is_active: bool
     is_locked: bool                # computed: locked_until > now()

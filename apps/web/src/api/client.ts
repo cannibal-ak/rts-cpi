@@ -15,6 +15,9 @@ import type {
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
   PlatformHealthResponse, TenantSummaryResponse,
 } from '../types';
+import type {
+  SmtpConfigRead, SmtpConfigUpdate, SmtpTestRequest, SmtpTestResponse,
+} from '../types/smtpConfig';
 
 // ── Superset chart manifest ────────────────
 export interface DashboardChart {
@@ -45,6 +48,17 @@ export interface SnapshotQuery {
   page?: number;
   page_size?: number;
   [key: string]: string | number | undefined;
+}
+
+/**
+ * Date filter sent to /api/v1/superset/guest-token. The backend turns these
+ * into an extra RLS clause on cap_date (single-day or BETWEEN).
+ */
+export interface DashboardDateFilter {
+  mode: 'single' | 'range';
+  capDateEq?: string;    // YYYY-MM-DD, set when mode === 'single'
+  capDateFrom?: string;  // YYYY-MM-DD, set when mode === 'range'
+  capDateTo?: string;    // YYYY-MM-DD, set when mode === 'range'
 }
 
 
@@ -119,6 +133,17 @@ export interface CpiApiClient {
       getHealth(): Promise<PlatformHealthResponse>;
       getTenantSummary(): Promise<TenantSummaryResponse>;
     };
+
+    // ── Platform Settings ──
+    settings: {
+      smtp: {
+        // null when the smtp_config row hasn't been written yet.
+        get(): Promise<SmtpConfigRead | null>;
+        update(body: SmtpConfigUpdate): Promise<SmtpConfigRead>;
+        test(body: SmtpTestRequest): Promise<SmtpTestResponse>;
+        delete(): Promise<void>;
+      };
+    };
   };
   // Stats
   stats: {
@@ -130,11 +155,18 @@ export interface CpiApiClient {
     updateUserRoles(roles: string[], tenant_id: string): Promise<{ roles: string[] }>;
   };
   superset: {
-    getGuestToken(dashboardId: string): Promise<{
+    getGuestToken(
+      dashboardId: string,
+      dateFilter?: DashboardDateFilter,
+    ): Promise<{
         token: string;
         dashboard_uuid: string;
         embedded_uuid: string;
         dashboard_title: string;
+    }>;
+    getAvailableDates(dashboardId: string): Promise<{
+        dashboard_id: string;
+        dates: string[];
     }>;
     getDashboardCharts(dashboardId: string): Promise<DashboardChartsResponse>;
   };
