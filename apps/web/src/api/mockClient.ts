@@ -356,6 +356,19 @@ export const mockClient: CpiApiClient = {
       forceReset: (_email: string, _newPassword: string, _forceChangeOnLogin: boolean) =>
         delay({ success: false, message: 'Not available in mock mode' }),
     },
+    // SMTP settings aren't exercised offline; stubs keep the interface satisfied.
+    settings: {
+      smtp: {
+        get: () => delay(null),
+        update: (_body: unknown) => Promise.reject(new Error('API 503: SMTP config not available in mock mode')),
+        test: (_body: unknown) => delay({
+          success: false,
+          message: 'Not available in mock mode',
+          latency_ms: null,
+        }),
+        delete: () => delay(undefined as unknown as void),
+      },
+    },
     // Dashboard isn't exercised offline; mocks return plausible data so the UI renders.
     dashboard: {
       getHealth: () => delay({

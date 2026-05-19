@@ -83,6 +83,16 @@ export const navigationItems: NavItem[] = [
     category: 'Admin',
   },
 
+  // ── Platform Settings (peer of ADMIN; renders as its own section) ─
+  {
+    label: 'Email',
+    path: '/admin/settings/email',
+    icon: 'Email',
+    requiredRoles: ['TENANT_ADMIN'],
+    requireSuperAdmin: true,
+    category: 'Settings',
+  },
+
   // ── Data Ops (manual fallback alongside SFTP automation) ─────
   {
     label: 'Ingestion Jobs',

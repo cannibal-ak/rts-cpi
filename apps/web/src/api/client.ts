@@ -15,6 +15,9 @@ import type {
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
   PlatformHealthResponse, TenantSummaryResponse,
 } from '../types';
+import type {
+  SmtpConfigRead, SmtpConfigUpdate, SmtpTestRequest, SmtpTestResponse,
+} from '../types/smtpConfig';
 
 // ── Superset chart manifest ────────────────
 export interface DashboardChart {
@@ -129,6 +132,17 @@ export interface CpiApiClient {
     dashboard: {
       getHealth(): Promise<PlatformHealthResponse>;
       getTenantSummary(): Promise<TenantSummaryResponse>;
+    };
+
+    // ── Platform Settings ──
+    settings: {
+      smtp: {
+        // null when the smtp_config row hasn't been written yet.
+        get(): Promise<SmtpConfigRead | null>;
+        update(body: SmtpConfigUpdate): Promise<SmtpConfigRead>;
+        test(body: SmtpTestRequest): Promise<SmtpTestResponse>;
+        delete(): Promise<void>;
+      };
     };
   };
   // Stats

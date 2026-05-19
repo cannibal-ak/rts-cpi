@@ -17,6 +17,9 @@ import type {
   PlatformHealthResponse, TenantSummaryResponse,
   IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionAuditLog, IngestionPreview,
 } from '../types';
+import type {
+  SmtpConfigRead, SmtpConfigUpdate, SmtpTestRequest, SmtpTestResponse,
+} from '../types/smtpConfig';
 import { authStorage } from '../utils/authStorage';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -383,6 +386,16 @@ export const httpClient: CpiApiClient = {
     dashboard: {
       getHealth: () => get<PlatformHealthResponse>('/api/v1/admin/dashboard/health'),
       getTenantSummary: () => get<TenantSummaryResponse>('/api/v1/admin/dashboard/tenant-summary'),
+    },
+    settings: {
+      smtp: {
+        get: () => get<SmtpConfigRead | null>('/api/v1/admin/settings/smtp'),
+        update: (body: SmtpConfigUpdate) =>
+          put<SmtpConfigRead>('/api/v1/admin/settings/smtp', body),
+        test: (body: SmtpTestRequest) =>
+          post<SmtpTestResponse>('/api/v1/admin/settings/smtp/test', body),
+        delete: () => del<void>('/api/v1/admin/settings/smtp'),
+      },
     },
   },
   stats: {
