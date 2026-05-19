@@ -8,7 +8,7 @@ export interface TenantSession {
   tenant_name: string;
   enabled_modules: ModuleCode[];
   enabled_capabilities: Capability[];
-  // True for the Skywave platform admin tenant. The backend equivalent is
+  // True for the RTS platform admin tenant. The backend equivalent is
   // is_platform_admin() in deps.py (identity-based, not role-based).
   is_super_admin?: boolean;
   user: { id: string; name: string; email: string; roles: UserRole[]; avatar_url?: string };
@@ -21,8 +21,9 @@ export interface NavItem {
   requiredModules?: ModuleCode[];
   requiredCapabilities?: Capability[];
   requiredRoles?: UserRole[];
-  // When true, only the Skywave super-admin sees this item, regardless of role list.
+  // When true, only the RTS super-admin sees this item, regardless of role list.
   requireSuperAdmin?: boolean;
+  hideForSuperAdmin?: boolean;
   children?: NavItem[];
   category?: string;
 }
@@ -46,6 +47,9 @@ export interface SavedView {
 }
 
 // ──────── Airline snapshot ────────
+// Mirrors apps/api/app/schemas/airline.py AirlineSnapshotOut.
+// All non-core fields are Optional in Pydantic — declared optional here so
+// the UI can render '—' for missing values without TS complaints.
 export interface AirlineSnapshot {
   id: string;
   cap_date: string;
@@ -78,8 +82,7 @@ export interface AirlineSnapshot {
   fare_delta?: number;
   fare_delta_pct?: number;
 
-  // ── Phase 2A migration 022: 47 new dictionary columns ──
-  // Reference flight — outbound additions (11)
+  // Reference outbound additions
   ref_dep_time?: string | null;
   ref_arr_time?: string | null;
   ref_stops?: number | null;
@@ -91,7 +94,9 @@ export interface AirlineSnapshot {
   ref_anc_price?: number | null;
   ref_anc_type?: string | null;
   ref_equip_code?: string | null;
-  // Reference flight — return-leg (11) — JY-only in source
+  ref_equip_name?: string | null;
+
+  // Reference return leg
   ref_ret_flt_num?: string | null;
   ref_ret_dep_date?: string | null;
   ref_ret_dep_time?: string | null;
@@ -103,7 +108,8 @@ export interface AirlineSnapshot {
   ref_ret_bkg_class?: string | null;
   ref_ret_seats?: number | null;
   ref_ret_equip_code?: string | null;
-  // Competitor — outbound additions (11)
+
+  // Competitor outbound additions
   comp_dep_time?: string | null;
   comp_arr_time?: string | null;
   comp_stops?: number | null;
@@ -115,7 +121,9 @@ export interface AirlineSnapshot {
   comp_anc_price?: number | null;
   comp_anc_type?: string | null;
   comp_equip_code?: string | null;
-  // Competitor — return-leg (11) — JY-only in source
+  comp_equip_name?: string | null;
+
+  // Competitor return leg
   comp_ret_flt_num?: string | null;
   comp_ret_dep_date?: string | null;
   comp_ret_dep_time?: string | null;
@@ -127,13 +135,15 @@ export interface AirlineSnapshot {
   comp_ret_bkg_class?: string | null;
   comp_ret_seats?: number | null;
   comp_ret_equip_code?: string | null;
-  // Point-of-* (PW source carries pod/poc) (2)
-  pod?: string | null;
-  poc?: string | null;
-  // Provenance (1)
-  path?: string | null;
 
-  // ── Phase 2E: 9 newly-exposed infra/metadata fields ──
+  // Provenance and dictionary additions
+  path?: string | null;
+  ref_pos?: string | null;
+  ref_channel?: string | null;
+  comp_pos?: string | null;
+  comp_channel?: string | null;
+
+  // Infra / metadata
   ref_curr?: string | null;
   comp_curr?: string | null;
   tenant_code?: string | null;
@@ -146,7 +156,7 @@ export interface AirlineSnapshot {
 }
 
 // ──────── JY velocity snapshot ────────
-export interface JyVelocitySnapshot {
+export interface VelocitySnapshot {
   id: string;
   tenant_id: string;
   dep_date: string;
@@ -174,6 +184,7 @@ export interface JyVelocitySnapshot {
   source_file?: string;
   loaded_at?: string;
   ingested_at?: string;
+  airline_code: string;
 }
 
 // ──────── CFL snapshot ────────
@@ -187,9 +198,18 @@ export interface CflSnapshot {
   dest: string;
   out_dep_date: string;
   out_dep_time: string;
+  // Outbound Arrival (migration 024)
+  out_arr_date: string | null;
+  out_arr_time: string | null;
   prod_family: string;
   out_equip_name: string;
   out_cab_type: string;
+  // Outbound Descriptions & Seats (migration 024)
+  out_cabin_desc: string | null;
+  out_seat_type: string | null;
+  out_num_cabs: number | null;
+  out_seat_fare: number | null;
+  out_num_seats: number | null;
   total_fare: number;
   out_per_pax_fare: number;
   out_veh_fare: number;
@@ -199,50 +219,37 @@ export interface CflSnapshot {
   veh_size: string;
   curr_code: string;
   out_avail: string;
+  // Return Journey — Schedule & Product (migration 024)
+  ret_dep_date: string | null;
+  ret_dep_time: string | null;
+  ret_arr_date: string | null;
+  ret_arr_time: string | null;
+  ret_equip_name: string | null;
+  ret_cab_type: string | null;
+  ret_cab_desc: string | null;
+  ret_seat_type: string | null;
+  ret_avail: string | null;
+  // Return Journey — Fares (migration 024)
+  ret_per_pax_fare: number | null;
+  ret_num_pax: number | null;
+  ret_veh_fare: number | null;
+  ret_cab_fare: number | null;
+  ret_num_cabs: number | null;
+  ret_seat_fare: number | null;
+  ret_num_seats: number | null;
+  ret_taxes: number | null;
+  // Total/Combined Fares (migration 024)
+  tot_per_pax_fare: number | null;
+  tot_num_pax: number | null;
+  tot_veh_fare: number | null;
+  tot_cab_fare: number | null;
+  tot_num_cabs: number | null;
+  tot_seat_fare: number | null;
+  tot_num_seats: number | null;
+  tot_taxes: number | null;
+  // Duration (migration 024)
+  duration: number | null;
 }
-
-// ──────── Ingestion ────────
-export type JobStatus = 'queued' | 'validating' | 'committed' | 'failed';
-export type ValidationMode = 'STRICT' | 'COMPAT';
-
-export interface JobTimelineEntry {
-  status: JobStatus;
-  timestamp: string;
-  message?: string;
-}
-
-export interface IngestionJob {
-  id: string;
-  source_name: string;
-  domain: string;
-  tenant_code?: string;
-  status: JobStatus;
-  validation_mode: ValidationMode;
-  records_total: number;
-  records_valid: number;
-  records_rejected: number;
-  started_at: string;
-  completed_at?: string;
-  timeline: JobTimelineEntry[];
-}
-
-export interface ImportBatch {
-  id: string;
-  import_job_id: string;
-  batch_seq: number;
-  record_count: number;
-  completeness_score: number | null;
-  warning_codes: string[];
-  validation_results: {
-    total_fields?: number;
-    present_fields?: number;
-    optional_missing?: string[];
-    warnings?: Array<{ code: string; message: string }>;
-  };
-  created_at: string;
-}
-
-
 
 // ──────── Alerts ────────
 export interface AlertRule {
@@ -286,4 +293,479 @@ export interface FilterMetadata {
   field: string;
   label: string;
   values: string[];
+}
+
+// ─── SFTP admin (Phase 4) ─────────────────────────────────
+// IngestionDomain is the canonical YAML-declared domain enum
+// (matches app/ingestion/filename_patterns.yaml on the server).
+export type IngestionDomain = 'AIRLINE' | 'VELOCITY' | 'CFL';
+
+export type SftpAuthMethod = 'password' | 'private_key';
+
+// Read shape — what the API returns for a connection.
+// Plaintext credentials are NEVER present; masked_credential
+// is the operator-facing presence indicator.
+export interface SftpConnection {
+  id: string;
+  tenant_code: string;
+  name: string;
+  host: string;
+  port: number;
+  username: string;
+  auth_method: SftpAuthMethod;
+  remote_base_path: string;
+  is_active: boolean;
+  host_key_fingerprint: string | null;
+  masked_credential: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SftpConnectionCreate {
+  tenant_code: string;
+  name: string;
+  host: string;
+  port?: number;
+  username: string;
+  auth_method: SftpAuthMethod;
+  password?: string;
+  private_key_pem?: string;
+  remote_base_path: string;
+  is_active?: boolean;
+}
+
+export interface SftpConnectionUpdate {
+  name?: string;
+  host?: string;
+  port?: number;
+  username?: string;
+  auth_method?: SftpAuthMethod;
+  password?: string;
+  private_key_pem?: string;
+  remote_base_path?: string;
+  is_active?: boolean;
+}
+
+export interface IngestionSchedule {
+  id: string;
+  tenant_code: string;
+  sftp_connection_id: string;
+  cron_expression: string;
+  timezone: string;
+  is_enabled: boolean;
+  domain: IngestionDomain;
+  filename_regex: string;
+  replace_existing: boolean;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  redbeat_registered: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IngestionScheduleCreate {
+  tenant_code: string;
+  sftp_connection_id: string;
+  cron_expression: string;
+  timezone?: string;
+  is_enabled?: boolean;
+  domain: IngestionDomain;
+  filename_regex: string;
+  replace_existing?: boolean;
+}
+
+export interface IngestionScheduleUpdate {
+  sftp_connection_id?: string;
+  cron_expression?: string;
+  timezone?: string;
+  is_enabled?: boolean;
+  domain?: IngestionDomain;
+  filename_regex?: string;
+  replace_existing?: boolean;
+}
+
+export interface IngestionRun {
+  id: string;
+  schedule_id: string;
+  tenant_code: string | null;
+  started_at: string;
+  finished_at: string | null;
+  // The API returns string today: 'RUNNING' | 'SUCCESS' |
+  // 'PARTIAL' | 'FAILED'. Kept open as `string` so a future
+  // server-side enum extension doesn't break the type.
+  status: string;
+  files_seen: number;
+  files_pulled: number;
+  jobs_created: number;
+  jobs_committed: number;
+  triggered_by: string | null;
+  // detail_log is a free-form JSONB observability field; the
+  // current Phase 2 worker writes a list[dict] of per-file
+  // outcomes, but the schema permits any shape. Treat as
+  // opaque on the client.
+  detail_log: unknown | null;
+  error_summary: string | null;
+}
+
+export interface IngestionRunDetail extends IngestionRun {
+  ingested_files: IngestedFile[];
+}
+
+export interface IngestedFile {
+  id: string;
+  run_id: string;
+  schedule_id: string | null;
+  remote_filename: string;
+  sha256: string;
+  remote_size_bytes: number;
+  remote_mtime_utc: string | null;
+  // 'COMMITTED' | 'DUPLICATE' | 'FAILED' | future variants —
+  // see IngestionRun.status note for the rationale.
+  outcome: string;
+  ingestion_job_id: string | null;
+  error_message: string | null;
+  created_at: string;
+}
+
+// ── Operation results ──
+
+export interface SftpConnectionTestResult {
+  ok: boolean;
+  detail: string;
+}
+
+export interface RunNowResult {
+  task_id: string;
+  run_id: string | null;
+}
+
+// ── List query shapes ──
+
+export interface SftpConnectionListQuery {
+  page?: number;
+  page_size?: number;
+  tenant_code?: string;
+  is_active?: boolean;
+}
+
+export interface IngestionScheduleListQuery {
+  page?: number;
+  page_size?: number;
+  tenant_code?: string;
+  is_enabled?: boolean;
+  sftp_connection_id?: string;
+}
+
+export interface IngestionRunListQuery {
+  page?: number;
+  page_size?: number;
+  tenant_code?: string;
+  schedule_id?: string;
+  status?: string;
+  started_after?: string;
+  started_before?: string;
+}
+
+// ──────── Admin Password Management ────────
+export interface AdminUserListItem {
+  id: string;
+  email: string;
+  tenant_name: string;
+  role: string;
+  is_active: boolean;
+  is_locked: boolean;
+  force_password_change: boolean;
+  last_login: string | null;
+  created_at: string;
+}
+
+export interface AdminUserListResponse {
+  users: AdminUserListItem[];
+  total: number;
+}
+
+export interface AdminResetTokenItem {
+  id: string;
+  email: string;
+  code: string;
+  status: 'pending' | 'used' | 'expired';
+  created_at: string;
+  expires_at: string;
+  attempts: number;
+}
+
+export interface AdminResetTokenListResponse {
+  tokens: AdminResetTokenItem[];
+  total: number;
+}
+
+export interface AdminGenerateResetCodeResponse {
+  success: boolean;
+  message: string;
+  code: string;
+  expires_at: string;
+}
+
+export interface AdminForceResetResponse {
+  success: boolean;
+  message: string;
+}
+
+
+// ──────── Data Ops (restored from 66b5965) ────────
+export type IngestionStatus =
+  | 'STAGED'
+  | 'VALIDATING'
+  | 'VALIDATED'
+  | 'COMMITTING'
+  | 'COMMITTED'
+  | 'REJECTED'
+  | 'REPLACED'
+  | 'FAILED';
+
+export type IngestionDomain = 'AIRLINE' | 'VELOCITY' | 'CFL';
+export type IngestionMode = 'STRICT' | 'LENIENT';
+
+export type IngestionAuditAction =
+  | 'UPLOADED'
+  | 'VALIDATED'
+  | 'COMMITTED'
+  | 'REJECTED'
+  | 'REPLACED'
+  | 'CANCELLED'
+  | 'DELETED';
+
+export interface IngestionJob {
+  id: string;
+  tenant_id: string;
+  tenant_code: string;
+  domain: IngestionDomain;
+  filename: string;
+  file_hash: string;
+  file_size_bytes: number;
+  file_date: string;
+  status: IngestionStatus;
+  mode: IngestionMode;
+  row_count_total: number | null;
+  row_count_valid: number | null;
+  row_count_rejected: number | null;
+  validation_summary: Record<string, unknown> | null;
+  uploaded_by_user_id: string;
+  uploaded_at: string;
+  validated_at: string | null;
+  committed_at: string | null;
+  replaced_by_job_id: string | null;
+  error_message: string | null;
+}
+
+export type IngestionMode = 'STRICT' | 'LENIENT';
+
+export type IngestionAuditAction =
+  | 'UPLOADED'
+  | 'VALIDATED'
+  | 'COMMITTED'
+  | 'REJECTED'
+  | 'REPLACED'
+  | 'CANCELLED'
+  | 'DELETED';
+
+export interface IngestionJob {
+  id: string;
+  tenant_id: string;
+  tenant_code: string;
+  domain: IngestionDomain;
+  filename: string;
+  file_hash: string;
+  file_size_bytes: number;
+  file_date: string;
+  status: IngestionStatus;
+  mode: IngestionMode;
+  row_count_total: number | null;
+  row_count_valid: number | null;
+  row_count_rejected: number | null;
+  validation_summary: Record<string, unknown> | null;
+  uploaded_by_user_id: string;
+  uploaded_at: string;
+  validated_at: string | null;
+  committed_at: string | null;
+  replaced_by_job_id: string | null;
+  error_message: string | null;
+}
+
+export type IngestionAuditAction =
+  | 'UPLOADED'
+  | 'VALIDATED'
+  | 'COMMITTED'
+  | 'REJECTED'
+  | 'REPLACED'
+  | 'CANCELLED'
+  | 'DELETED';
+
+export interface IngestionJob {
+  id: string;
+  tenant_id: string;
+  tenant_code: string;
+  domain: IngestionDomain;
+  filename: string;
+  file_hash: string;
+  file_size_bytes: number;
+  file_date: string;
+  status: IngestionStatus;
+  mode: IngestionMode;
+  row_count_total: number | null;
+  row_count_valid: number | null;
+  row_count_rejected: number | null;
+  validation_summary: Record<string, unknown> | null;
+  uploaded_by_user_id: string;
+  uploaded_at: string;
+  validated_at: string | null;
+  committed_at: string | null;
+  replaced_by_job_id: string | null;
+  error_message: string | null;
+}
+
+export interface IngestionJob {
+  id: string;
+  tenant_id: string;
+  tenant_code: string;
+  domain: IngestionDomain;
+  filename: string;
+  file_hash: string;
+  file_size_bytes: number;
+  file_date: string;
+  status: IngestionStatus;
+  mode: IngestionMode;
+  row_count_total: number | null;
+  row_count_valid: number | null;
+  row_count_rejected: number | null;
+  validation_summary: Record<string, unknown> | null;
+  uploaded_by_user_id: string;
+  uploaded_at: string;
+  validated_at: string | null;
+  committed_at: string | null;
+  replaced_by_job_id: string | null;
+  error_message: string | null;
+}
+
+export interface IngestionUploadFileResult {
+  filename: string;
+  job: IngestionJob | null;
+  duplicate: boolean;
+  conflict: boolean;
+  existing_job_id: string | null;
+  error_code: string | null;
+  error_message: string | null;
+}
+
+export interface IngestionUploadSummary {
+  accepted: number;
+  duplicate: number;
+  conflict: number;
+  rejected: number;
+}
+
+export interface IngestionUploadResponse {
+  files: IngestionUploadFileResult[];
+  summary: IngestionUploadSummary;
+}
+
+export interface IngestionValidationResult {
+  job: IngestionJob;
+  row_count_total: number;
+  row_count_valid: number;
+  row_count_rejected: number;
+  summary: Record<string, unknown>;
+}
+
+export interface IngestionCommitResult {
+  job: IngestionJob;
+  rows_inserted: number;
+  replaced_job_id: string | null;
+}
+
+export interface IngestionAuditEntry {
+  id: string;
+  job_id: string;
+  actor_user_id: string;
+  action: IngestionAuditAction;
+  actor_ip: string | null;
+  timestamp: string;
+  details: Record<string, unknown> | null;
+}
+
+export interface IngestionAuditLog {
+  job_id: string;
+  entries: IngestionAuditEntry[];
+}
+
+export interface IngestionPreviewRow {
+  row_num: number;
+  data: Record<string, unknown>;
+}
+
+export interface IngestionPreviewRejection {
+  row_num: number;
+  reason: string;
+}
+
+export interface IngestionPreview {
+  job_id: string;
+  sample_valid: IngestionPreviewRow[];
+  sample_rejected: IngestionPreviewRejection[];
+}
+
+export interface ImportBatch {
+  id: string;
+  import_job_id: string;
+  batch_seq: number;
+  record_count: number;
+  completeness_score: number | null;
+  warning_codes: string[];
+  validation_results: {
+    total_fields?: number;
+    present_fields?: number;
+    optional_missing?: string[];
+    warnings?: Array<{ code: string; message: string }>;
+  };
+  created_at: string;
+}
+
+// ──────── Admin Dashboard (Home page) ────────
+export type ServiceHealthStatus = 'healthy' | 'unhealthy' | 'unknown';
+
+export interface ServiceHealthItem {
+  name: string;
+  status: ServiceHealthStatus;
+  response_time_ms: number | null;
+  details: string | null;
+}
+
+export interface PlatformHealthResponse {
+  services: ServiceHealthItem[];
+  checked_at: string;
+}
+
+export type TenantFreshnessStatus = 'fresh' | 'stale' | 'critical' | 'no_data';
+
+export interface TenantDataSummary {
+  tenant_id: string;
+  tenant_name: string;
+  tenant_type: 'airline' | 'cruise';
+  airline_code: string;
+  sftp_connected: boolean;
+  sftp_last_pull: string | null;
+  sftp_last_pull_status: string | null;
+  latest_data_date: string | null;
+  last_capture_at: string | null;
+  freshness_status: TenantFreshnessStatus;
+  total_records: number;
+  next_scheduled_run: string | null;
+  schedule_enabled: boolean;
+  last_run_status: string | null;
+  last_run_id: string | null;
+  last_run_at: string | null;
+}
+
+export interface TenantSummaryResponse {
+  tenants: TenantDataSummary[];
 }

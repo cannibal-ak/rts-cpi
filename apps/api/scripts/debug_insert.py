@@ -38,7 +38,7 @@ with engine.connect() as conn:
                 587.45, 425.25, 162.20, 0, 9,
                 'BW', 'BW001', 'BGI', 'ANU', '2026-04-04', 'Y',
                 500.00, 400.00, 100.00, 0, 9,
-                'US', 'US', 'admin@skywave.com'
+                'US', 'US', 'admin@rts.com'
             )
         """), {"id": uuid.uuid4(), "tid": TENANT_ID, "bid": batch_id})
         

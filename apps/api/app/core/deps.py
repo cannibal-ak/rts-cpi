@@ -109,11 +109,11 @@ def get_user_identity(current_user: dict = Depends(get_current_user)) -> str:
 
 # ── Platform admin detection ──────────────────
 
-PLATFORM_TENANT_SLUG = "SKYWAVE"
+PLATFORM_TENANT_SLUG = "RTS"
 
 
 def is_platform_admin(user_identity: str, user_roles: list[str]) -> bool:
-    """True if user belongs to Skywave platform tenant AND has TENANT_ADMIN role."""
+    """True if user belongs to RTS platform tenant AND has TENANT_ADMIN role."""
     return user_identity == PLATFORM_TENANT_SLUG and "TENANT_ADMIN" in user_roles
 
 
@@ -136,10 +136,10 @@ class RequireRoles:
 
 
 class RequirePlatformAdmin:
-    """Restricts access to Skywave platform administrators only.
+    """Restricts access to RTS platform administrators only.
 
     Checks that the user has TENANT_ADMIN role AND belongs to the
-    Skywave platform tenant (slug='skywave').
+    RTS platform tenant (slug='rts').
     """
 
     def __call__(

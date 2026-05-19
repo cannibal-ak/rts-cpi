@@ -9,7 +9,7 @@ interface HomeIngestionJob {
 
 export const mockSession: TenantSession = {
   tenant_id: import.meta.env.VITE_TENANT_ID || 'a0000000-0000-0000-0000-000000000001',
-  tenant_name: 'SkyWave Airlines Group',
+  tenant_name: 'Revenue Technology Services',
   // Platform admin owns the tenant/pipeline management surfaces, not the
   // tenant analytics dashboards. Modules are intentionally empty so
   // canAccessDashboard() returns false for every tenant dashboard.
@@ -18,8 +18,8 @@ export const mockSession: TenantSession = {
   is_super_admin: true,
   user: {
     id: 'user-001',
-    name: 'Alex Rivera',
-    email: 'alex.rivera@skywave.com',
+    name: 'RTS Admin',
+    email: 'admin@rts.com',
     roles: ['TENANT_ADMIN'],
   },
 };
@@ -29,7 +29,7 @@ export const mockRolePresets: Record<string, TenantSession> = {
   airline_jy: {
     ...mockSession,
     tenant_id: 'a0000000-0000-0000-0000-000000000001',
-    tenant_name: 'Acme Airways - JY',
+    tenant_name: 'interCaribbean Airways',
     enabled_modules: ['airline_jy'],
     is_super_admin: false,
     user: { id: 'user-jy', name: 'Airline_JY', email: 'jy@airline.com', roles: ['TENANT_ADMIN'] },

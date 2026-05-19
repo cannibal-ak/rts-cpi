@@ -223,7 +223,7 @@ async def fetch_guest_token(
     cap_date_to   = sanitize_date(cap_date_to, "cap_date_to")
 
     # 2. Access control
-    #    Platform admins (skywave tenant) manage pipelines and tenants — they
+    #    Platform admins (rts tenant) manage pipelines and tenants — they
     #    do not consume tenant dashboards. Tenant users only access their own
     #    dashboard.  Note: the previous ``is_admin = "TENANT_ADMIN" in user_roles``
     #    check was structurally broken — every authenticated user receives
@@ -354,7 +354,7 @@ async def list_dashboard_charts(
         })
 
     # 2. Access control — mirror the guest-token endpoint.
-    #    is_platform_admin() is identity-based (skywave tenant), not role-based.
+    #    is_platform_admin() is identity-based (rts tenant), not role-based.
     #    Every authenticated user gets TENANT_ADMIN via get_user_roles (deps.py),
     #    so a role-based admin check would let every tenant bypass tenant
     #    isolation — see the equivalent fix on fetch_guest_token().

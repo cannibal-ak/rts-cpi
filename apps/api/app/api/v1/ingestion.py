@@ -11,7 +11,7 @@ Endpoints:
 * GET    /api/v1/ingestion/jobs/{id}/audit         audit log
 
 All endpoints require a valid JWT (handled by ``enforce_password_change``
-in main.py) and Skywave platform-admin identity (enforced inside the
+in main.py) and RTS platform-admin identity (enforced inside the
 ``IngestionService`` for upload/validate/commit/cancel; route-level for
 read-only endpoints via the ``RequirePlatformAdmin`` dependency).
 """

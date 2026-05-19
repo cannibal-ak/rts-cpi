@@ -20,7 +20,7 @@ from sqlalchemy import create_engine, text
 from app.core.config import settings
 
 CANONICAL_USERS = [
-    ("admin@skywave.com",  "admin123",   "skywave"),
+    ("admin@rts.com",      "admin123",   "rts"),
     ("jy@airline.com",     "airline123", "jy"),
     ("pw@airline.com",     "airline123", "pw"),
     ("fjl@cruise.com",     "cruise123",  "fjl"),

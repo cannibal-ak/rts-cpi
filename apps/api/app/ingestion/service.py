@@ -5,10 +5,10 @@ Routers are thin wrappers that translate exceptions into HTTP responses;
 all business logic, audit trail, and DB writes live here.
 
 Design notes:
-* Each public method enforces Skywave platform-admin authorization.
+* Each public method enforces RTS platform-admin authorization.
 * Tenant UUIDs are resolved at runtime from the ``tenant`` table by slug.
   This is the Phase 1 fix: the legacy ``ingest_daily.py`` hardcoded JY's
-  UUID as Skywave's, and we want that bug to be impossible in the new
+  UUID as the RTS platform tenant's, and we want that bug to be impossible in the new
   flow by construction.
 * Each method commits its own DB transaction. ``commit_job`` does this
   in two phases (mark COMMITTING, do work, mark COMMITTED-or-FAILED) so a
@@ -49,6 +49,7 @@ from app.ingestion.parsers import (
     parse_velocity_date,
     read_data_file,
     safe_float,
+    safe_float_nullable,
     safe_int,
     safe_int_nullable,
 )
@@ -290,7 +291,7 @@ class IngestionService:
             # the date gate and the post-loop branch tags the job with a
             # schema-specific error_message instead of the generic one.
 
-        for row in read_data_file(str(staged_file)):
+        for row in read_data_file(str(staged_file), domain=job.domain):
             total += 1
             raw_date = (row.get(date_field) or "").strip()
             parsed_dt = (
@@ -490,7 +491,7 @@ class IngestionService:
         roles = _roles_from_payload(user_payload)
         if not is_platform_admin(identity, roles):
             raise IngestionAuthError(
-                "Skywave platform admin required for ingestion operations"
+                "RTS platform admin required for ingestion operations"
             )
         return _ensure_actor_uuid(user_payload)
 
@@ -994,7 +995,7 @@ class IngestionService:
             """
         )
         inserted = 0
-        for row in read_data_file(str(staged_file)):
+        for row in read_data_file(str(staged_file), domain=job.domain):
             dep_date = parse_velocity_date(row.get("DepDate"))
             if not dep_date:
                 continue
@@ -1031,22 +1032,45 @@ class IngestionService:
         return inserted
 
     def _insert_cfl_rows(self, job: IngestionJob, staged_file: Path) -> int:
+        # Note: existing fare columns (total_fare, out_per_pax_fare, etc.) keep
+        # safe_float() semantics (0.0 for missing) to preserve backwards
+        # compatibility. The 33 new columns added in migration 024 use
+        # safe_float_nullable() so a missing return-leg fare is NULL rather
+        # than 0.0, which keeps averages and IS NULL filters accurate.
         sql = text(
             """
             INSERT INTO cfl_cpi_snapshot (
                 id, tenant_id, data_owner, cap_date, cap_time, trip_type,
                 source, org, dest, out_dep_date, out_dep_time,
+                out_arr_date, out_arr_time,
                 prod_family, out_equip_name, out_cab_type,
+                out_cabin_desc, out_seat_type, out_num_cabs, out_seat_fare, out_num_seats,
                 total_fare, out_per_pax_fare, out_veh_fare, out_cab_fare,
                 out_taxes, out_num_pax, veh_size, curr_code, out_avail,
+                ret_dep_date, ret_dep_time, ret_arr_date, ret_arr_time,
+                ret_equip_name, ret_cab_type, ret_cab_desc, ret_seat_type, ret_avail,
+                ret_per_pax_fare, ret_num_pax, ret_veh_fare, ret_cab_fare,
+                ret_num_cabs, ret_seat_fare, ret_num_seats, ret_taxes,
+                tot_per_pax_fare, tot_num_pax, tot_veh_fare, tot_cab_fare,
+                tot_num_cabs, tot_seat_fare, tot_num_seats, tot_taxes,
+                duration,
                 tenant_code, business_type, report_date, source_file,
                 loaded_at
             ) VALUES (
                 :id, :tid, :owner, :cd, :ct, :tt,
                 :src, :org, :dst, :odd, :odt,
+                :oad, :oat,
                 :pf, :oen, :oct,
+                :ocd, :ost, :onc, :osf, :ons,
                 :tf, :oppf, :ovf, :ocf,
                 :otx, :onp, :vs, :cc, :oa,
+                :rdd, :rdt, :rad, :rat,
+                :ren, :rct, :rcd, :rst, :rav,
+                :rppf, :rnp, :rvf, :rcf,
+                :rnc, :rsf, :rns, :rtx,
+                :tppf, :tnp, :tvf, :tcf,
+                :tnc, :tsf, :tns, :ttx,
+                :dur,
                 :tcode, :btype, :rdate, :sfile,
                 now()
             )
@@ -1057,6 +1081,17 @@ class IngestionService:
             cap_date = parse_date(row.get("CapDate"))
             if not cap_date:
                 continue
+
+            def _trim(val: object, n: int) -> str | None:
+                """String columns added in 024 are nullable — preserve None
+                instead of coercing blank to empty string."""
+                if val is None:
+                    return None
+                s = str(val).strip()
+                if not s:
+                    return None
+                return s[:n]
+
             params = {
                 "id": uuid.uuid4(),
                 "tid": job.tenant_id,
@@ -1069,9 +1104,19 @@ class IngestionService:
                 "dst": (row.get("Dest") or "")[:32],
                 "odd": parse_date(row.get("OutDepDate")) or cap_date,
                 "odt": parse_time(row.get("OutDepTime")) or datetime.now().time(),
+                # Outbound Arrival (024)
+                "oad": parse_date(row.get("OutArrDate")),
+                "oat": parse_time(row.get("OutArrTime")),
                 "pf": (row.get("ProdFamily") or "Standard")[:64],
                 "oen": (row.get("OutEquipName") or "")[:64],
                 "oct": (row.get("OutCabType") or "none")[:32],
+                # Outbound Descriptions & Seats (024)
+                "ocd": _trim(row.get("OutCabinDesc"), 100),
+                "ost": _trim(row.get("OutSeatType"), 50),
+                "onc": safe_int_nullable(row.get("OutNumCabs")),
+                "osf": safe_float_nullable(row.get("OutSeatFare")),
+                "ons": safe_int_nullable(row.get("OutNumSeats")),
+                # Existing outbound fares (unchanged semantics)
                 "tf": safe_float(row.get("TotalFare")),
                 "oppf": safe_float(row.get("OutPerPaxFare")),
                 "ovf": safe_float(row.get("OutVehFare")),
@@ -1081,6 +1126,36 @@ class IngestionService:
                 "vs": (row.get("VehSize") or "none")[:16],
                 "cc": (row.get("CurrCode") or "EUR")[:4],
                 "oa": (row.get("OutAvail") or "Available")[:16],
+                # Return Journey — Schedule & Product (024)
+                "rdd": parse_date(row.get("RetDepDate")),
+                "rdt": parse_time(row.get("RetDepTime")),
+                "rad": parse_date(row.get("RetArrDate")),
+                "rat": parse_time(row.get("RetArrTime")),
+                "ren": _trim(row.get("RetEquipName"), 64),
+                "rct": _trim(row.get("RetCabType"), 50),
+                "rcd": _trim(row.get("RetCabDesc"), 100),
+                "rst": _trim(row.get("RetSeatType"), 50),
+                "rav": _trim(row.get("RetAvail"), 16),
+                # Return Journey — Fares (024)
+                "rppf": safe_float_nullable(row.get("RetPerPaxFare")),
+                "rnp":  safe_int_nullable(row.get("RetNumPax")),
+                "rvf":  safe_float_nullable(row.get("RetVehFare")),
+                "rcf":  safe_float_nullable(row.get("RetCabFare")),
+                "rnc":  safe_int_nullable(row.get("RetNumCabs")),
+                "rsf":  safe_float_nullable(row.get("RetSeatFare")),
+                "rns":  safe_int_nullable(row.get("RetNumSeats")),
+                "rtx":  safe_float_nullable(row.get("RetTaxes")),
+                # Total/Combined Fares (024)
+                "tppf": safe_float_nullable(row.get("TotPerPaxFare")),
+                "tnp":  safe_int_nullable(row.get("TotNumPax")),
+                "tvf":  safe_float_nullable(row.get("TotVehFare")),
+                "tcf":  safe_float_nullable(row.get("TotCabFare")),
+                "tnc":  safe_int_nullable(row.get("TotNumCabs")),
+                "tsf":  safe_float_nullable(row.get("TotSeatFare")),
+                "tns":  safe_int_nullable(row.get("TotNumSeats")),
+                "ttx":  safe_float_nullable(row.get("TotTaxes")),
+                # Duration (024)
+                "dur":  safe_int_nullable(row.get("Duration")),
                 "tcode": job.tenant_code,
                 "btype": _business_type_for(job.domain),
                 "rdate": job.file_date,

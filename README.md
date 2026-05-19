@@ -57,7 +57,7 @@ special character).
 
 | Email | Tenant | Temp Password |
 |---|---|---|
-| `admin@skywave.com` | `skywave` | `admin123` |
+| `admin@rts.com` | `rts` | `admin123` |
 | `jy@airline.com` | `jy` | `airline123` |
 | `pw@airline.com` | `pw` | `airline123` |
 | `fjl@cruise.com` | `fjl` | `cruise123` |
@@ -98,6 +98,7 @@ Default Superset credentials: `admin` / (set in `.env`).
 - [docs/SECRETS.md](docs/SECRETS.md) — Secrets management and rotation
 - [docs/ingestion-uuid-discovery.md](docs/ingestion-uuid-discovery.md) — Phase A: ingestion overhaul UUID-bug findings + fix
 - [docs/phase-a-schema-verification.txt](docs/phase-a-schema-verification.txt) — Phase A: alembic 018 schema verification snapshot
+- [docs/phase-a-smoke-test-results.md](docs/phase-a-smoke-test-results.md) — Phase A: 10/10 live JY smoke-test results
 - [CONTRIBUTING.md](CONTRIBUTING.md) — Contribution guidelines
 
 ## Project Status

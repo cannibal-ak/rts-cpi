@@ -161,7 +161,7 @@ confirms each user has a `password_hash` set.
 
 | Email | Tenant Slug | Display Name | Role | Temp Password |
 |---|---|---|---|---|
-| `admin@skywave.com` | `skywave` | Alex Rivera | TENANT_ADMIN | `admin123` |
+| `admin@rts.com` | `rts` | RTS Admin | TENANT_ADMIN | `admin123` |
 | `jy@airline.com` | `jy` | JY Airline Admin | TENANT_ADMIN | `airline123` |
 | `pw@airline.com` | `pw` | PW Airline Admin | TENANT_ADMIN | `airline123` |
 | `fjl@cruise.com` | `fjl` | FJL Cruise Admin | TENANT_ADMIN | `cruise123` |
@@ -170,7 +170,7 @@ confirms each user has a `password_hash` set.
 
 | Tenant UUID | Slug | Display Name |
 |---|---|---|
-| `a0000000-0000-0000-0000-000000000001` | `skywave` | Skywave Platform Admin |
+| `a0000000-0000-0000-0000-000000000001` | `rts` | Revenue Technology Services |
 | `dd000000-0000-0000-0000-000000000001` | `jy` | Skywave - JY |
 | `bb000000-0000-0000-0000-000000000001` | `pw` | Skybound - PW |
 | `cc000000-0000-0000-0000-000000000001` | `fjl` | Baltic Ferries - FJL |

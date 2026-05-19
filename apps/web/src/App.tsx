@@ -11,25 +11,36 @@ import LoginPage from './pages/login/LoginPage';
 import HomePage from './pages/home/HomePage';
 import AirlineCpiPage from './pages/airline/AirlineCpiPage';
 import CflCpiPage from './pages/cfl/CflCpiPage';
+import SftpConnectionsPage from './pages/admin/SftpConnectionsPage';
+import IngestionSchedulesPage from './pages/admin/IngestionSchedulesPage';
+import IngestionRunsPage from './pages/admin/IngestionRunsPage';
+import PasswordManagementPage from './pages/PasswordManagementPage';
 import IngestionJobsPage from './pages/ingestion/IngestionJobsPage';
+import UploadPage from './pages/ingestion/UploadPage';
 
 import SupersetPage from './pages/superset/SupersetPage';
 import DashboardViewerPage from './pages/superset/DashboardViewerPage';
 import NotAuthorizedPage from './pages/NotAuthorizedPage';
 import NotFoundPage from './pages/NotFoundPage';
 import ChangePasswordPage from './pages/auth/ChangePasswordPage';
+import { isSuperAdmin } from './utils/access';
+import { getPrimaryDashboardId } from './pages/superset/dashboardAccess';
 
 /**
  * RootRoute handles the logic for the base path "/".
  * Admin -> HomePage
- * Others -> Dashboards
+ * Single-dashboard tenant -> /dashboards/{their-id}
+ * Fallback (no mapping) -> /dashboards listing
  */
 function RootRoute() {
   const { session } = useSession();
-  if (session.user.roles.includes('TENANT_ADMIN')) {
+  if (isSuperAdmin(session)) {
     return <HomePage />;
   }
-  // All other authenticated users (JY, PW, FJL) land on Dashboards
+  const dashboardId = getPrimaryDashboardId(session);
+  if (dashboardId) {
+    return <Navigate to={`/dashboards/${dashboardId}`} replace />;
+  }
   return <Navigate to="/dashboards" replace />;
 }
 
@@ -83,11 +94,37 @@ export default function App() {
                 {/* Legacy redirects */}
                 <Route path="/airline" element={<Navigate to="/cpi/airline/jy" replace />} />
                 <Route path="/cfl" element={<Navigate to="/cpi/cruise/fjl" replace />} />
+                {/* Admin (RTS platform admins only) */}
+                <Route path="/admin/sftp-connections" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <SftpConnectionsPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/admin/ingestion-schedules" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <IngestionSchedulesPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/admin/ingestion-runs" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <IngestionRunsPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/admin/password-management" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <PasswordManagementPage />
+                  </ProtectedRoute>
+                } />
 
-
+                {/* Data Ops (platform admin only) */}
                 <Route path="/ingestion" element={
                   <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
                     <IngestionJobsPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/ingestion/upload" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <UploadPage />
                   </ProtectedRoute>
                 } />
 
