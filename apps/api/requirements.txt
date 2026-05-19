@@ -9,6 +9,11 @@ python-multipart>=0.0.9
 httpx>=0.27,<1
 openpyxl>=3.1,<4
 python-jose[cryptography]>=3.3,<4
+# Explicit pin for Fernet symmetric encryption used by core/encryption.py
+# (smtp_config password at rest). python-jose pulls cryptography in too,
+# but we pin the major version here so an unrelated upgrade can't break
+# the Fernet contract under us.
+cryptography>=42.0,<43.0
 passlib[bcrypt]>=1.7,<2
 bcrypt>=4.0,<4.1   # pinned: passlib 1.7.x is incompatible with bcrypt >= 4.1 (raises ValueError in self-test)
 email-validator>=2.1,<3
