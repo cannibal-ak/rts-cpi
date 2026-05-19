@@ -88,6 +88,7 @@ def list_users(db: Session = Depends(get_db)):
                 id=user.id,
                 email=user.email,
                 tenant_name=tenant.display_name,
+                tenant_slug=tenant.slug,
                 role=roles[0] if roles else "",
                 is_active=bool(user.is_active),
                 is_locked=_is_locked(user),

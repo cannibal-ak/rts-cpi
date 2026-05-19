@@ -13,7 +13,7 @@ export interface TenantConfigEntry {
 }
 
 export const TENANT_CONFIG: Record<string, TenantConfigEntry> = {
-  rts:     { initials: 'RA', displayName: 'RTS Admin',     orgName: 'Revenue Technology Services' },
+  rts:     { initials: 'RTS', displayName: 'RTS Admin',    orgName: 'Revenue Technology Services' },
   jy:      { initials: 'JY', displayName: 'JY Airline',    orgName: 'interCaribbean Airways' },
   pw:      { initials: 'PW', displayName: 'PW Airline',    orgName: 'Precision Air' },
   fjl:     { initials: 'FL', displayName: 'FJL Cruise',    orgName: 'Fjord Line' },

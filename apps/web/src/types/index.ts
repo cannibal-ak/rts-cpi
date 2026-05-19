@@ -471,6 +471,7 @@ export interface AdminUserListItem {
   id: string;
   email: string;
   tenant_name: string;
+  tenant_slug: string;
   role: string;
   is_active: boolean;
   is_locked: boolean;
