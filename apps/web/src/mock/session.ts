@@ -18,8 +18,8 @@ export const mockSession: TenantSession = {
   is_super_admin: true,
   user: {
     id: 'user-001',
-    name: 'Alex Rivera',
-    email: 'alex.rivera@skywave.com',
+    name: 'RTS Admin',
+    email: 'admin@rts.com',
     roles: ['TENANT_ADMIN'],
   },
 };
