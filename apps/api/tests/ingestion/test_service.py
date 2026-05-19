@@ -113,7 +113,7 @@ def test_upload_file_resolves_jy_uuid_correctly(
         "4/1/2026,09:00,LHRJFK,4/1/2026\n"
     ).encode("utf-8")
     result = svc.upload_file(
-        velocity, "JYVelocityData_01.04.2026.csv", admin_jwt_payload
+        velocity, "JY_VL_010426.csv", admin_jwt_payload
     )
     assert result.job.tenant_id == JY_TENANT_UUID
     assert result.job.tenant_id != SKYWAVE_TENANT_UUID

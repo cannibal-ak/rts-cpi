@@ -16,26 +16,26 @@ patterns:
     case_insensitive: true
     example: "JY_010426.xlsx"
 
-  - regex: "^JYVelocityData_(\\d{2}\\.\\d{2}\\.\\d{4})\\.csv$"
+  - regex: "^JY_VL_(\\d{6})\\.(?i:csv|xlsx)$"
     tenant_code: JY
     domain: VELOCITY
-    date_format: DD.MM.YYYY
-    case_insensitive: true
-    example: "JYVelocityData_01.04.2026.csv"
+    date_format: DDMMYY
+    case_insensitive: false
+    example: "JY_VL_010426.CSV"
 
-  - regex: "^PW_(\\d{6})\\.(xlsx|csv)$"
+  - regex: "^PW_(\\d{6})\\.xlsx$"
     tenant_code: PW
     domain: AIRLINE
     date_format: DDMMYY
     case_insensitive: true
     example: "PW_010426.xlsx"
 
-  - regex: "^PWVelocityData_(\\d{2}\\.\\d{2}\\.\\d{4})\\.csv$"
+  - regex: "^PW_VL_(\\d{6})\\.(?i:csv|xlsx)$"
     tenant_code: PW
     domain: VELOCITY
-    date_format: DD.MM.YYYY
-    case_insensitive: true
-    example: "PWVelocityData_01.04.2026.csv"
+    date_format: DDMMYY
+    case_insensitive: false
+    example: "PW_VL_010426.CSV"
 
   - regex: "^FJL_(\\d{6})\\.csv$"
     tenant_code: FJL

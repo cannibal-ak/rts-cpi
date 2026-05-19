@@ -175,6 +175,16 @@ def _diagnose_no_match(name: str) -> ParsedFilename:
         shape.group(3).lower(),
     )
 
+    if prefix.lower() in {"jyvelocitydata", "pwvelocitydata"}:
+        return ParsedFilename(
+            None,
+            None,
+            None,
+            False,
+            "Old velocity format detected. Use JY_VL_DDMMYY.csv "
+            "or JY_VL_DDMMYY.xlsx instead.",
+        )
+
     if prefix.lower() not in KNOWN_PREFIXES:
         return ParsedFilename(
             None,

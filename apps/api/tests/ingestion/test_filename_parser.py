@@ -7,9 +7,9 @@ from app.ingestion.filename_parser import ParsedFilename, parse_filename
 
 
 # Reference "today" used in tests for deterministic future-date detection.
-# Picked well after April 2026 (which is when the canonical sample data is
-# dated) so the valid filenames are always in the past.
-TEST_TODAY = date(2026, 4, 30)
+# Picked well after the latest canonical sample-data date (May 19, 2026 — the
+# velocity-format-change cutover) so the valid filenames are always in the past.
+TEST_TODAY = date(2026, 5, 31)
 
 
 # ── Valid filenames ────────────────────────────────────────────────
@@ -19,19 +19,17 @@ TEST_TODAY = date(2026, 4, 30)
     "filename,expected_tenant,expected_domain,expected_date",
     [
         ("JY_010426.xlsx", "JY", "AIRLINE", date(2026, 4, 1)),
-        (
-            "JYVelocityData_01.04.2026.csv",
-            "JY",
-            "VELOCITY",
-            date(2026, 4, 1),
-        ),
+        # Velocity: new JY_VL_DDMMYY.{csv|CSV|xlsx|XLSX} format, all 4 ext variants.
+        ("JY_VL_190526.CSV", "JY", "VELOCITY", date(2026, 5, 19)),
+        ("JY_VL_190526.csv", "JY", "VELOCITY", date(2026, 5, 19)),
+        ("JY_VL_190526.XLSX", "JY", "VELOCITY", date(2026, 5, 19)),
+        ("JY_VL_190526.xlsx", "JY", "VELOCITY", date(2026, 5, 19)),
         ("PW_010426.xlsx", "PW", "AIRLINE", date(2026, 4, 1)),
-        (
-            "PWVelocityData_01.04.2026.csv",
-            "PW",
-            "VELOCITY",
-            date(2026, 4, 1),
-        ),
+        # Velocity: new PW_VL_DDMMYY.{csv|CSV|xlsx|XLSX} format, all 4 ext variants.
+        ("PW_VL_190526.CSV", "PW", "VELOCITY", date(2026, 5, 19)),
+        ("PW_VL_190526.csv", "PW", "VELOCITY", date(2026, 5, 19)),
+        ("PW_VL_190526.XLSX", "PW", "VELOCITY", date(2026, 5, 19)),
+        ("PW_VL_190526.xlsx", "PW", "VELOCITY", date(2026, 5, 19)),
         ("FJL_010426.csv", "FJL", "CFL", date(2026, 4, 1)),
     ],
 )
@@ -155,3 +153,62 @@ def test_parsed_filename_is_frozen_dataclass() -> None:
     assert isinstance(result, ParsedFilename)
     with pytest.raises(Exception):
         result.is_valid = False  # type: ignore[misc]
+
+
+# ── Velocity filename-format-change cutover (2026-05-19) ──────────
+
+
+def test_old_velocity_format_rejected_jy() -> None:
+    """Pre-2026-05-19 JYVelocityData_DD.MM.YYYY format is dead and must be
+    rejected with a hint pointing at the new JY_VL_DDMMYY format."""
+    result = parse_filename(
+        "JYVelocityData_19.05.2026.csv", today=TEST_TODAY
+    )
+    assert not result.is_valid
+    assert "Old velocity format detected" in result.error_reason
+    assert "JY_VL_DDMMYY" in result.error_reason
+
+
+def test_old_velocity_format_rejected_pw() -> None:
+    result = parse_filename(
+        "PWVelocityData_19.05.2026.csv", today=TEST_TODAY
+    )
+    assert not result.is_valid
+    assert "Old velocity format detected" in result.error_reason
+
+
+def test_velocity_wrong_extension_txt() -> None:
+    result = parse_filename("JY_VL_190526.txt", today=TEST_TODAY)
+    assert not result.is_valid
+    assert "unsupported file extension" in result.error_reason
+
+
+def test_velocity_wrong_extension_pdf() -> None:
+    result = parse_filename("JY_VL_190526.pdf", today=TEST_TODAY)
+    assert not result.is_valid
+    assert "unsupported file extension" in result.error_reason
+
+
+def test_velocity_eight_digit_date_rejected() -> None:
+    """The new format is DDMMYY (6 digits), not DDMMYYYY (8 digits)."""
+    result = parse_filename("JY_VL_19052026.csv", today=TEST_TODAY)
+    assert not result.is_valid
+
+
+def test_velocity_missing_date_rejected() -> None:
+    result = parse_filename("JY_VL_.csv", today=TEST_TODAY)
+    assert not result.is_valid
+
+
+def test_velocity_invalid_day_rejected() -> None:
+    """Day 32 is impossible; strptime must reject it."""
+    result = parse_filename("JY_VL_320526.csv", today=TEST_TODAY)
+    assert not result.is_valid
+    assert "malformed date" in result.error_reason
+
+
+def test_velocity_lowercase_prefix_rejected() -> None:
+    """Velocity prefix must be UPPERCASE (JY_VL_, PW_VL_) — unlike pricing,
+    velocity is case-sensitive on the prefix. Extension stays case-insensitive."""
+    result = parse_filename("jy_vl_190526.csv", today=TEST_TODAY)
+    assert not result.is_valid

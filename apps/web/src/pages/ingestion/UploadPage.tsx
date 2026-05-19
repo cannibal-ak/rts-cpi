@@ -16,9 +16,9 @@ import type { IngestionUploadResponse } from '../../types';
 
 const FILENAME_EXAMPLES = [
   { tenant: 'JY', domain: 'AIRLINE', pattern: 'JY_DDMMYY.xlsx', example: 'JY_010426.xlsx' },
-  { tenant: 'JY', domain: 'VELOCITY', pattern: 'JYVelocityData_DD.MM.YYYY.csv', example: 'JYVelocityData_01.04.2026.csv' },
-  { tenant: 'PW', domain: 'AIRLINE', pattern: 'PW_DDMMYY.csv', example: 'PW_010426.csv' },
-  { tenant: 'PW', domain: 'VELOCITY', pattern: 'PWVelocityData_DD.MM.YYYY.csv', example: 'PWVelocityData_01.04.2026.csv' },
+  { tenant: 'JY', domain: 'VELOCITY', pattern: 'JY_VL_DDMMYY.{csv|xlsx}', example: 'JY_VL_010426.CSV' },
+  { tenant: 'PW', domain: 'AIRLINE', pattern: 'PW_DDMMYY.xlsx', example: 'PW_010426.xlsx' },
+  { tenant: 'PW', domain: 'VELOCITY', pattern: 'PW_VL_DDMMYY.{csv|xlsx}', example: 'PW_VL_010426.CSV' },
   { tenant: 'FJL', domain: 'CFL', pattern: 'FJL_DDMMYY.csv', example: 'FJL_010426.csv' },
 ];
 
