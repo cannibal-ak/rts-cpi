@@ -69,7 +69,7 @@ export const navigationItems: NavItem[] = [
   {
     label: 'Ingestion Runs',
     path: '/admin/ingestion-runs',
-    icon: 'History',
+    icon: 'PlayCircleFilled',
     requiredRoles: ['TENANT_ADMIN'],
     requireSuperAdmin: true,
     category: 'Admin',
@@ -97,7 +97,7 @@ export const navigationItems: NavItem[] = [
   {
     label: 'Ingestion Jobs',
     path: '/ingestion',
-    icon: 'Assignment',
+    icon: 'AssignmentTurnedIn',
     requiredRoles: ['TENANT_ADMIN'],
     requireSuperAdmin: true,
     category: 'Data Ops',
