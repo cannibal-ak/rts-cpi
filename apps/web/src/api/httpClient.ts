@@ -139,15 +139,38 @@ async function fetchWithAuth<T>(url: string, init: RequestInit): Promise<T> {
   return handleResponse<T>(res);
 }
 
-async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
-  const url = new URL(path, BASE);
-  if (params) {
-    Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
-    });
+// Build a request URL that works for both absolute BASE
+// (e.g. "http://192.168.101.10:8000" during local dev) and relative
+// BASE (e.g. "/api" in production behind nginx). The native
+// ``new URL(path, base)`` constructor REQUIRES an absolute base and
+// throws "Invalid base URL" on a relative one — that's why this
+// helper exists.
+function buildUrl(path: string, base: string): string {
+  if (/^https?:\/\//i.test(base)) {
+    return new URL(path, base).toString();
   }
+  const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base;
+  const normalizedPath = path.startsWith('/') ? path : '/' + path;
+  return normalizedBase + normalizedPath;
+}
+
+// Serialise a flat param record into a "?k=v&k=v" suffix. Empty /
+// undefined / null values are dropped, matching the previous
+// URLSearchParams.set behaviour.
+function buildQuery(params?: Record<string, string | number | undefined>): string {
+  if (!params) return '';
+  const usp = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') usp.set(k, String(v));
+  }
+  const s = usp.toString();
+  return s ? `?${s}` : '';
+}
+
+async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+  const url = buildUrl(path, BASE) + buildQuery(params);
   try {
-    return await fetchWithAuth<T>(url.toString(), { headers: headers() });
+    return await fetchWithAuth<T>(url, { headers: headers() });
   } catch (err: any) {
     if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
     throw new Error(`Network Error: ${err.message}. Is the backend at ${BASE} reachable?`);
@@ -209,18 +232,13 @@ async function postMultipart<T>(path: string, files: File[]): Promise<T> {
 }
 
 async function download(path: string, params?: Record<string, string | number | undefined>): Promise<void> {
-  const url = new URL(path, BASE);
-  if (params) {
-    Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== '') url.searchParams.set(k, String(v));
-    });
-  }
-  const res = await fetch(url.toString(), { headers: headers() });
+  const url = buildUrl(path, BASE) + buildQuery(params);
+  const res = await fetch(url, { headers: headers() });
 
   if (res.status === 401) {
     const refreshed = await attemptRefresh();
     if (refreshed) {
-      const retryRes = await fetch(url.toString(), { headers: headers() });
+      const retryRes = await fetch(url, { headers: headers() });
       if (!retryRes.ok) throw new Error(`Download failed: ${retryRes.status}`);
       return processDownload(retryRes);
     }
