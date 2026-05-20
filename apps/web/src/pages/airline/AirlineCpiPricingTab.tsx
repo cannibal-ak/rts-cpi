@@ -116,7 +116,6 @@ const SUMMARY_COLUMNS: SummaryColumn[] = [
         {p == null ? DASH : fmtSignedPercent(p)}
       </Box>;
   }},
-  { label: 'POS',       align: 'left',  width: 44, render: r => fmtText(r.pos) },
 ];
 
 const CHEVRON_COL_WIDTH = 28;
@@ -232,7 +231,6 @@ const DETAIL_GROUPS: DetailGroup[] = [
       { key: 'comp_channel', label: 'Comp Channel' },
       { key: 'ref_pos',      label: 'Ref POS' },
       { key: 'comp_pos',     label: 'Comp POS' },
-      { key: 'pos',          label: 'POS' },
     ],
   },
   {
@@ -327,7 +325,6 @@ const EXPORT_COLUMNS: Array<{ header: string; key: keyof AirlineSnapshot }> = [
   { header: 'CompAncPrice',     key: 'comp_anc_price' },
   { header: 'CompAncType',      key: 'comp_anc_type' },
   { header: 'CompTotFare',      key: 'comp_tot_fare' },
-  { header: 'POS',              key: 'pos' },
   { header: 'CompCabName',      key: 'comp_cab_name' },
   { header: 'CompRetCabName',   key: 'comp_ret_cab_name' },
   { header: 'CompCabCode',      key: 'comp_cab_code' },
@@ -418,7 +415,6 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
   const [competitors, setCompetitors] = useState<string[]>([]);
   const [tripTypeFilter, setTripTypeFilter] = useState<'all' | 'OW' | 'RT'>('all');
   const [cabins, setCabins] = useState<string[]>([]);
-  const [posList, setPosList] = useState<string[]>([]);
   const [depFrom, setDepFrom] = useState<string>('');
   const [depTo, setDepTo] = useState<string>('');
 
@@ -473,7 +469,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
   useEffect(() => {
     setPage(0);
     setExpandedId(null);
-  }, [routes, competitors, tripTypeFilter, cabins, posList, depFrom, depTo]);
+  }, [routes, competitors, tripTypeFilter, cabins, depFrom, depTo]);
 
   // ── Derived option lists from loaded data ───────────────────────────
   const routeOptions = useMemo(() => {
@@ -496,12 +492,6 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
     return Array.from(set).sort();
   }, [allData]);
 
-  const posOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const r of allData) if (r.pos) set.add(r.pos);
-    return Array.from(set).sort();
-  }, [allData]);
-
   // ── File-date options (from metadata) ───────────────────────────────
   const fileDateOptions = useMemo(() => {
     const fdMeta = meta.find(m => m.field === 'file_date');
@@ -516,12 +506,11 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
       if (competitors.length > 0 && !competitors.includes(r.comp_al)) return false;
       if (tripTypeFilter !== 'all' && r.trip_type !== tripTypeFilter) return false;
       if (cabins.length > 0 && !cabins.includes(r.ref_cab_code)) return false;
-      if (posList.length > 0 && (r.pos == null || !posList.includes(r.pos))) return false;
       if (depFrom && (!r.ref_dep_date || r.ref_dep_date < depFrom)) return false;
       if (depTo && (!r.ref_dep_date || r.ref_dep_date > depTo)) return false;
       return true;
     });
-  }, [allData, routes, competitors, tripTypeFilter, cabins, posList, depFrom, depTo]);
+  }, [allData, routes, competitors, tripTypeFilter, cabins, depFrom, depTo]);
 
   const totalPages = Math.max(1, Math.ceil(filteredData.length / rowsPerPage));
   const safePage = Math.min(page, totalPages - 1);
@@ -531,7 +520,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
 
   const hasClientFilters =
     routes.length > 0 || competitors.length > 0 || tripTypeFilter !== 'all' ||
-    cabins.length > 0 || posList.length > 0 || depFrom !== '' || depTo !== '';
+    cabins.length > 0 || depFrom !== '' || depTo !== '';
 
   // ── Handlers ────────────────────────────────────────────────────────
   const handleFileDateChange = (v: string) => {
@@ -546,7 +535,6 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
     setCompetitors([]);
     setTripTypeFilter('all');
     setCabins([]);
-    setPosList([]);
     setDepFrom('');
     setDepTo('');
   };
@@ -615,7 +603,6 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
           minWidth={80}
         />
         <CompactMultiSelect label="Cab" value={cabins}  onChange={setCabins}  options={cabinOptions} />
-        <CompactMultiSelect label="POS" value={posList} onChange={setPosList} options={posOptions} />
         <CompactDateInput label="Dep from" value={depFrom} onChange={setDepFrom} />
         <CompactDateInput label="Dep to"   value={depTo}   onChange={setDepTo}   />
 
