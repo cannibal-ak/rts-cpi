@@ -50,7 +50,7 @@ export default function UploadPage() {
           breadcrumbs={[{ label: 'Home', href: '/' }, { label: 'Ingestion Jobs', href: '/ingestion' }, { label: 'Upload' }]}
         />
         <Alert severity="warning" sx={{ mt: 2 }}>
-          Skywave platform admin access required. The upload pipeline is restricted to platform administrators.
+          RTS platform admin access required. The upload pipeline is restricted to platform administrators.
         </Alert>
       </Box>
     );

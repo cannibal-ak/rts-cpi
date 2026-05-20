@@ -390,6 +390,8 @@ export const httpClient: CpiApiClient = {
       },
       get: (id: string) =>
         get<IngestionRunDetail>(`/api/v1/admin/ingestion-runs/${id}`),
+      cancel: (id: string) =>
+        post<IngestionRun>(`/api/v1/admin/ingestion-runs/${id}/cancel`, {}),
     },
     passwordManagement: {
       listUsers: () => get<AdminUserListResponse>('/api/v1/admin/password-management/users'),

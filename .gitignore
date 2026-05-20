@@ -73,12 +73,18 @@ docker-compose.override.yml
 # ---------------------------------------------------------------------------
 tmp/
 *.bak
+*.bak-*
+*.bak.*
 *.tmp
 
 # Data files (keep folder structure via .gitkeep)
-apps/api/data/**/*.csv
-apps/api/data/**/*.xlsx
-apps/api/data/**/*.json
+# Case-insensitive on extensions because uppercase .CSV / .XLSX have
+# leaked through case-sensitive matches before.
+apps/api/data/**/*.[Cc][Ss][Vv]
+apps/api/data/**/*.[Xx][Ll][Ss][Xx]
+apps/api/data/**/*.[Jj][Ss][Oo][Nn]
+# Ingestion staging — UUID-named per-run subdirs, never to be committed.
+apps/api/data/staging/
 !apps/api/data/.gitkeep
 
 # Loose debug/log files in project root

@@ -118,6 +118,7 @@ export interface CpiApiClient {
     ingestionRuns: {
       list(query?: IngestionRunListQuery): Promise<Paginated<IngestionRun>>;
       get(id: string): Promise<IngestionRunDetail>;
+      cancel(id: string): Promise<IngestionRun>;
     };
 
     // ── Password Management ──

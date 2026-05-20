@@ -27,8 +27,8 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.deps import (
@@ -47,6 +47,7 @@ from app.schemas.sftp import (
     IngestionRunDetail,
     IngestionRunRead,
 )
+from app.services import audit
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -220,3 +221,94 @@ def get_run(
         detail_log=row.detail_log,
         ingested_files=[_file_to_read(f) for f in files_sorted],
     )
+
+
+@router.post(
+    "/{run_id}/cancel",
+    response_model=IngestionRunRead,
+)
+def cancel_run(
+    run_id: UUID,
+    db: Session = Depends(get_tenant_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Signal cooperative cancellation of an in-progress run.
+
+    Atomically transitions ``status='RUNNING'`` to
+    ``status='CANCELLING'`` via a conditional UPDATE — only currently
+    running runs are cancellable; the request 400s for any other
+    state (already-terminal SUCCESS/PARTIAL/FAILED/CANCELLED, or
+    already-CANCELLING). The worker observes CANCELLING at the next
+    file boundary and writes ``status='CANCELLED'`` along with the
+    counters of work it had completed up to that point. Already-
+    committed files are NOT rolled back.
+
+    Returns the row in its post-update state (status=CANCELLING).
+    Clients should poll the GET detail endpoint — or rely on the
+    runs-page auto-refresh — to observe the terminal CANCELLED
+    transition.
+    """
+    row = db.get(IngestionRun, run_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="ingestion run not found")
+
+    # Conditional UPDATE — atomic. ``rowcount`` is 1 iff status was
+    # RUNNING; otherwise 0 and the run is in a non-cancellable state.
+    result = db.execute(
+        text(
+            "UPDATE ingestion_run SET status = 'CANCELLING' "
+            "WHERE id = :id AND status = 'RUNNING'"
+        ),
+        {"id": str(run_id)},
+    )
+    if result.rowcount == 0:
+        # Re-read to report the actual current status to the caller.
+        current = db.execute(
+            text("SELECT status FROM ingestion_run WHERE id = :id"),
+            {"id": str(run_id)},
+        ).scalar()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"run is not cancellable: current status is {current!r}; "
+                "only RUNNING runs can be cancelled"
+            ),
+        )
+
+    audit.record(
+        db,
+        tenant_id=UUID(current_user["tenant_id"]),
+        actor=current_user["sub"],
+        action="CANCEL",
+        target_type="ingestion_run",
+        target_id=str(run_id),
+    )
+
+    # Resolve tenant_code while still in the tenant-context tx (RLS
+    # would filter post-commit reads — same pattern as the schedules
+    # router). The raw UPDATE bypassed the ORM, so ``row.status`` is
+    # still 'RUNNING'; build the response with the known new value.
+    tenant_code: Optional[str] = None
+    if row.schedule_id is not None:
+        tenant_code = db.scalar(
+            select(IngestionSchedule.tenant_code).where(
+                IngestionSchedule.id == row.schedule_id
+            )
+        )
+    response = IngestionRunRead(
+        id=row.id,
+        schedule_id=row.schedule_id,
+        tenant_code=tenant_code,
+        triggered_by=row.triggered_by,
+        started_at=row.started_at,
+        finished_at=row.finished_at,
+        status="CANCELLING",
+        files_seen=row.files_seen,
+        files_pulled=row.files_pulled,
+        jobs_created=row.jobs_created,
+        jobs_committed=row.jobs_committed,
+        error_summary=row.error_summary,
+        detail_log=row.detail_log,
+    )
+    db.commit()
+    return response

@@ -152,6 +152,11 @@ class IngestionRun(Base):
     jobs_committed = Column(Integer, nullable=False, server_default="0")
     error_summary = Column(Text, nullable=True)
     detail_log = Column(JSONB, nullable=True)
+    # Set by the celery task wrapper to ``self.request.id``. NULL on
+    # rows created by non-celery callers (tests, manual scripts) and on
+    # pre-migration-028 rows. The orphan-sweeper treats NULL as "no live
+    # task can claim this" — eligible for sweep once past threshold.
+    celery_task_id = Column(String(155), nullable=True)
 
     ingested_files = relationship(
         "IngestedFile",

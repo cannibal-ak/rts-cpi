@@ -28,11 +28,21 @@ class Settings(BaseSettings):
     password_min_length: int = int(os.environ.get("PASSWORD_MIN_LENGTH", "12"))
     bcrypt_rounds: int = int(os.environ.get("BCRYPT_ROUNDS", "12"))
 
-    # Symmetric master key for secrets stored in the DB (smtp_config password).
+    # Fernet key for SFTP connection password encryption (pre-existing,
+    # used by app.core.crypto for sftp_connections.password_ciphertext).
+    cpi_kek: str = os.environ.get("CPI_KEK", "")
+
+    # Separate Fernet key for SMTP credential encryption (smtp_config password).
     # MUST be a valid Fernet key (base64-urlsafe, 32 bytes). Generate once with:
     #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     # Losing this value forfeits the ability to decrypt anything stored under it.
     smtp_encryption_key: str = os.environ.get("CPI_SMTP_ENCRYPTION_KEY", "")
+
+    # System user email for automated tasks (SFTP pulls, etc.) — must exist in app_user.
+    system_user_email: str = os.environ.get("CPI_SYSTEM_USER_EMAIL", "admin@rts.com")
+
+    # Platform tenant slug (the internal RTS tenant, excluded from customer-tenant lists).
+    platform_tenant_slug: str = os.environ.get("CPI_PLATFORM_TENANT_SLUG", "rts")
 
     # Feature flags
     allow_legacy_header_auth: bool = os.environ.get("ALLOW_LEGACY_HEADER_AUTH", "false").lower() == "true"

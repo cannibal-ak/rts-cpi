@@ -10,7 +10,7 @@ interface ProtectedRouteProps {
   requiredModules?: ModuleCode[];
   requiredCapabilities?: Capability[];
   requireSuperAdmin?: boolean;
-  // Hard-blocks the Skywave platform admin from a route. Used for tenant-only
+  // Hard-blocks the RTS platform admin from a route. Used for tenant-only
   // surfaces (analytics dashboards) where the admin has no business being.
   denyForSuperAdmin?: boolean;
 }

@@ -43,3 +43,22 @@ celery_app.conf.update(
     redbeat_redis_url=_BROKER,
     redbeat_lock_timeout=30,
 )
+
+
+# Fixed-cadence maintenance jobs. RedBeat seeds these into redis on
+# ``setup_schedule`` and re-asserts them on every beat startup, so the
+# entries survive redis flushes. Names here MUST NOT collide with the
+# per-schedule entries written by ``app.services.redbeat_sync`` (which
+# use the ``sched-`` prefix and are reconciled against the DB at API
+# startup — see ``reconcile_all``).
+celery_app.conf.beat_schedule = {
+    "sftp-orphan-run-sweeper": {
+        "task": "app.tasks.sftp_pull.sweep_orphan_runs",
+        # Every 5 minutes. The sweeper itself enforces a 30-min minimum
+        # row-age before touching anything; this cadence just controls
+        # how soon an orphan is observed after that age is reached.
+        "schedule": 300.0,
+        "options": {"expires": 240.0},
+    },
+}
+

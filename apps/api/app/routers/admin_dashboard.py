@@ -63,7 +63,7 @@ router = APIRouter(
 _PROBE_TIMEOUT_S = 3.0
 
 # Platform tenant slug — excluded from the tenant-summary list.
-_PLATFORM_TENANT_SLUG = "skywave"
+_PLATFORM_TENANT_SLUG = settings.platform_tenant_slug
 
 # Maps tenant slug → (snapshot model, tenant_type) for the freshness query.
 # tenant_code in snapshot tables is uppercased (see schemas/sftp.py note);

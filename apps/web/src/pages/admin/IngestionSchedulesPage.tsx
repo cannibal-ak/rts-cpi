@@ -2,7 +2,7 @@
  * Ingestion Schedules admin page (Phase 4.3).
  *
  * Lists / creates / edits / deletes / enables / disables / triggers
- * cron-driven SFTP-pull schedules. Skywave platform admins only —
+ * cron-driven SFTP-pull schedules. RTS platform admins only —
  * gated at the route level via ProtectedRoute and again inside the
  * component via ``isSuperAdmin(session)`` for the direct-URL
  * fall-through.
@@ -395,7 +395,7 @@ export default function IngestionSchedulesPage() {
           breadcrumbs={[{ label: 'Admin' }, { label: 'Ingestion Schedules' }]}
         />
         <Alert severity="warning" sx={{ mt: 2 }}>
-          Skywave platform admin access required.
+          RTS platform admin access required.
         </Alert>
       </Box>
     );

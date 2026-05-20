@@ -360,6 +360,26 @@ export const mockClient: CpiApiClient = {
           .map(f => ({ ...f }));
         return delay({ ...row, ingested_files: files });
       },
+      cancel: (id: string): Promise<IngestionRun> => {
+        const row = mockIngestionRuns.find(r => r.id === id);
+        if (!row) return Promise.reject(new Error(`API 404: ingestion run ${id} not found`));
+        if (row.status !== 'RUNNING') {
+          return Promise.reject(new Error(
+            `API 400: run is not cancellable: current status is '${row.status}'; only RUNNING runs can be cancelled`,
+          ));
+        }
+        row.status = 'CANCELLING';
+        // Simulate the worker noticing CANCELLING at its next checkpoint
+        // and writing the terminal CANCELLED state. The page's 5s
+        // auto-refresh picks this up.
+        setTimeout(() => {
+          if (row.status === 'CANCELLING') {
+            row.status = 'CANCELLED';
+            row.finished_at = new Date().toISOString();
+          }
+        }, 2000);
+        return delay({ ...row });
+      },
     },
     // Password management isn't exercised offline; stubs keep the interface satisfied.
     passwordManagement: {

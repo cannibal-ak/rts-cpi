@@ -34,7 +34,7 @@ import json
 import logging
 import re
 import uuid
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from zoneinfo import ZoneInfo
@@ -55,7 +55,8 @@ from app.worker import celery_app
 logger = logging.getLogger(__name__)
 
 
-SYSTEM_USER_EMAIL = "admin@skywave.com"
+from app.core.config import settings as _settings
+SYSTEM_USER_EMAIL = _settings.system_user_email
 
 
 # ── date-scoped ingestion helpers ───────────────────────────────────
@@ -131,7 +132,11 @@ def _system_user_payload(db: Session) -> dict:
     a configuration invariant, NOT a transient failure, so no retry.
     """
     row = db.execute(
-        text("SELECT id FROM app_user WHERE email = :email"),
+        text(
+            "SELECT u.id AS user_id, t.slug AS tenant_slug "
+            "FROM app_user u JOIN tenant t ON t.id = u.tenant_id "
+            "WHERE u.email = :email"
+        ),
         {"email": SYSTEM_USER_EMAIL},
     ).first()
     if not row:
@@ -140,8 +145,8 @@ def _system_user_payload(db: Session) -> dict:
             "configuration invariant violated"
         )
     return {
-        "sub": str(row[0]),
-        "tenant_slug": "skywave",
+        "sub": str(row.user_id),
+        "tenant_slug": row.tenant_slug,
         "roles": ["TENANT_ADMIN"],
     }
 
@@ -192,18 +197,55 @@ def _build_sftp_client(connection: dict) -> SFTPSourceClient:
     )
 
 
-def _create_run(db: Session, schedule_id: str) -> str:
+def _create_run(
+    db: Session,
+    schedule_id: str,
+    *,
+    celery_task_id: Optional[str] = None,
+) -> str:
+    """Insert a new RUNNING ingestion_run row.
+
+    ``celery_task_id`` is the celery message id of the task that owns
+    this row (``self.request.id`` in the bound task wrapper). It is
+    persisted so the periodic ``sweep_orphan_runs`` task can match
+    rows against ``inspect.active/reserved/scheduled`` and distinguish
+    a truly-orphaned row from one that's still being processed (or
+    has been redelivered after a worker crash).
+    """
     run_id = str(uuid.uuid4())
     db.execute(
         text(
             "INSERT INTO ingestion_run "
-            "(id, schedule_id, triggered_by, status) "
-            "VALUES (:id, :sched, 'SCHEDULED', 'RUNNING')"
+            "(id, schedule_id, triggered_by, status, celery_task_id) "
+            "VALUES (:id, :sched, 'SCHEDULED', 'RUNNING', :task_id)"
         ),
-        {"id": run_id, "sched": schedule_id},
+        {
+            "id": run_id,
+            "sched": schedule_id,
+            "task_id": celery_task_id,
+        },
     )
     db.commit()
     return run_id
+
+
+def _is_cancelling(db: Session, run_id: str) -> bool:
+    """Return True iff the run row currently has ``status='CANCELLING'``.
+
+    Called between files inside ``run_pull`` so an operator's cancel
+    signal is observed at the next file boundary. Returns False on
+    any DB error (cancel must not be able to crash the worker — a
+    missed checkpoint just defers cancellation by one file).
+    """
+    try:
+        cur = db.execute(
+            text("SELECT status FROM ingestion_run WHERE id = :id"),
+            {"id": run_id},
+        ).scalar()
+    except Exception:
+        logger.exception("cancel-check failed for run %s", run_id)
+        return False
+    return cur == "CANCELLING"
 
 
 def _finalize_run(
@@ -218,11 +260,17 @@ def _finalize_run(
     error_summary: Optional[str] = None,
     detail_log: Optional[list[dict]] = None,
 ) -> None:
+    # Race-safe terminal write: if a cancel was signalled while the
+    # worker was finishing its last file (status='CANCELLING'), the
+    # CASE coerces the terminal state to CANCELLED in the same UPDATE.
+    # Without this, a SUCCESS/PARTIAL/FAILED write could silently
+    # overwrite the cancel signal.
     db.execute(
         text(
             "UPDATE ingestion_run SET "
             "  finished_at = now(), "
-            "  status = :status, "
+            "  status = CASE WHEN status = 'CANCELLING' "
+            "                THEN 'CANCELLED' ELSE :status END, "
             "  files_seen = :seen, "
             "  files_pulled = :pulled, "
             "  jobs_created = :created, "
@@ -355,6 +403,7 @@ def run_pull(
     schedule_id: str,
     *,
     staging_root: Optional[Path] = None,
+    celery_task_id: Optional[str] = None,
     scope: str = "today",
 ) -> dict:
     """Core SFTP-pull logic — testable without celery.
@@ -386,7 +435,9 @@ def run_pull(
         connection = _load_connection(db, schedule["sftp_connection_id"])
         system_payload = _system_user_payload(db)
 
-        run_id = _create_run(db, schedule_id)
+        run_id = _create_run(
+            db, schedule_id, celery_task_id=celery_task_id,
+        )
 
         client = _build_sftp_client(connection)
 
@@ -428,7 +479,19 @@ def run_pull(
         )
 
         svc = IngestionService(db, staging_root=staging_root)
+        cancelled = False
         for entry in entries:
+            # Cooperative cancel: an operator-initiated CANCELLING
+            # state is picked up at each file boundary. Already-
+            # committed files keep their COMMITTED outcome — we
+            # never roll back successful work on cancel.
+            if _is_cancelling(db, run_id):
+                cancelled = True
+                detail_log.append({
+                    "event": "CANCELLED",
+                    "note": "operator cancel observed before next file",
+                })
+                break
             result = _process_one_file(
                 db, svc, client, connection, schedule,
                 run_id, entry, system_payload,
@@ -440,7 +503,9 @@ def run_pull(
             if result["outcome"] == "COMMITTED":
                 jobs_committed += 1
 
-        if jobs_created == 0:
+        if cancelled:
+            final_status = "CANCELLED"
+        elif jobs_created == 0:
             final_status = "SUCCESS"
         elif jobs_committed == jobs_created:
             final_status = "SUCCESS"
@@ -504,7 +569,214 @@ def sftp_pull_for_schedule(
     """
     db = SessionLocal()
     try:
-        return run_pull(db, schedule_id, scope=scope)
+        return run_pull(
+            db,
+            schedule_id,
+            celery_task_id=self.request.id,
+            scope=scope,
+        )
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+# ── orphan-run sweeper ──────────────────────────────────────────────
+
+
+ORPHAN_AGE_THRESHOLD = timedelta(minutes=30)
+ORPHAN_ERROR_SUMMARY = (
+    "Abandoned: worker died before completion (orphan sweeper)."
+)
+
+
+def _live_pull_task_ids(app, *, inspect_timeout: float = 2.0) -> Optional[set[str]]:
+    """Return the set of celery message-ids for ``sftp_pull_for_schedule``
+    tasks currently in any worker's active / reserved / scheduled queue.
+
+    Returns ``None`` when no worker replied to ping — the sweeper MUST
+    skip its scan in that case. Without confirmation that at least one
+    worker is alive we cannot safely declare any row orphaned (an empty
+    set would falsely match every row).
+    """
+    insp = app.control.inspect(timeout=inspect_timeout)
+    try:
+        pong = insp.ping() or {}
+    except Exception:
+        logger.exception("orphan-sweep: inspect.ping() failed")
+        return None
+    if not pong:
+        logger.info(
+            "orphan-sweep: no workers replied to ping; skipping this cycle"
+        )
+        return None
+
+    try:
+        active = insp.active() or {}
+        reserved = insp.reserved() or {}
+        scheduled = insp.scheduled() or {}
+    except Exception:
+        logger.exception("orphan-sweep: inspect.active/reserved/scheduled failed")
+        return None
+
+    task_ids: set[str] = set()
+    # ``active`` and ``reserved`` return ``{worker: [task_dict, ...]}``;
+    # ``scheduled`` wraps each entry as ``{'eta': ..., 'request': task_dict}``.
+    for bag, wrapped in ((active, False), (reserved, False), (scheduled, True)):
+        for tasks in bag.values():
+            for entry in tasks or []:
+                t = (entry.get("request") or {}) if wrapped else entry
+                if t.get("name") != "app.tasks.sftp_pull.sftp_pull_for_schedule":
+                    continue
+                tid = t.get("id")
+                if tid:
+                    task_ids.add(str(tid))
+    return task_ids
+
+
+def _sweep_one(
+    db: Session,
+    run_id: str,
+    current_status: str,
+) -> Optional[str]:
+    """Conditionally transition a single orphaned row.
+
+    Returns the new status if the UPDATE moved the row, else ``None``
+    (status was changed by another writer between the SELECT and the
+    UPDATE — race-safe no-op).
+
+    RUNNING → FAILED, CANCELLING → CANCELLED. ``finished_at`` is set
+    only if NULL (so a coincident-but-stale finalize doesn't get
+    overwritten). ``error_summary`` is preserved if already set.
+    """
+    if current_status == "CANCELLING":
+        new_status = "CANCELLED"
+    elif current_status == "RUNNING":
+        new_status = "FAILED"
+    else:
+        return None  # caller should not pass terminal statuses
+
+    result = db.execute(
+        text(
+            "UPDATE ingestion_run SET "
+            "  status = :new_status, "
+            "  finished_at = COALESCE(finished_at, now()), "
+            "  error_summary = COALESCE(error_summary, :err) "
+            "WHERE id = :id AND status = :old_status"
+        ),
+        {
+            "id": run_id,
+            "old_status": current_status,
+            "new_status": new_status,
+            "err": ORPHAN_ERROR_SUMMARY,
+        },
+    )
+    return new_status if result.rowcount else None
+
+
+@celery_app.task(
+    name="app.tasks.sftp_pull.sweep_orphan_runs",
+    ignore_result=True,
+    acks_late=False,
+)
+def sweep_orphan_runs() -> dict:
+    """Periodic sweeper: finalise ingestion_run rows whose worker died.
+
+    Runs on the celery-beat / redbeat cadence configured in
+    ``app/worker.py`` (every 5 min by default). The flow:
+
+    1. Select RUNNING + CANCELLING rows older than ``ORPHAN_AGE_THRESHOLD``.
+    2. Ask celery for ``sftp_pull_for_schedule`` task-ids that are
+       currently active / reserved / scheduled. Abort the cycle if no
+       worker replied (we cannot safely declare anything orphaned
+       without confirmation that the inspect path is healthy).
+    3. For each candidate row whose ``celery_task_id`` is NOT in the
+       live set, conditionally UPDATE it to FAILED / CANCELLED with a
+       fixed ``error_summary``. The UPDATE's ``WHERE status = ...``
+       clause makes the operation idempotent and race-safe against the
+       cancel endpoint and the worker's own ``_finalize_run``.
+
+    Returns a small dict with counts + per-row outcomes; callers (beat,
+    operators inspecting result backend) get a forensic trail without
+    flooding the DB or the logs.
+    """
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - ORPHAN_AGE_THRESHOLD
+        candidates = db.execute(
+            text(
+                "SELECT id, status, celery_task_id "
+                "FROM ingestion_run "
+                "WHERE status IN ('RUNNING', 'CANCELLING') "
+                "  AND started_at < :cutoff"
+            ),
+            {"cutoff": cutoff},
+        ).mappings().all()
+
+        if not candidates:
+            return {"checked": 0, "swept": 0, "skipped_live": 0}
+
+        live_task_ids = _live_pull_task_ids(celery_app)
+        if live_task_ids is None:
+            logger.warning(
+                "orphan-sweep: aborting cycle — inspect path unhealthy "
+                "(%d candidate row(s) deferred)",
+                len(candidates),
+            )
+            return {
+                "checked": len(candidates),
+                "swept": 0,
+                "skipped_live": 0,
+                "deferred": True,
+            }
+
+        swept: list[dict] = []
+        skipped_live = 0
+        for row in candidates:
+            row_id = str(row["id"])
+            row_status = row["status"]
+            row_task_id = row["celery_task_id"]
+            # A NULL task id means "no live task can claim this row"
+            # (pre-migration row, or non-celery test/script writer).
+            # Treat as eligible for sweep — past the age threshold, the
+            # only thing that could legitimately hold it is a live
+            # celery task, which by definition would have a non-NULL id
+            # written by the wrapper.
+            if row_task_id and row_task_id in live_task_ids:
+                skipped_live += 1
+                continue
+            new_status = _sweep_one(db, row_id, row_status)
+            if new_status:
+                swept.append(
+                    {
+                        "run_id": row_id,
+                        "from": row_status,
+                        "to": new_status,
+                        "celery_task_id": row_task_id,
+                    }
+                )
+        db.commit()
+
+        if swept:
+            logger.warning(
+                "orphan-sweep: finalised %d abandoned run(s): %s",
+                len(swept),
+                [s["run_id"] for s in swept],
+            )
+        else:
+            logger.info(
+                "orphan-sweep: %d candidate(s), %d still live, 0 swept",
+                len(candidates),
+                skipped_live,
+            )
+
+        return {
+            "checked": len(candidates),
+            "swept": len(swept),
+            "skipped_live": skipped_live,
+            "details": swept,
+        }
     finally:
         try:
             db.close()

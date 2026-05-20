@@ -2,7 +2,7 @@
  * SFTP Connections admin page (Phase 4.2).
  *
  * Lists, creates, edits, deletes, and live-tests SFTP connection
- * records that back scheduled ingestion pulls. Skywave platform
+ * records that back scheduled ingestion pulls. RTS platform
  * admins only — gated at the route level via ProtectedRoute and
  * inside the component via ``isSuperAdmin(session)`` for the
  * direct-URL fall-through.
@@ -343,7 +343,7 @@ export default function SftpConnectionsPage() {
           breadcrumbs={[{ label: 'Admin' }, { label: 'SFTP Connections' }]}
         />
         <Alert severity="warning" sx={{ mt: 2 }}>
-          Skywave platform admin access required.
+          RTS platform admin access required.
         </Alert>
       </Box>
     );

@@ -4,7 +4,7 @@
  * visible run is RUNNING (so a Run-Now triggered on the
  * Schedules page surfaces here without manual reload).
  *
- * Skywave platform admins only. Route-level guard via
+ * RTS platform admins only. Route-level guard via
  * ProtectedRoute + soft in-component gate for the direct-URL
  * fall-through.
  */
@@ -15,9 +15,10 @@ import {
   FormControl, InputLabel, Select, MenuItem, CircularProgress, Tooltip,
   Drawer, Divider, Snackbar, Alert, TextField, Grid,
   Accordion, AccordionSummary, AccordionDetails,
+  Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
 } from '@mui/material';
 import {
-  Refresh, Close, ContentCopy, ExpandMore,
+  Refresh, Close, ContentCopy, ExpandMore, Stop,
 } from '@mui/icons-material';
 import PageHeader from '../../components/common/PageHeader';
 import { api } from '../../api';
@@ -76,6 +77,8 @@ function statusColor(status: string): StatusColor {
     case 'PARTIAL': return 'warning';
     case 'FAILED': return 'error';
     case 'RUNNING': return 'info';
+    case 'CANCELLING': return 'warning';
+    case 'CANCELLED': return 'default';
     default: return 'default';
   }
 }
@@ -141,11 +144,15 @@ interface DetailDrawerProps {
   scheduleLookup: (id: string | null) => string | null;
   onClose: () => void;
   showToast: (message: string, severity: ToastState['severity']) => void;
+  onCancelRequest: (runId: string) => Promise<void>;
 }
 
 function DetailDrawer({
-  open, run, loading, scheduleLookup, onClose, showToast,
+  open, run, loading, scheduleLookup, onClose, showToast, onCancelRequest,
 }: DetailDrawerProps) {
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
   const copyId = (id: string) => {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(id).then(
@@ -163,6 +170,17 @@ function DetailDrawer({
     return <em>(deleted)</em>;
   })();
 
+  const handleConfirmCancel = async () => {
+    if (!run) return;
+    setCancelling(true);
+    try {
+      await onCancelRequest(run.id);
+      setCancelDialogOpen(false);
+    } finally {
+      setCancelling(false);
+    }
+  };
+
   return (
     <Drawer
       anchor="right"
@@ -172,8 +190,51 @@ function DetailDrawer({
     >
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
         <Typography variant="h6">Run Details</Typography>
-        <IconButton onClick={onClose} aria-label="Close"><Close /></IconButton>
+        <Stack direction="row" spacing={1} alignItems="center">
+          {run && run.status === 'RUNNING' && (
+            <Button
+              variant="contained"
+              color="error"
+              size="small"
+              startIcon={<Stop />}
+              onClick={() => setCancelDialogOpen(true)}
+              disabled={cancelling}
+            >
+              Stop
+            </Button>
+          )}
+          <IconButton onClick={onClose} aria-label="Close"><Close /></IconButton>
+        </Stack>
       </Stack>
+
+      <Dialog
+        open={cancelDialogOpen}
+        onClose={() => !cancelling && setCancelDialogOpen(false)}
+        aria-labelledby="cancel-run-dialog-title"
+      >
+        <DialogTitle id="cancel-run-dialog-title">Cancel this ingestion run?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            The worker will stop processing further files at its next
+            checkpoint. <strong>Files already committed in this run will be kept</strong> —
+            cancellation does not roll back successful work.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setCancelDialogOpen(false)} disabled={cancelling}>
+            Keep running
+          </Button>
+          <Button
+            onClick={handleConfirmCancel}
+            color="error"
+            variant="contained"
+            startIcon={cancelling ? <CircularProgress size={16} color="inherit" /> : <Stop />}
+            disabled={cancelling}
+          >
+            {cancelling ? 'Cancelling…' : 'Cancel run'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {loading ? (
         <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
@@ -486,7 +547,7 @@ export default function IngestionRunsPage() {
           breadcrumbs={[{ label: 'Admin' }, { label: 'Ingestion Runs' }]}
         />
         <Alert severity="warning" sx={{ mt: 2 }}>
-          Skywave platform admin access required.
+          RTS platform admin access required.
         </Alert>
       </Box>
     );
@@ -523,6 +584,28 @@ export default function IngestionRunsPage() {
     setStartedAfter('');
     setStartedBefore('');
     setPage(1);
+  };
+
+  const handleCancelRun = async (runId: string) => {
+    try {
+      await api.admin.ingestionRuns.cancel(runId);
+      showToast('Cancellation signalled — worker will stop at next checkpoint', 'info');
+      // Refresh both the open drawer detail and the list so the
+      // CANCELLING badge appears immediately. The 5s auto-refresh
+      // then catches the terminal CANCELLED transition.
+      try {
+        const detail = await api.admin.ingestionRuns.get(runId);
+        setSelectedRun(detail);
+      } catch {
+        // Drawer refresh is best-effort; the list auto-refresh
+        // will surface the new state regardless.
+      }
+      await fetchRuns();
+    } catch (err) {
+      const e = err as Error & ApiErrorShape;
+      showToast(e.message || 'Failed to cancel run', 'error');
+      throw err;
+    }
   };
 
   return (
@@ -580,6 +663,8 @@ export default function IngestionRunsPage() {
               <MenuItem value="SUCCESS">SUCCESS</MenuItem>
               <MenuItem value="PARTIAL">PARTIAL</MenuItem>
               <MenuItem value="FAILED">FAILED</MenuItem>
+              <MenuItem value="CANCELLING">CANCELLING</MenuItem>
+              <MenuItem value="CANCELLED">CANCELLED</MenuItem>
             </Select>
           </FormControl>
           <FormControl size="small" sx={{ minWidth: 240 }}>
@@ -724,6 +809,7 @@ export default function IngestionRunsPage() {
         scheduleLookup={scheduleNameForId}
         onClose={() => setDrawerOpen(false)}
         showToast={showToast}
+        onCancelRequest={handleCancelRun}
       />
 
       <Snackbar
