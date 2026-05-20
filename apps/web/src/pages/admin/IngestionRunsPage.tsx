@@ -91,6 +91,47 @@ function outcomeColor(outcome: string): StatusColor {
 }
 
 
+// The worker prepends a {event: 'DATE_FILTER', ...} entry as
+// detail_log[0]. Returns null when detail_log is missing, empty,
+// or doesn't carry that event (legacy runs predating the scope feature).
+interface DateFilterEvent {
+  scope: string;
+  target_date: string | null;
+  timezone?: string;
+  listed_total?: number;
+  matched?: number;
+  skipped_examples?: string[];
+}
+
+function extractDateFilterEvent(detailLog: unknown): DateFilterEvent | null {
+  if (!Array.isArray(detailLog) || detailLog.length === 0) return null;
+  const head = detailLog[0];
+  if (!head || typeof head !== 'object') return null;
+  const evt = head as Record<string, unknown>;
+  if (evt.event !== 'DATE_FILTER') return null;
+  if (typeof evt.scope !== 'string') return null;
+  return {
+    scope: evt.scope,
+    target_date: typeof evt.target_date === 'string' ? evt.target_date : null,
+    timezone: typeof evt.timezone === 'string' ? evt.timezone : undefined,
+    listed_total: typeof evt.listed_total === 'number' ? evt.listed_total : undefined,
+    matched: typeof evt.matched === 'number' ? evt.matched : undefined,
+    skipped_examples: Array.isArray(evt.skipped_examples)
+      ? evt.skipped_examples.filter((s): s is string => typeof s === 'string')
+      : undefined,
+  };
+}
+
+function scopeLabel(evt: DateFilterEvent): string {
+  if (evt.scope === 'today') return `Today (${evt.target_date ?? '?'} ${evt.timezone ?? 'IST'})`;
+  if (evt.scope === 'all') return 'All files (backfill)';
+  if (evt.scope.startsWith('date:')) {
+    return `Specific date — ${evt.target_date ?? evt.scope.slice(5)}`;
+  }
+  return evt.scope;
+}
+
+
 // ── Detail drawer ──────────────────────────────────────────
 
 interface DetailDrawerProps {
@@ -195,6 +236,30 @@ function DetailDrawer({
               <Typography variant="body2">{run.triggered_by ?? 'scheduled'}</Typography>
             </Box>
           </Stack>
+
+          {(() => {
+            const evt = extractDateFilterEvent(run.detail_log);
+            if (!evt) return null;
+            return (
+              <Box>
+                <Typography variant="caption" color="text.secondary">Scope</Typography>
+                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+                  <Chip
+                    label={scopeLabel(evt)}
+                    size="small"
+                    color={evt.scope === 'all' ? 'warning' : 'primary'}
+                    variant="outlined"
+                  />
+                  {typeof evt.listed_total === 'number' && typeof evt.matched === 'number' && (
+                    <Typography variant="caption" color="text.secondary">
+                      {evt.matched}/{evt.listed_total} files matched the date filter
+                      {evt.listed_total > evt.matched ? ` (${evt.listed_total - evt.matched} skipped)` : ''}
+                    </Typography>
+                  )}
+                </Stack>
+              </Box>
+            );
+          })()}
 
           <Divider />
 

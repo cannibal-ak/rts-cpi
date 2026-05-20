@@ -17,6 +17,7 @@ environments that have not yet bootstrapped Celery or the
 ingestion-pattern cache (OpenAPI generation, isolated unit tests).
 """
 
+import re
 from datetime import datetime
 from typing import Any, List, Literal, Optional, Set, Tuple
 from uuid import UUID
@@ -28,6 +29,13 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+
+# Date-scoped Run Now: scope literal grammar.
+# ``today`` and ``all`` are bare literals; ``date:DDMMYY`` carries a
+# concrete date. The DDMMYY format is locked by filename convention
+# (JY_DDMMYY.xlsx, JY_VL_DDMMYY.csv, PW_DDMMYY.xlsx, PW_VL_DDMMYY.csv).
+_RUN_NOW_DATE_SCOPE_RE = re.compile(r"^date:(\d{6})$")
 
 
 # Domain casing convention (locked):
@@ -358,3 +366,38 @@ class IngestionRunRead(BaseModel):
 
 class IngestionRunDetail(IngestionRunRead):
     ingested_files: List[IngestedFileRead] = []
+
+
+# -- run-now request body ---------------------------------------------
+
+
+class RunNowRequest(BaseModel):
+    """Body for ``POST /admin/ingestion-schedules/{id}/run-now``.
+
+    ``scope`` is optional (defaults to ``"today"``). Valid values:
+      - ``"today"`` — only files whose filename DDMMYY equals today
+        in IST (Asia/Kolkata).
+      - ``"all"`` — no date filter (backfill).
+      - ``"date:DDMMYY"`` — only files matching the given date.
+    """
+
+    scope: str = Field(default="today", max_length=64)
+
+    @field_validator("scope")
+    @classmethod
+    def _check_scope(cls, value: str) -> str:
+        if value in ("today", "all"):
+            return value
+        m = _RUN_NOW_DATE_SCOPE_RE.match(value)
+        if not m:
+            raise ValueError(
+                "scope must be 'today', 'all', or 'date:DDMMYY' "
+                f"(got '{value}')"
+            )
+        try:
+            datetime.strptime(m.group(1), "%d%m%y")
+        except ValueError as exc:
+            raise ValueError(
+                f"invalid date in scope '{value}': {exc}"
+            ) from exc
+        return value

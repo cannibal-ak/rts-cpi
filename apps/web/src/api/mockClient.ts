@@ -14,6 +14,7 @@ import type {
   IngestionScheduleCreate,
   IngestionScheduleUpdate,
   IngestionScheduleListQuery,
+  RunNowRequest,
   RunNowResult,
   IngestionRun,
   IngestionRunDetail,
@@ -282,9 +283,10 @@ export const mockClient: CpiApiClient = {
         row.updated_at = new Date().toISOString();
         return delay({ ...row });
       },
-      runNow: (id: string): Promise<RunNowResult> => {
+      runNow: (id: string, body?: RunNowRequest): Promise<RunNowResult> => {
         const row = mockIngestionSchedules.find(s => s.id === id);
         if (!row) return Promise.reject(new Error(`API 404: schedule ${id} not found`));
+        const scope = body?.scope ?? 'today';
         // Side-effect: push a synthetic RUNNING run so the runs page
         // reflects the trigger. Real backend: worker creates this row
         // when it picks up the task.
@@ -300,11 +302,23 @@ export const mockClient: CpiApiClient = {
           jobs_created: 0,
           jobs_committed: 0,
           triggered_by: 'MANUAL',
-          detail_log: null,
+          // Mirror the worker's DATE_FILTER detail_log[0] event so the
+          // mock runs page shows the same scope provenance as prod.
+          detail_log: [
+            {
+              event: 'DATE_FILTER',
+              scope,
+              target_date: null,
+              timezone: 'Asia/Kolkata',
+              listed_total: 0,
+              matched: 0,
+              skipped_examples: [],
+            },
+          ],
           error_summary: null,
         };
         mockIngestionRuns.unshift(newRun);
-        return delay({ task_id: mockUuid(), run_id: null }, 300);
+        return delay({ task_id: mockUuid(), run_id: null, scope }, 300);
       },
     },
 

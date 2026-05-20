@@ -32,9 +32,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import uuid
+from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
@@ -43,6 +46,7 @@ from sqlalchemy.orm import Session
 from app.core.crypto import decrypt_str
 from app.core.database import SessionLocal
 from app.ingestion.exceptions import IngestionConflictError, IngestionError
+from app.ingestion.filename_parser import parse_filename
 from app.ingestion.service import IngestionService
 from app.ingestion.sftp_client import SFTPClientError, SFTPSourceClient
 from app.worker import celery_app
@@ -52,6 +56,69 @@ logger = logging.getLogger(__name__)
 
 
 SYSTEM_USER_EMAIL = "admin@skywave.com"
+
+
+# ── date-scoped ingestion helpers ───────────────────────────────────
+#
+# "Today" is always today in IST (Asia/Kolkata). The schedule row's
+# timezone column is intentionally NOT consulted — IST is hard-coded
+# for date-scope resolution so behaviour is identical regardless of
+# how the cron entry is timezoned.
+IST = ZoneInfo("Asia/Kolkata")
+
+_SCOPE_DATE_RE = re.compile(r"^date:(\d{6})$")
+
+
+def _resolve_target_date(scope: str) -> Optional[date]:
+    """Resolve the date a scope filter targets.
+
+    Returns:
+        - ``date`` for ``"today"`` (today in IST) or ``"date:DDMMYY"``
+        - ``None`` for ``"all"`` (caller skips the date filter)
+
+    Raises ``ValueError`` on malformed scope strings.
+    """
+    if scope == "all":
+        return None
+    if scope == "today":
+        return datetime.now(IST).date()
+    m = _SCOPE_DATE_RE.match(scope)
+    if m:
+        try:
+            return datetime.strptime(m.group(1), "%d%m%y").date()
+        except ValueError as exc:
+            raise ValueError(
+                f"invalid date in scope {scope!r}: {exc}"
+            ) from exc
+    raise ValueError(
+        f"invalid scope {scope!r} — must be 'today', 'all', or 'date:DDMMYY'"
+    )
+
+
+def _filter_by_scope(
+    entries: list[dict], target_date: Optional[date]
+) -> tuple[list[dict], list[str]]:
+    """Keep only entries whose filename date matches ``target_date``.
+
+    Entries whose filenames don't parse (or parse but have no date)
+    are skipped — a date filter only narrows scope, and unparseable
+    names would fail downstream anyway. Returns ``(kept, skipped)``
+    where ``skipped`` is the list of skipped filenames for logging.
+
+    If ``target_date`` is ``None`` (scope=all), returns
+    ``(list(entries), [])`` unchanged.
+    """
+    if target_date is None:
+        return list(entries), []
+    kept: list[dict] = []
+    skipped: list[str] = []
+    for entry in entries:
+        parsed = parse_filename(entry["filename"])
+        if parsed.file_date is not None and parsed.file_date == target_date:
+            kept.append(entry)
+        else:
+            skipped.append(entry["filename"])
+    return kept, skipped
 
 
 # ── helpers (testable independently of celery) ──────────────────────
@@ -288,6 +355,7 @@ def run_pull(
     schedule_id: str,
     *,
     staging_root: Optional[Path] = None,
+    scope: str = "today",
 ) -> dict:
     """Core SFTP-pull logic — testable without celery.
 
@@ -295,9 +363,23 @@ def run_pull(
     file-staging at a tmp_path; production callers leave it None and the
     service uses its DEFAULT_STAGING_ROOT.
 
+    ``scope`` controls which files are pulled:
+      - ``"today"`` (default): only files whose filename DDMMYY equals
+        today in IST.
+      - ``"date:DDMMYY"``: only files matching the given date.
+      - ``"all"``: no date filter (legacy backfill behaviour).
+
+    A DATE_FILTER event is prepended to ``ingestion_run.detail_log``
+    so the scope used is durably auditable per run.
+
     Returns ``{run_id, files_seen, files_pulled, jobs_committed, status}``.
     Always finalises the ingestion_run row before returning or re-raising.
     """
+    # Resolve the target date OUTSIDE the run-bookkeeping try/except so
+    # a malformed scope fails fast with a clean 400-equivalent ValueError
+    # rather than creating a doomed ingestion_run row.
+    target_date = _resolve_target_date(scope)
+
     run_id: Optional[str] = None
     try:
         schedule = _load_schedule(db, schedule_id)
@@ -312,11 +394,38 @@ def run_pull(
             connection["remote_base_path"], schedule["filename_regex"]
         )
 
+        listed_total = len(entries)
+        entries, skipped = _filter_by_scope(entries, target_date)
+
         files_seen = len(entries)
         files_pulled = 0
         jobs_created = 0
         jobs_committed = 0
-        detail_log: list[dict] = []
+        # Prepend the DATE_FILTER provenance event so the UI / operator
+        # can see exactly which scope produced the per-file rows that
+        # follow. detail_log[0] is, by convention, the run-context entry.
+        detail_log: list[dict] = [
+            {
+                "event": "DATE_FILTER",
+                "scope": scope,
+                "target_date": (
+                    target_date.isoformat() if target_date else None
+                ),
+                "timezone": "Asia/Kolkata",
+                "listed_total": listed_total,
+                "matched": files_seen,
+                "skipped_examples": skipped[:5],
+            }
+        ]
+        logger.info(
+            "ingestion.run_pull: date filter applied — scope=%s "
+            "target_date=%s listed=%d matched=%d (run_id=%s)",
+            scope,
+            target_date.isoformat() if target_date else "ALL",
+            listed_total,
+            files_seen,
+            run_id,
+        )
 
         svc = IngestionService(db, staging_root=staging_root)
         for entry in entries:
@@ -384,11 +493,18 @@ def run_pull(
     max_retries=3,
     acks_late=True,
 )
-def sftp_pull_for_schedule(self, schedule_id: str) -> dict:
-    """Celery wrapper around ``run_pull``. See module docstring for details."""
+def sftp_pull_for_schedule(
+    self, schedule_id: str, scope: str = "today"
+) -> dict:
+    """Celery wrapper around ``run_pull``. See module docstring for details.
+
+    ``scope`` defaults to ``"today"`` so cron-fired invocations (which
+    pass only ``schedule_id``) get today-only filtering automatically.
+    Run-Now callers can override with ``"all"`` or ``"date:DDMMYY"``.
+    """
     db = SessionLocal()
     try:
-        return run_pull(db, schedule_id)
+        return run_pull(db, schedule_id, scope=scope)
     finally:
         try:
             db.close()

@@ -24,7 +24,15 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -39,6 +47,7 @@ from app.schemas.sftp import (
     IngestionScheduleCreate,
     IngestionScheduleRead,
     IngestionScheduleUpdate,
+    RunNowRequest,
 )
 from app.services import audit, redbeat_sync
 from app.services.redbeat_sync import RedbeatSyncError
@@ -455,6 +464,7 @@ def disable_schedule(
 )
 def run_schedule_now(
     schedule_id: UUID,
+    body: RunNowRequest = Body(default_factory=RunNowRequest),
     db: Session = Depends(get_tenant_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -464,12 +474,16 @@ def run_schedule_now(
     task, so ``run_id`` is null in the response. Callers poll
     ``/api/v1/admin/ingestion-runs?schedule_id=<id>`` to find the
     new run once it materialises.
+
+    Body is optional; when omitted defaults to ``{"scope": "today"}``.
+    The scope is stored in ``ingestion_run.detail_log[0]`` (the
+    DATE_FILTER event) by the worker, so it is durably auditable.
     """
     row = db.get(IngestionSchedule, schedule_id)
     if row is None:
         raise HTTPException(status_code=404, detail="schedule not found")
 
-    result = sftp_pull_for_schedule.delay(str(row.id))
+    result = sftp_pull_for_schedule.delay(str(row.id), scope=body.scope)
 
     audit.record(
         db,
@@ -480,4 +494,4 @@ def run_schedule_now(
         target_id=str(row.id),
     )
     db.commit()
-    return {"task_id": result.id, "run_id": None}
+    return {"task_id": result.id, "run_id": None, "scope": body.scope}

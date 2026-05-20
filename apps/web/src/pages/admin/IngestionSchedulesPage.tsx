@@ -19,6 +19,7 @@ import {
   FormControl, InputLabel, Select, MenuItem, CircularProgress, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
   TextField, Switch, FormControlLabel, Snackbar, Alert,
+  Radio, RadioGroup, FormLabel,
 } from '@mui/material';
 import {
   Add, Edit, PlayArrow, Pause, Send, DeleteOutline, Refresh,
@@ -38,6 +39,7 @@ import type {
   IngestionScheduleUpdate,
   IngestionDomain,
   PageInfo,
+  RunNowScope,
 } from '../../types';
 
 
@@ -334,6 +336,12 @@ export default function IngestionSchedulesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<IngestionSchedule | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<IngestionSchedule | null>(null);
+  // Run-Now confirmation dialog state. `mode` mirrors the scope grammar
+  // 1-for-1: 'today' / 'all' / 'date' (which combines with `dateValue`
+  // YYYY-MM-DD into `date:DDMMYY` on submit).
+  const [runNowTarget, setRunNowTarget] = useState<IngestionSchedule | null>(null);
+  const [runNowMode, setRunNowMode] = useState<'today' | 'all' | 'date'>('today');
+  const [runNowDate, setRunNowDate] = useState<string>(''); // YYYY-MM-DD
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<ToastState>({
     open: false, message: '', severity: 'info',
@@ -431,16 +439,54 @@ export default function IngestionSchedulesPage() {
     }
   };
 
-  const handleRunNow = async (sched: IngestionSchedule) => {
+  const openRunNow = (sched: IngestionSchedule) => {
+    setRunNowTarget(sched);
+    setRunNowMode('today');
+    // Default the date field to today (local browser date) so a
+    // user clicking "Specific date" doesn't see an empty picker.
+    setRunNowDate(new Date().toISOString().slice(0, 10));
+  };
+
+  const closeRunNow = () => {
+    setRunNowTarget(null);
+  };
+
+  // Convert a YYYY-MM-DD value from <input type="date"> into the
+  // DDMMYY token the backend's scope grammar expects.
+  const toDDMMYY = (yyyymmdd: string): string | null => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(yyyymmdd);
+    if (!m) return null;
+    return `${m[3]}${m[2]}${m[1].slice(2)}`;
+  };
+
+  const runNowScopeReady: { ok: true; scope: RunNowScope } | { ok: false; reason: string } = (() => {
+    if (runNowMode === 'today') return { ok: true, scope: 'today' as const };
+    if (runNowMode === 'all') return { ok: true, scope: 'all' as const };
+    const ddmmyy = toDDMMYY(runNowDate);
+    if (!ddmmyy) return { ok: false, reason: 'Pick a date.' };
+    return { ok: true, scope: `date:${ddmmyy}` as RunNowScope };
+  })();
+
+  const handleConfirmRunNow = async () => {
+    if (!runNowTarget) return;
+    if (!runNowScopeReady.ok) return;
+    const sched = runNowTarget;
+    const scope = runNowScopeReady.scope;
     const key = `runNow:${sched.id}`;
     markPending(key, true);
     try {
-      const result = await api.admin.ingestionSchedules.runNow(sched.id);
+      const result = await api.admin.ingestionSchedules.runNow(sched.id, { scope });
+      const scopeLabel = scope === 'today'
+        ? "today's file"
+        : scope === 'all'
+          ? 'all files'
+          : `date ${scope.slice(5)}`;
       showToast(
-        `Run dispatched. Task ID: ${result.task_id.slice(0, 8)}…  ` +
+        `Run dispatched (${scopeLabel}). Task ID: ${result.task_id.slice(0, 8)}…  ` +
         `Visible in Ingestion Runs in a few seconds.`,
         'info',
       );
+      closeRunNow();
     } catch (err) {
       const e = err as Error & ApiErrorShape;
       showToast(e.message || 'Run-now failed', 'error');
@@ -684,12 +730,12 @@ export default function IngestionSchedulesPage() {
                           </Tooltip>
                         )}
                         <Tooltip
-                          title={sched.is_enabled ? 'Run now' : 'Enable schedule first'}
+                          title={sched.is_enabled ? 'Run now…' : 'Enable schedule first'}
                         >
                           <span>
                             <IconButton
                               size="small"
-                              onClick={() => handleRunNow(sched)}
+                              onClick={() => openRunNow(sched)}
                               disabled={!sched.is_enabled || pendingActions.has(runKey)}
                             >
                               {pendingActions.has(runKey)
@@ -754,6 +800,106 @@ export default function IngestionSchedulesPage() {
         onSaved={fetchSchedules}
         showToast={showToast}
       />
+
+      <Dialog
+        open={runNowTarget !== null}
+        onClose={closeRunNow}
+        maxWidth="xs"
+        fullWidth
+      >
+        <DialogTitle>Run schedule now</DialogTitle>
+        <DialogContent>
+          {runNowTarget && (
+            <Stack spacing={2} sx={{ mt: 0.5 }}>
+              <Typography variant="body2" color="text.secondary">
+                {runNowTarget.tenant_code} · {runNowTarget.domain} ·{' '}
+                <Box component="span" sx={{ fontFamily: 'monospace' }}>
+                  {runNowTarget.filename_regex}
+                </Box>
+              </Typography>
+              <FormControl>
+                <FormLabel>Which files should this run pull?</FormLabel>
+                <RadioGroup
+                  value={runNowMode}
+                  onChange={e => setRunNowMode(e.target.value as 'today' | 'all' | 'date')}
+                >
+                  <FormControlLabel
+                    value="today"
+                    control={<Radio size="small" />}
+                    label="Today's file only (default)"
+                  />
+                  <FormControlLabel
+                    value="date"
+                    control={<Radio size="small" />}
+                    label="Specific date"
+                  />
+                  <FormControlLabel
+                    value="all"
+                    control={<Radio size="small" />}
+                    label="All files (backfill)"
+                  />
+                </RadioGroup>
+              </FormControl>
+              {runNowMode === 'date' && (
+                <TextField
+                  size="small"
+                  type="date"
+                  label="Target date"
+                  InputLabelProps={{ shrink: true }}
+                  value={runNowDate}
+                  onChange={e => setRunNowDate(e.target.value)}
+                  helperText={
+                    runNowDate
+                      ? `Sent as scope=date:${toDDMMYY(runNowDate) ?? '??????'}`
+                      : 'Pick a date to filter on.'
+                  }
+                />
+              )}
+              {runNowMode === 'all' && (
+                <Alert severity="warning" variant="outlined">
+                  Backfill mode scans every file in the SFTP folder that
+                  matches the regex. Existing files are skipped by SHA-256
+                  dedup, but the scan itself can be slow on large folders.
+                </Alert>
+              )}
+              <Typography variant="caption" color="text.secondary">
+                Resolved scope:{' '}
+                <Box component="span" sx={{ fontFamily: 'monospace' }}>
+                  {runNowScopeReady.ok ? runNowScopeReady.scope : '—'}
+                </Box>
+              </Typography>
+            </Stack>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={closeRunNow}
+            disabled={
+              runNowTarget !== null &&
+              pendingActions.has(`runNow:${runNowTarget.id}`)
+            }
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="contained"
+            onClick={handleConfirmRunNow}
+            disabled={
+              !runNowScopeReady.ok ||
+              (runNowTarget !== null &&
+                pendingActions.has(`runNow:${runNowTarget.id}`))
+            }
+            startIcon={
+              runNowTarget !== null &&
+              pendingActions.has(`runNow:${runNowTarget.id}`)
+                ? <CircularProgress size={16} />
+                : <Send fontSize="small" />
+            }
+          >
+            Run
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={deleteTarget !== null} onClose={() => setDeleteTarget(null)}>
         <DialogTitle>Delete schedule?</DialogTitle>

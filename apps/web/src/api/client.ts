@@ -9,7 +9,7 @@ import type {
   SftpConnection, SftpConnectionCreate, SftpConnectionUpdate,
   SftpConnectionTestResult, SftpConnectionListQuery,
   IngestionSchedule, IngestionScheduleCreate, IngestionScheduleUpdate,
-  IngestionScheduleListQuery, RunNowResult,
+  IngestionScheduleListQuery, RunNowRequest, RunNowResult,
   IngestionRun, IngestionRunDetail, IngestionRunListQuery,
   AdminUserListResponse, AdminResetTokenListResponse,
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
@@ -113,7 +113,7 @@ export interface CpiApiClient {
       delete(id: string): Promise<void>;
       enable(id: string): Promise<IngestionSchedule>;
       disable(id: string): Promise<IngestionSchedule>;
-      runNow(id: string): Promise<RunNowResult>;
+      runNow(id: string, body?: RunNowRequest): Promise<RunNowResult>;
     };
     ingestionRuns: {
       list(query?: IngestionRunListQuery): Promise<Paginated<IngestionRun>>;

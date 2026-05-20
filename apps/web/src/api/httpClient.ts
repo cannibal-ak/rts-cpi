@@ -10,7 +10,7 @@ import type {
   SftpConnection, SftpConnectionCreate, SftpConnectionUpdate,
   SftpConnectionTestResult, SftpConnectionListQuery,
   IngestionSchedule, IngestionScheduleCreate, IngestionScheduleUpdate,
-  IngestionScheduleListQuery, RunNowResult,
+  IngestionScheduleListQuery, RunNowRequest, RunNowResult,
   IngestionRun, IngestionRunDetail, IngestionRunListQuery,
   AdminUserListResponse, AdminResetTokenListResponse,
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
@@ -370,8 +370,11 @@ export const httpClient: CpiApiClient = {
         post<IngestionSchedule>(`/api/v1/admin/ingestion-schedules/${id}/enable`, {}),
       disable: (id: string) =>
         post<IngestionSchedule>(`/api/v1/admin/ingestion-schedules/${id}/disable`, {}),
-      runNow: (id: string) =>
-        post<RunNowResult>(`/api/v1/admin/ingestion-schedules/${id}/run-now`, {}),
+      runNow: (id: string, body?: RunNowRequest) =>
+        post<RunNowResult>(
+          `/api/v1/admin/ingestion-schedules/${id}/run-now`,
+          body ?? { scope: 'today' },
+        ),
     },
     ingestionRuns: {
       list: (query?: IngestionRunListQuery) => {

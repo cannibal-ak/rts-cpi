@@ -434,9 +434,22 @@ export interface SftpConnectionTestResult {
   detail: string;
 }
 
+// Date-scoped Run Now (see admin_ingestion_schedules.run_schedule_now).
+//   'today'             — only files whose filename DDMMYY equals today (IST)
+//   'all'               — no date filter (backfill)
+//   'date:DDMMYY'       — only files matching the given date
+// The DDMMYY narrowing is enforced server-side by the Pydantic validator.
+export type RunNowScope = 'today' | 'all' | `date:${string}`;
+
+export interface RunNowRequest {
+  scope: RunNowScope;
+}
+
 export interface RunNowResult {
   task_id: string;
   run_id: string | null;
+  // Echo of the scope the backend accepted; useful for toast messages.
+  scope?: RunNowScope;
 }
 
 // ── List query shapes ──
