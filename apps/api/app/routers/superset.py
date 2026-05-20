@@ -16,12 +16,38 @@ Why UUIDs are stored here instead of fetched from the Superset API:
 
 import httpx
 import logging
-from typing import Dict, Any
+import re
+from datetime import datetime
+from typing import Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 from app.core.config import settings
+from app.core.database import get_db
 from app.core.deps import get_user_identity, get_user_roles, is_platform_admin
 
 logger = logging.getLogger(__name__)
+
+# Surface lines via uvicorn — see project_logging_convention.md.
+_log = logging.getLogger("uvicorn.error")
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_cap_date(value: str, field: str) -> str:
+    """Validate YYYY-MM-DD strings before injecting into an RLS WHERE clause.
+
+    Why: cap_date_* params land verbatim inside a string SQL clause sent to
+    Superset as part of the guest token RLS rules. A strict regex + strptime
+    is the only thing keeping that from being SQLi.
+    """
+    if not _DATE_RE.match(value or ""):
+        raise HTTPException(400, detail={"message": f"Invalid {field}: must be YYYY-MM-DD"})
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, detail={"message": f"Invalid {field}: not a real date"})
+    return value
 
 router = APIRouter(prefix="/api/v1/superset", tags=["superset"])
 
@@ -191,10 +217,18 @@ superset_client = SupersetClient()
 @router.get("/guest-token")
 async def fetch_guest_token(
     dashboard_id: str,
+    cap_date_eq: Optional[str] = None,
+    cap_date_from: Optional[str] = None,
+    cap_date_to: Optional[str] = None,
     user_identity: str = Depends(get_user_identity),
     user_roles: list[str] = Depends(get_user_roles),
 ):
-    """Return a Superset guest token + dashboard UUID for embedding."""
+    """Return a Superset guest token + dashboard UUID for embedding.
+
+    Optional cap_date_* params append an extra RLS clause so chart queries
+    are server-side scoped to a single day (cap_date_eq) or a window
+    (cap_date_from..cap_date_to). The React DateFilterToggle drives this.
+    """
 
     # 1. Lookup dashboard config
     dash = DASHBOARDS.get(dashboard_id)
@@ -204,7 +238,7 @@ async def fetch_guest_token(
         })
 
     # 2. Access control
-    #    Platform admins (skywave tenant) manage pipelines and tenants — they
+    #    Platform admins (rts tenant) manage pipelines and tenants — they
     #    do not consume tenant dashboards. Tenant users only access their own
     #    dashboard.  Note: the previous ``is_admin = "TENANT_ADMIN" in user_roles``
     #    check was structurally broken — every authenticated user receives
@@ -234,6 +268,25 @@ async def fetch_guest_token(
 
     for ds_id in dataset_ids:
         rls_rules.append({"dataset": ds_id, "clause": f"tenant_code = '{user_identity}'"})
+
+    # 3b. Optional cap_date scoping.
+    #     Validate first (regex + strptime) — these strings are interpolated
+    #     into a SQL clause string sent to Superset. Single day wins over range
+    #     if both are present.
+    cap_date_clause: Optional[str] = None
+    if cap_date_eq:
+        _validate_cap_date(cap_date_eq, "cap_date_eq")
+        cap_date_clause = f"cap_date = '{cap_date_eq}'"
+    elif cap_date_from and cap_date_to:
+        _validate_cap_date(cap_date_from, "cap_date_from")
+        _validate_cap_date(cap_date_to, "cap_date_to")
+        if cap_date_from > cap_date_to:
+            raise HTTPException(400, detail={"message": "cap_date_from must be <= cap_date_to"})
+        cap_date_clause = f"cap_date >= '{cap_date_from}' AND cap_date <= '{cap_date_to}'"
+
+    if cap_date_clause:
+        for ds_id in dataset_ids:
+            rls_rules.append({"dataset": ds_id, "clause": cap_date_clause})
 
     # 4. Get guest token (use numeric Superset ID – see create_guest_token docstring)
     try:
@@ -323,7 +376,7 @@ async def list_dashboard_charts(
         })
 
     # 2. Access control — mirror the guest-token endpoint.
-    #    is_platform_admin() is identity-based (skywave tenant), not role-based.
+    #    is_platform_admin() is identity-based (rts tenant), not role-based.
     #    Every authenticated user gets TENANT_ADMIN via get_user_roles (deps.py),
     #    so a role-based admin check would let every tenant bypass tenant
     #    isolation — see the equivalent fix on fetch_guest_token().
@@ -395,3 +448,69 @@ async def list_dashboard_charts(
         "dashboard_title": dash["title"],
         "charts": items,
     }
+
+
+# ── Available-dates endpoint (drives the React DateFilterToggle) ────────────
+
+# Map each app dashboard id to the PostgreSQL view whose cap_date column the
+# DateFilterToggle should enumerate. Mirrors TENANT_TABLES but is its own
+# constant so a tenant can have multiple Superset datasets without forcing
+# us to pick one for the date dropdown.
+_DASHBOARD_DATE_VIEW = {
+    "1": "vw_airline_cpi_jy_snapshot",
+    "2": "vw_airline_cpi_pw_snapshot",
+    "3": "vw_cfl_cpi_fjl_snapshot",
+}
+
+# Whitelist of view names we'll ever query from this endpoint. The view name
+# is interpolated into the SQL string (psycopg can't bind identifiers), so
+# this whitelist is the only thing preventing identifier injection if the
+# mapping above is ever extended carelessly.
+_ALLOWED_DATE_VIEWS = set(_DASHBOARD_DATE_VIEW.values())
+
+
+@router.get("/dashboards/{dashboard_id}/available-dates")
+def list_available_dates(
+    dashboard_id: str,
+    db: Session = Depends(get_db),
+    user_identity: str = Depends(get_user_identity),
+    user_roles: list[str] = Depends(get_user_roles),
+):
+    """Return distinct cap_date values for a dashboard's tenant view, newest first.
+
+    Tenant-scoped: platform admins are rejected (they don't consume tenant
+    dashboards), and a tenant user can only enumerate their own dashboard's
+    dates. The underlying views already filter by tenant_code so we don't add
+    a WHERE clause — but we still gate access at the dashboard level.
+    """
+    dash = DASHBOARDS.get(dashboard_id)
+    if not dash:
+        raise HTTPException(404, detail={
+            "message": f"Unknown dashboard_id '{dashboard_id}'. Valid IDs: {list(DASHBOARDS.keys())}",
+        })
+
+    if is_platform_admin(user_identity, user_roles):
+        raise HTTPException(403, detail={
+            "message": "Platform administrators do not have access to tenant dashboards.",
+        })
+    if user_identity != dash["tenant"]:
+        raise HTTPException(403, detail={
+            "message": f"Access denied: '{dash['title']}' is restricted to {dash['tenant']} users.",
+        })
+
+    view_name = _DASHBOARD_DATE_VIEW.get(dashboard_id)
+    if not view_name or view_name not in _ALLOWED_DATE_VIEWS:
+        raise HTTPException(500, detail={"message": f"No date view configured for dashboard '{dashboard_id}'"})
+
+    try:
+        rows = db.execute(
+            text(f"SELECT DISTINCT cap_date FROM {view_name} ORDER BY cap_date DESC")
+        ).fetchall()
+    except Exception as e:
+        _log.error(f"[available-dates] query failed on {view_name}: {e}")
+        raise HTTPException(500, detail={"message": f"Could not load available dates: {e}"})
+
+    dates = [r[0].isoformat() if r[0] is not None else None for r in rows]
+    dates = [d for d in dates if d]
+
+    return {"dashboard_id": dashboard_id, "dates": dates}

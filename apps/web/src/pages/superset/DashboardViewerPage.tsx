@@ -11,10 +11,12 @@ import {
 import { keyframes } from '@mui/system';
 import type { Theme } from '@mui/material/styles';
 import { api } from '../../api';
+import type { DashboardDateFilter } from '../../api/client';
 import { useSession } from '../../context/SessionContext';
 import { canAccessDashboard } from './dashboardAccess';
 import { useDashboardCharts } from '../../hooks/useDashboardCharts';
 import ChartSelectorPanel from '../../components/dashboard/ChartSelectorPanel';
+import DateFilterToggle from '../../components/dashboard/DateFilterToggle';
 import SingleChartViewer from '../../components/dashboard/SingleChartViewer';
 
 /**
@@ -67,6 +69,17 @@ export default function DashboardViewerPage() {
   const [dataDate, setDataDate] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // ── Date filter (drives RLS on chart queries via guest token) ──
+  // Default to single-day mode; the actual day is filled in once
+  // /available-dates resolves. We keep dateFilter in a ref so the
+  // SDK's fetchGuestToken closure always reads the latest value
+  // without having to re-bind the SDK callback on every change.
+  const [availableDates, setAvailableDates] = useState<string[]>([]);
+  const [datesLoading, setDatesLoading] = useState(true);
+  const [dateFilter, setDateFilter] = useState<DashboardDateFilter>({ mode: 'single' });
+  const dateFilterRef = useRef<DashboardDateFilter>(dateFilter);
+  useEffect(() => { dateFilterRef.current = dateFilter; }, [dateFilter]);
+
   const meta = id ? DASHBOARD_META[id] : undefined;
 
   // ── Slice & dice: chart selector + isolated chart view (additive) ──
@@ -102,6 +115,36 @@ export default function DashboardViewerPage() {
   useEffect(() => {
     setViewMode('dashboard');
   }, [id]);
+
+  // ── Load available cap_date values for this dashboard ──
+  // Resets to default single-day mode whenever the dashboard changes, then
+  // anchors on the most recent date once /available-dates resolves.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    setDatesLoading(true);
+    setAvailableDates([]);
+    setDateFilter({ mode: 'single' });
+    api.superset.getAvailableDates(id)
+      .then(res => {
+        if (cancelled) return;
+        const dates = res.dates ?? [];
+        setAvailableDates(dates);
+        if (dates.length > 0) {
+          setDateFilter({ mode: 'single', capDateEq: dates[0] });
+        }
+      })
+      .catch(err => {
+        if (!cancelled) console.error('[DateFilter] available-dates failed:', err);
+      })
+      .finally(() => { if (!cancelled) setDatesLoading(false); });
+    return () => { cancelled = true; };
+  }, [id]);
+
+  const handleDateFilterChange = (next: DashboardDateFilter) => {
+    setDateFilter(next);
+    setRefreshKey(k => k + 1);   // bump → re-embed with new RLS-scoped guest token
+  };
 
   // Effective selection — falls back to the first chart if state hasn't
   // settled yet.  Keeps the right pane non-blank in the brief window between
@@ -157,8 +200,11 @@ export default function DashboardViewerPage() {
         }
 
         // ── 3. Fetch embedded_uuid + initial guest token from backend ──
+        //   Pass the current date filter so the very first token carries
+        //   the cap_date RLS clause — otherwise the iframe briefly loads
+        //   unfiltered data before the SDK re-fetches.
         setIsLoading(true);
-        const metadata = await api.superset.getGuestToken(id);
+        const metadata = await api.superset.getGuestToken(id, dateFilterRef.current);
 
         // ── 3b. Fetch data freshness to get the report date ──
         try {
@@ -180,7 +226,7 @@ export default function DashboardViewerPage() {
           supersetDomain: SUPERSET_URL,
           mountPoint: mountRef.current!,
           fetchGuestToken: async () => {
-            const { token } = await api.superset.getGuestToken(id);
+            const { token } = await api.superset.getGuestToken(id, dateFilterRef.current);
             return token;
           },
           dashboardUiConfig: {
@@ -323,6 +369,15 @@ export default function DashboardViewerPage() {
         flexGrow: 1,
         minHeight: 0,
       }}>
+        {/* Date filter bar — drives cap_date RLS on every chart in this dashboard */}
+        <Box sx={{ mb: 1 }}>
+          <DateFilterToggle
+            availableDates={availableDates}
+            value={dateFilter}
+            onChange={handleDateFilterChange}
+            disabled={datesLoading || availableDates.length === 0}
+          />
+        </Box>
         {/* Dashboard container */}
         <Paper
           variant="outlined"
