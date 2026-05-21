@@ -54,6 +54,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
   const filteredItems = navigationItems.filter(item => {
     if (item.requireSuperAdmin && !isSuperAdmin(session)) return false;
+    if (item.hideForSuperAdmin && isSuperAdmin(session)) return false;
     return hasAccess({
       roles: item.requiredRoles,
       modules: item.requiredModules,
