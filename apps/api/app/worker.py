@@ -31,7 +31,7 @@ celery_app = Celery(
     "cpi",
     broker=_BROKER,
     backend=_BACKEND,
-    include=["app.tasks.sftp_pull"],
+    include=["app.tasks.sftp_pull", "app.tasks.reconcile_task"],
 )
 
 celery_app.conf.update(
@@ -41,7 +41,7 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,
     task_reject_on_worker_lost=True,
     redbeat_redis_url=_BROKER,
-    redbeat_lock_timeout=30,
+    redbeat_lock_key=None,
 )
 
 
@@ -60,5 +60,10 @@ celery_app.conf.beat_schedule = {
         "schedule": 300.0,
         "options": {"expires": 240.0},
     },
+    "redbeat-reconcile-heartbeat": {
+        "task": "app.tasks.reconcile_redbeat",
+        # Every 15 minutes. Cheap self-heal in case sched-* entries
+        # disappear between API restarts (e.g. a Beat crash storm).
+        "schedule": 900.0,
+    },
 }
-

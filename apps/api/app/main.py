@@ -37,10 +37,11 @@ async def lifespan(app: FastAPI):
         with SessionLocal() as db:
             summary = redbeat_sync.reconcile_all(db)
         logger.info(
-            "redbeat reconcile on startup: added=%d removed=%d kept=%d",
+            "redbeat reconcile on startup: added=%d removed=%d kept=%d refreshed=%d",
             len(summary["added"]),
             len(summary["removed"]),
             len(summary["kept"]),
+            len(summary.get("refreshed", [])),
         )
     except Exception as e:
         logger.warning(

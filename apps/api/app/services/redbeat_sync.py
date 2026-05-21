@@ -24,8 +24,10 @@ type-introspection, etc.).
 """
 
 import logging
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -75,17 +77,38 @@ def _key_prefix(app=None) -> str:
     return RedBeatConfig(app or _get_app()).key_prefix
 
 
-def _crontab_from_expr(cron_expression: str):
+class _TZNow:
+    """Picklable callable returning ``datetime.now()`` in a named timezone.
+
+    Used as ``nowfun=`` for a Celery crontab so RedBeat fires each schedule
+    at its DB-configured local time. Must be a module-level class (not a
+    lambda or closure) because RedBeat pickles the crontab into Redis.
+    """
+
+    def __init__(self, tz_name: str):
+        self.tz_name = tz_name
+
+    def __call__(self):
+        return datetime.now(ZoneInfo(self.tz_name))
+
+    def __repr__(self):
+        return f"_TZNow({self.tz_name!r})"
+
+
+def _crontab_from_expr(cron_expression: str, timezone: Optional[str] = None):
     from celery.schedules import crontab
 
     m, h, dom, mon, dow = cron_expression.split()
-    return crontab(
+    kwargs = dict(
         minute=m,
         hour=h,
         day_of_month=dom,
         month_of_year=mon,
         day_of_week=dow,
     )
+    if timezone and timezone.upper() != "UTC":
+        kwargs["nowfun"] = _TZNow(timezone)
+    return crontab(**kwargs)
 
 
 # -- public API -------------------------------------------------------
@@ -106,7 +129,7 @@ def register(schedule: IngestionSchedule, *, app=None) -> None:
         entry = RedBeatSchedulerEntry(
             name=_entry_name(schedule.id),
             task=TASK_NAME,
-            schedule=_crontab_from_expr(schedule.cron_expression),
+            schedule=_crontab_from_expr(schedule.cron_expression, schedule.timezone),
             args=[str(schedule.id)],
             app=app or _get_app(),
         )
@@ -194,12 +217,21 @@ def reconcile_all(db: Session, *, app=None) -> dict:
 
     Returns a summary dict::
 
-        {'added': [...], 'removed': [...], 'kept': [...]}
+        {'added': [...], 'removed': [...], 'kept': [...],
+         'refreshed': [...]}
 
-    where each list contains stringified schedule UUIDs. Top-level
-    redis errors are wrapped as :class:`RedbeatSyncError`; per-entry
-    failures are logged and skipped — partial drift is preferable to
-    a hard fail at startup.
+    where each list contains stringified schedule UUIDs. ``refreshed`` is
+    the subset of ``kept`` that was re-registered to refresh the in-memory
+    crontab — necessary because RedBeat's JSON encoder strips ``nowfun``,
+    so the tz-aware schedule reverts to UTC after Beat re-saves following
+    a fire. Re-running ``register()`` rebuilds the entry with nowfun
+    intact and overwrites the post-fire UTC score within the heartbeat
+    cycle (15 min). Side benefit: cron/tz edits in Postgres now propagate
+    on the next reconcile rather than waiting for an API restart.
+
+    Top-level redis errors are wrapped as :class:`RedbeatSyncError`;
+    per-entry failures are logged and skipped — partial drift is
+    preferable to a hard fail at startup.
     """
     enabled = (
         db.query(IngestionSchedule)
@@ -264,8 +296,20 @@ def reconcile_all(db: Session, *, app=None) -> dict:
         except RedbeatSyncError as e:
             logger.warning("reconcile-remove failed for %s: %s", sid, e)
 
+    # Refresh kept entries — re-register so any cron/tz edits in
+    # Postgres propagate, and nowfun (lost by RedBeat's JSON round-trip
+    # after a fire) is restored. register() is an upsert on the hash key.
+    refreshed = []
+    for sid in sorted(kept):
+        try:
+            register(db_index[sid], app=celery_app)
+            refreshed.append(sid)
+        except RedbeatSyncError as e:
+            logger.warning("reconcile-refresh failed for %s: %s", sid, e)
+
     return {
         "added": added,
         "removed": removed,
         "kept": sorted(kept),
+        "refreshed": refreshed,
     }
