@@ -57,6 +57,15 @@ SQLALCHEMY_EXAMPLES_URI = None     # Don't load example data
 
 
 # ── Custom categorical color palettes (RTS CPI brand) ──
+# Color ORDER matters: standalone Chart-view rendering does NOT apply per-series
+# label_colors for metric-only charts (charts where the "series" comes from the
+# metric label, not a groupby dimension). Those charts use palette[index] in
+# legend order. Most PW charts are this kind, with two metrics sorted by
+# descending sum, so the higher-value series (typically comp_* or forecasted_*)
+# gets palette[0] and the lower-value series (typically ref_* or actual_*) gets
+# palette[1]. We therefore put forest green at [0] and gold at [1] so the
+# standalone view visually matches the dashboard view, which DOES honor
+# label_colors (comp_* = green, ref_* = gold). See discussion 2026-05-21.
 EXTRA_CATEGORICAL_COLOR_SCHEMES = [
     {
         "id": "rts_cpi_palette",
@@ -64,12 +73,42 @@ EXTRA_CATEGORICAL_COLOR_SCHEMES = [
         "label": "RTS CPI",
         "isDefault": False,
         "colors": [
-            "#0070C0",
-            "#0E9AA7",
-            "#3DC1D3",
-            "#5B6C8A",
-            "#95AABE",
-            "#CBD5E1",
+            "#2B6B2B",  # forest green — comp_* metrics (also forecasted leader)
+            "#C5981B",  # gold — ref_* / actual / single-metric KPIs
+            "#3D8B3D",  # medium green — secondary green accent
+            "#D4652F",  # orange — TC carrier accent
+            "#E4049C",  # pink — Coa carrier
+            "#8B5CF6",  # purple — KQ carrier
+            "#1A6B8A",  # teal — Fli carrier
+            "#06B6D4",  # cyan — fallback
+            "#64748B",  # slate — fallback
+            "#0070C0",  # blue — fallback
+        ],
+    },
+]
+
+# ── Gold-first variant of rts_cpi_palette ──
+# For single-metric KPI charts (capacity, current_booking, etc.) where
+# label_colors maps the metric to gold (#C5981B). Standalone Chart-view
+# can't honor label_colors for metric-only charts, so these charts pick
+# color_scheme=rts_cpi_palette_kpi instead, putting gold at palette[0].
+EXTRA_CATEGORICAL_COLOR_SCHEMES = EXTRA_CATEGORICAL_COLOR_SCHEMES + [
+    {
+        "id": "rts_cpi_palette_kpi",
+        "description": "RTS CPI Palette — gold-first variant for single-metric KPIs",
+        "label": "RTS CPI (KPI)",
+        "isDefault": False,
+        "colors": [
+            "#C5981B",  # gold — primary for own-airline KPI metrics
+            "#2B6B2B",  # forest green — secondary
+            "#3D8B3D",  # medium green
+            "#D4652F",  # orange
+            "#E4049C",  # pink
+            "#8B5CF6",  # purple
+            "#1A6B8A",  # teal
+            "#06B6D4",  # cyan
+            "#64748B",  # slate
+            "#0070C0",  # blue
         ],
     },
 ]
@@ -137,3 +176,15 @@ EXTRA_CATEGORICAL_COLOR_SCHEMES = EXTRA_CATEGORICAL_COLOR_SCHEMES + [
         ],
     },
 ]
+
+# ── Explore form_data cache (per-open snapshot) ──
+# Standalone /explore/ loads via ?form_data_key=<uuid> which reads from this
+# cache instead of the chart's persisted params/query_context. Default TTL
+# is days, which makes stale snapshots outlive any backend chart edits.
+# Short-circuit that by expiring entries quickly (60s) so per-open snapshots
+# always rebuild from the live chart definition.
+EXPLORE_FORM_DATA_CACHE_CONFIG = {
+    "CACHE_TYPE": "SupersetMetastoreCache",
+    "CACHE_DEFAULT_TIMEOUT": 60,
+    "REFRESH_TIMEOUT_ON_RETRIEVAL": True,
+}
