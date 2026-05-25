@@ -1,7 +1,7 @@
 /**
  * In-memory mock API client — for offline demos without a backend.
  */
-import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse } from './client';
+import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, KpiKey, KpiSummaryResponse, KpiDetailResponse } from './client';
 import type {
   Paginated,
   AlertRule,
@@ -456,5 +456,74 @@ export const mockClient: CpiApiClient = {
         { slice_id: 3, slice_name: 'Breakdown by Type', viz_type: 'pie',                     description: null, is_kpi: false },
       ],
     }),
+  },
+  kpi: {
+    getSummary: (airlineCode: string, capDate: string): Promise<KpiSummaryResponse> => delay({
+      cap_date: capDate,
+      airline_code: airlineCode.toUpperCase(),
+      kpis: {
+        airlines_analyzed:  { value: 7,  label: 'Airlines Analyzed',   subheader: 'Distinct competitors tracked' },
+        markets_covered:    { value: 16, label: 'Markets Covered',      subheader: 'Origin-destination pairs analyzed' },
+        cheaper_routes_pct: { value: 50, label: 'Cheaper on Routes %',  subheader: 'Routes where JY is cheaper' },
+        undercut_count:     { value: 28, label: 'Undercut Count',       subheader: 'Route-competitor pairs beating JY' },
+        // PW
+        competitors_analyzed: { value: 4,      label: 'Competitors Analyzed',   subheader: 'Distinct competitors tracked' },
+        routes_covered:       { value: 7,      label: 'Routes Covered',          subheader: 'Origin-destination pairs analyzed' },
+        pw_avg_fare:          { value: 179.10, label: 'PW Avg Fare',             subheader: 'Average PW fare across all routes' },
+        competitors_avg_fare: { value: 410.01, label: 'Competitors Avg Fare',   subheader: 'Average competitor fare across all routes' },
+        dep_dates_monitored:  { value: 30,     label: 'Dep Dates Monitored',    subheader: 'Future travel dates with pricing data' },
+      },
+    }),
+    getDetail: (airlineCode: string, kpiKey: KpiKey, capDate: string): Promise<KpiDetailResponse> => {
+      const tables: Record<KpiKey, { columns: string[]; rows: Array<Record<string, string | number>> }> = {
+        airlines_analyzed: {
+          columns: ['#', 'Competitor', 'Routes', 'Avg Fare'],
+          rows: [
+            { rank: 1, comp_al: 'BW', routes: 15, avg_fare: 324 },
+            { rank: 2, comp_al: '5L', routes: 12, avg_fare: 73 },
+          ],
+        },
+        markets_covered: {
+          columns: ['#', 'Route', 'Competitors', 'JY avg fare'],
+          rows: [{ rank: 1, route: 'ANU → EIS', competitors: 4, jy_avg: 341 }],
+        },
+        cheaper_routes_pct: {
+          columns: ['Route', 'JY avg', 'Comp avg', 'Δ', 'Winner'],
+          rows: [{ route: 'PLS → STI', jy_avg: 61, comp_avg: 336, delta: -276, winner: 'JY' }],
+        },
+        undercut_count: {
+          columns: ['Route', 'Competitor', 'JY avg', 'Comp avg', 'Gap'],
+          rows: [{ route: 'ANU → EIS', comp_al: 'BW', jy_avg: 311, comp_avg: 0, gap: -311 }],
+        },
+        // PW
+        competitors_analyzed: {
+          columns: ['#', 'Competitor', 'Routes', 'Avg Fare', 'Fare Gap'],
+          rows: [{ rank: 1, comp_al: 'CQ', routes: 3, avg_fare: 402, fare_gap: 326 }],
+        },
+        routes_covered: {
+          columns: ['#', 'Route', 'Competitors', 'PW Avg Fare', 'Comp Avg Fare', 'Fare Gap'],
+          rows: [{ rank: 1, route: 'DAR → ARK', competitors: 3, pw_avg: 30, comp_avg: 146, fare_gap: 116 }],
+        },
+        pw_avg_fare: {
+          columns: ['#', 'Route', 'PW Avg Fare', 'Min Fare', 'Max Fare', 'Records'],
+          rows: [{ rank: 1, route: 'DAR → NBO', avg_fare: 285, min_fare: 0, max_fare: 585, records: 1884 }],
+        },
+        competitors_avg_fare: {
+          columns: ['#', 'Competitor', 'Avg Fare', 'Min Fare', 'Max Fare', 'Routes'],
+          rows: [{ rank: 1, comp_al: 'KQ', avg_fare: 500, min_fare: 0, max_fare: 1867, routes: 3 }],
+        },
+        dep_dates_monitored: {
+          columns: ['#', 'Dep Date', 'Records', 'Competitors', 'Routes'],
+          rows: [{ rank: 1, ref_dep_date: '2026-06-23', records: 140, competitors: 4, routes: 7 }],
+        },
+      };
+      return delay({
+        cap_date: capDate,
+        airline_code: airlineCode.toUpperCase(),
+        kpi_key: kpiKey,
+        columns: tables[kpiKey].columns,
+        rows: tables[kpiKey].rows,
+      });
+    },
   },
 };

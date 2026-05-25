@@ -61,7 +61,41 @@ export interface DashboardDateFilter {
   capDateTo?: string;    // YYYY-MM-DD, set when mode === 'range'
 }
 
+// ── KPI summary + detail (click-to-expand KPI row) ──
+// Keys are per-airline: JY exposes the first four, PW the last five.
+// The backend returns only the subset for the requested airline_code.
+export type KpiKey =
+  // JY
+  | 'airlines_analyzed'
+  | 'markets_covered'
+  | 'cheaper_routes_pct'
+  | 'undercut_count'
+  // PW
+  | 'competitors_analyzed'
+  | 'routes_covered'
+  | 'pw_avg_fare'
+  | 'competitors_avg_fare'
+  | 'dep_dates_monitored';
 
+export interface KpiSummaryItem {
+  value: number;
+  label: string;
+  subheader: string;
+}
+
+export interface KpiSummaryResponse {
+  cap_date: string;
+  airline_code: string;
+  kpis: Record<KpiKey, KpiSummaryItem>;
+}
+
+export interface KpiDetailResponse {
+  cap_date: string;
+  airline_code: string;
+  kpi_key: KpiKey;
+  columns: string[];
+  rows: Array<Record<string, string | number>>;
+}
 
 
 
@@ -170,6 +204,10 @@ export interface CpiApiClient {
         dates: string[];
     }>;
     getDashboardCharts(dashboardId: string): Promise<DashboardChartsResponse>;
+  };
+  kpi: {
+    getSummary(airlineCode: string, capDate: string): Promise<KpiSummaryResponse>;
+    getDetail(airlineCode: string, kpiKey: KpiKey, capDate: string): Promise<KpiDetailResponse>;
   };
   ingestion: {
     listJobs(q?: JobQuery): Promise<Paginated<IngestionJob>>;

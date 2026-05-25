@@ -91,12 +91,24 @@ DASHBOARDS = {
     },
 }
 
-# Tenant -> per-tenant Superset dataset view names (for RLS filtering)
+# Tenant -> per-tenant Superset dataset view names (for RLS filtering).
+# These datasets MUST expose a tenant_code column — they get both the
+# tenant_code RLS clause AND any optional cap_date clause.
 # Each dashboard now has its own dedicated dataset—no cross-tenant bleed.
 TENANT_TABLES = {
     "JY":  ["vw_airline_cpi_jy_snapshot"],
     "PW":  ["vw_airline_cpi_pw_snapshot"],
     "FJL": ["vw_cfl_cpi_fjl_snapshot"],
+}
+
+# Tenant -> Superset virtual/derived datasets that need cap_date RLS but
+# do NOT have a tenant_code column. These are typically KPI virtual datasets
+# whose inner SQL already references a per-tenant view (so tenant isolation
+# is enforced by construction). They get ONLY the cap_date clause — applying
+# the tenant_code clause would error ("column does not exist") because their
+# SELECT does not project tenant_code.
+TENANT_CAPDATE_ONLY_TABLES = {
+    "JY":  ["kpi_jy_cheaper_routes_pct", "kpi_jy_undercut_count"],
 }
 
 
@@ -259,14 +271,24 @@ async def fetch_guest_token(
     #    so by this point we always have a tenant user whose identity matches
     #    the dashboard's tenant.
     rls_rules: list[dict] = []
-    table_names = TENANT_TABLES.get(dash["tenant"], [])
+    tenant_tables = TENANT_TABLES.get(dash["tenant"], [])
+    capdate_only_tables = TENANT_CAPDATE_ONLY_TABLES.get(dash["tenant"], [])
     try:
-        dataset_ids = await superset_client.resolve_dataset_ids(table_names)
+        tenant_dataset_ids = await superset_client.resolve_dataset_ids(tenant_tables)
     except Exception as e:
-        logger.error(f"Dataset resolution failed: {e}")
-        dataset_ids = []
+        logger.error(f"Tenant dataset resolution failed: {e}")
+        tenant_dataset_ids = []
+    try:
+        capdate_only_dataset_ids = (
+            await superset_client.resolve_dataset_ids(capdate_only_tables)
+            if capdate_only_tables else []
+        )
+    except Exception as e:
+        logger.error(f"Cap-date-only dataset resolution failed: {e}")
+        capdate_only_dataset_ids = []
 
-    for ds_id in dataset_ids:
+    # tenant_code clause: only datasets that actually have a tenant_code column.
+    for ds_id in tenant_dataset_ids:
         rls_rules.append({"dataset": ds_id, "clause": f"tenant_code = '{user_identity}'"})
 
     # 3b. Optional cap_date scoping.
@@ -284,8 +306,10 @@ async def fetch_guest_token(
             raise HTTPException(400, detail={"message": "cap_date_from must be <= cap_date_to"})
         cap_date_clause = f"cap_date >= '{cap_date_from}' AND cap_date <= '{cap_date_to}'"
 
+    # cap_date clause: applies to BOTH the tenant view datasets and the
+    # cap-date-only KPI virtual datasets. Both groups have a cap_date column.
     if cap_date_clause:
-        for ds_id in dataset_ids:
+        for ds_id in tenant_dataset_ids + capdate_only_dataset_ids:
             rls_rules.append({"dataset": ds_id, "clause": cap_date_clause})
 
     # 4. Get guest token (use numeric Superset ID – see create_guest_token docstring)

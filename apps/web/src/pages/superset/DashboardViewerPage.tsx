@@ -18,6 +18,7 @@ import { useDashboardCharts } from '../../hooks/useDashboardCharts';
 import ChartSelectorPanel from '../../components/dashboard/ChartSelectorPanel';
 import DateFilterToggle from '../../components/dashboard/DateFilterToggle';
 import SingleChartViewer from '../../components/dashboard/SingleChartViewer';
+import KPIRow from '../../components/dashboard/KPIRow';
 
 /**
  * Superset base URL — used by the Embedded SDK to construct the iframe src.
@@ -271,7 +272,7 @@ export default function DashboardViewerPage() {
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header bar */}
-      <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+      <Box sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
         <Tooltip title="Back to dashboards">
           <IconButton onClick={() => navigate('/dashboards')} sx={{ mr: 1 }}>
             <ArrowBack />
@@ -370,7 +371,7 @@ export default function DashboardViewerPage() {
         minHeight: 0,
       }}>
         {/* Date filter bar — drives cap_date RLS on every chart in this dashboard */}
-        <Box sx={{ mb: 1 }}>
+        <Box sx={{ mb: 0.5 }}>
           <DateFilterToggle
             availableDates={availableDates}
             value={dateFilter}
@@ -378,6 +379,20 @@ export default function DashboardViewerPage() {
             disabled={datesLoading || availableDates.length === 0}
           />
         </Box>
+
+        {/* KPI row — CPI-rendered tiles + click-to-expand detail (JY + PW).
+            These replace the Superset big-number tiles so the values and their
+            drill-downs share a single source of truth and respond to the Cap
+            Date picker above. The KPI set is per-airline (see KPIRow).
+            cap_date: single-day uses the picked day; range uses the window's
+            end (most recent) day, since the KPI queries are single-day. */}
+        {(meta?.tenant === 'JY' || meta?.tenant === 'PW') && (
+          <KPIRow
+            airlineCode={meta.tenant}
+            capDate={(dateFilter.mode === 'single' ? dateFilter.capDateEq : dateFilter.capDateTo) ?? ''}
+          />
+        )}
+
         {/* Dashboard container */}
         <Paper
           variant="outlined"
@@ -419,14 +434,19 @@ export default function DashboardViewerPage() {
             </Box>
           )}
 
-          {/* SDK mount point — must stay in the DOM even while loading */}
+          {/* SDK mount point — must stay in the DOM even while loading.
+              Absolute-fill the (position:relative) Paper so the injected iframe
+              exactly matches the flex-sized container. Avoids the brittle
+              `calc(100vh - Npx)` that over-sized the iframe and let its bottom
+              (the filter bar's APPLY FILTERS button) get clipped by the Paper's
+              overflow:hidden. */}
           <Box
             ref={mountRef}
             sx={{
-              width: '100%',
-              height: '100%',
+              position: 'absolute',
+              inset: 0,
               visibility: isLoading ? 'hidden' : 'visible',
-              '& > iframe': { height: 'calc(100vh - 140px) !important' },
+              '& > iframe': { width: '100%', height: '100% !important', border: 'none' },
             }}
           />
         </Paper>

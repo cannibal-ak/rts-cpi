@@ -2,7 +2,7 @@
  * HTTP-based API client — talks to the real FastAPI backend.
  * Uses JWT Bearer tokens for authentication (Phase 2).
  */
-import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, DashboardDateFilter } from './client';
+import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, DashboardDateFilter, KpiKey, KpiSummaryResponse, KpiDetailResponse } from './client';
 import type {
   Paginated, AirlineSnapshot, VelocitySnapshot, CflSnapshot, FilterMetadata,
   AlertRule, AlertEvent,
@@ -453,6 +453,18 @@ export const httpClient: CpiApiClient = {
     getDashboardCharts: (dashboardId: string) =>
       get<DashboardChartsResponse>(
         `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/charts`,
+      ),
+  },
+  kpi: {
+    getSummary: (airlineCode: string, capDate: string) =>
+      get<KpiSummaryResponse>(
+        `/api/v1/kpi/${encodeURIComponent(airlineCode)}/summary`,
+        { cap_date: capDate },
+      ),
+    getDetail: (airlineCode: string, kpiKey: KpiKey, capDate: string) =>
+      get<KpiDetailResponse>(
+        `/api/v1/kpi/${encodeURIComponent(airlineCode)}/detail/${encodeURIComponent(kpiKey)}`,
+        { cap_date: capDate },
       ),
   },
 };

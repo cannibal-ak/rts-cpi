@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import SessionLocal
 from app.core.deps import enforce_password_change
-from app.routers import health, auth, password_reset, airline, cfl, alerts, audit, admin, tenant, stats, superset
+from app.routers import health, auth, password_reset, airline, cfl, alerts, audit, admin, tenant, stats, superset, kpi
 from app.routers import (
     admin_ingestion_runs,
     admin_ingestion_schedules,
@@ -84,6 +84,12 @@ app.include_router(admin.router, dependencies=_protected)
 app.include_router(tenant.router, dependencies=_protected)
 app.include_router(stats.router, dependencies=_protected)
 app.include_router(superset.router, dependencies=_protected)
+
+# KPI summary + detail — backs the React click-to-expand KPI row on the
+# airline dashboard. Router declares its own /api/v1/kpi prefix (like
+# superset.router) and enforces identity-based tenant scoping internally;
+# the _protected gate adds JWT + forced-password-change like its siblings.
+app.include_router(kpi.router, dependencies=_protected)
 
 # Phase 3 SFTP-driven ingestion admin routers. Each declares
 # RequirePlatformAdmin() at the APIRouter level; the _protected
