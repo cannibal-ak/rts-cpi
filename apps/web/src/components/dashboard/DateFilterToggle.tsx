@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import {
-  Box, Paper, ToggleButton, ToggleButtonGroup,
+  Box, ToggleButton, ToggleButtonGroup,
   Select, MenuItem,
   TextField, Stack, Tooltip, Typography,
 } from '@mui/material';
@@ -98,12 +98,11 @@ export default function DateFilterToggle({
   const inlineLabelSx = { fontSize: 12, color: 'text.secondary', whiteSpace: 'nowrap' as const };
 
   return (
-    <Paper
-      variant="outlined"
+    <Box
       sx={{
-        px: '12px', py: '4px', mb: 1,
-        borderRadius: 2,
-        bgcolor: 'background.paper',
+        px: '12px', py: '4px',
+        borderTop: '0.5px solid',
+        borderColor: 'divider',
       }}
     >
       <Stack
@@ -235,6 +234,6 @@ export default function DateFilterToggle({
               : 'Pick a range'}
         </Typography>
       </Stack>
-    </Paper>
+    </Box>
   );
 }
