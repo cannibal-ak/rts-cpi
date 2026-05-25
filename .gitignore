@@ -127,3 +127,11 @@ dev-sftp-mount/pw/*
 
 # Backup files (underscore-suffixed, e.g. .bak_pre_pw)
 *.bak_*
+
+# ---------------------------------------------------------------------------
+# IT handoff cleanup additions (2026-05-25)
+# ---------------------------------------------------------------------------
+*.orig
+*.save
+*.tgz
+*.db.bak*
