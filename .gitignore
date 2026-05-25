@@ -124,3 +124,6 @@ dev-sftp-mount/jy/*
 dev-sftp-mount/pw/*
 !dev-sftp-mount/jy/.gitkeep
 !dev-sftp-mount/pw/.gitkeep
+
+# Backup files (underscore-suffixed, e.g. .bak_pre_pw)
+*.bak_*
