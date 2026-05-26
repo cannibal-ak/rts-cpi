@@ -472,6 +472,8 @@ export const mockClient: CpiApiClient = {
         pw_avg_fare:          { value: 179.10, label: 'PW Avg Fare',             subheader: 'Average PW fare across all routes' },
         competitors_avg_fare: { value: 410.01, label: 'Competitors Avg Fare',   subheader: 'Average competitor fare across all routes' },
         dep_dates_monitored:  { value: 30,     label: 'Dep Dates Monitored',    subheader: 'Future travel dates with pricing data' },
+        competitors_tracked: { value: 3, label: 'Competitors Tracked', subheader: 'Competitor websites monitored' },
+        fjl_avg_fare:        { value: 769.54, label: 'FJL Avg Fare', subheader: 'Average total fare across all routes' },
       },
     }),
     getDetail: (airlineCode: string, kpiKey: KpiKey, capDate: string): Promise<KpiDetailResponse> => {
@@ -515,6 +517,14 @@ export const mockClient: CpiApiClient = {
         dep_dates_monitored: {
           columns: ['#', 'Dep Date', 'Records', 'Competitors', 'Routes'],
           rows: [{ rank: 1, ref_dep_date: '2026-06-23', records: 140, competitors: 4, routes: 7 }],
+        },
+        competitors_tracked: {
+          columns: ['#', 'Competitor', 'Routes', 'Avg Total Fare', 'Avg Pax Fare', 'Records'],
+          rows: [{ rank: 1, source: 'https://www.colorline.no/', routes: 6, avg_total: 1217.13, avg_pax: 197.33, records: 1805 }],
+        },
+        fjl_avg_fare: {
+          columns: ['#', 'Route', 'Competitor', 'Total Fare', 'Pax Fare', 'Vehicle Fare', 'Cabin Fare'],
+          rows: [{ rank: 1, route: 'Hirtshals → Larvik', source: 'https://www.colorline.no/', total_fare: 1289.03, pax_fare: 197.8, veh_fare: 1091.23, cab_fare: 0 }],
         },
       };
       return delay({

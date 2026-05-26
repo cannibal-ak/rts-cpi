@@ -188,3 +188,28 @@ EXPLORE_FORM_DATA_CACHE_CONFIG = {
     "CACHE_DEFAULT_TIMEOUT": 60,
     "REFRESH_TIMEOUT_ON_RETRIEVAL": True,
 }
+
+
+# ── Precision Air branded palette (PW dashboard) ──
+# Color ORDER matters for standalone Chart-view (palette[index] in legend
+# order). Forest green first so PW (reference airline) leads; gold accents
+# for competitors. Dashboard view also honors per-series label_colors.
+EXTRA_CATEGORICAL_COLOR_SCHEMES = EXTRA_CATEGORICAL_COLOR_SCHEMES + [
+    {
+        "id": "precisionAir",
+        "description": "Precision Air brand colors (green/gold)",
+        "label": "Precision Air",
+        "isDefault": False,
+        "colors": [
+            "#3C5414",  # forest green — PW reference
+            "#4A6B1C",  # KQ
+            "#5C8226",  # TC
+            "#6E9930",  # Coa
+            "#FBC31C",  # gold — Aur
+            "#E0AD18",  # Fli
+            "#C49714",  # CQ
+            "#80A83A",  # UI
+            "#A8C44E",  # YS
+        ],
+    },
+]

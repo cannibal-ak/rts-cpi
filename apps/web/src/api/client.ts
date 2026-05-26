@@ -75,7 +75,10 @@ export type KpiKey =
   | 'routes_covered'
   | 'pw_avg_fare'
   | 'competitors_avg_fare'
-  | 'dep_dates_monitored';
+  | 'dep_dates_monitored'
+  // FJL adds two keys; routes_covered / competitors_avg_fare / dep_dates_monitored are shared with PW
+  | 'competitors_tracked'
+  | 'fjl_avg_fare';
 
 export interface KpiSummaryItem {
   value: number;

@@ -16,10 +16,14 @@ const KPI_LAYOUT: Record<string, { order: KpiKey[]; columns: number }> = {
     order: ['competitors_analyzed', 'routes_covered', 'pw_avg_fare', 'competitors_avg_fare', 'dep_dates_monitored'],
     columns: 5,
   },
+  FJL: {
+    order: ['competitors_tracked', 'routes_covered', 'fjl_avg_fare', 'competitors_avg_fare', 'dep_dates_monitored'],
+    columns: 5,
+  },
 };
 
 // KPIs whose summary value is a fare ⇒ render as $x.xx in the tile.
-const CURRENCY_KEYS = new Set<KpiKey>(['pw_avg_fare', 'competitors_avg_fare']);
+const CURRENCY_KEYS = new Set<KpiKey>(['pw_avg_fare', 'competitors_avg_fare', 'fjl_avg_fare']);
 // KPIs rendered as a percentage.
 const PERCENT_KEYS = new Set<KpiKey>(['cheaper_routes_pct']);
 

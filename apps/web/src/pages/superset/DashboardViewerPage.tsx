@@ -386,7 +386,7 @@ export default function DashboardViewerPage() {
             Date picker above. The KPI set is per-airline (see KPIRow).
             cap_date: single-day uses the picked day; range uses the window's
             end (most recent) day, since the KPI queries are single-day. */}
-        {(meta?.tenant === 'JY' || meta?.tenant === 'PW') && (
+        {(meta?.tenant === 'JY' || meta?.tenant === 'PW' || meta?.tenant === 'FJL') && (
           <KPIRow
             airlineCode={meta.tenant}
             capDate={(dateFilter.mode === 'single' ? dateFilter.capDateEq : dateFilter.capDateTo) ?? ''}

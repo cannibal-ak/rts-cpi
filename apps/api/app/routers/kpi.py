@@ -363,6 +363,178 @@ def _detail_pw_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any
 # airline_code -> config. The view name is interpolated into SQL, so this
 # mapping is the injection guard — never add an unvalidated entry.
 
+# ════════════════════════════════════════════════════════════
+#  FJL KPIs (cruise/ferry — competitor website pricing)
+# ════════════════════════════════════════════════════════════
+# FJL rows come from competitor + own websites (the `source` column), not
+# airline GDS data, so the schema differs from JY/PW: competitor = `source`,
+# route = org||dest, dates = out_dep_date, and the fare has a richer breakdown
+# (total / per-pax / vehicle / cabin). "FJL's own" rows are the fjordline.com
+# variants (nb/dk/de); everything else is a competitor — detected with
+# strpos(lower(source), 'fjordline') (there is no single own-source value).
+# NOTE: total_fare blends currencies (EUR/DKK/NOK) across sources, so the fare
+# averages are intentionally currency-mixed, mirroring the raw data.
+
+
+def _summary_sql_fjl(view: str) -> dict[str, str]:
+    return {
+        "competitors_tracked": f"""
+            SELECT COUNT(DISTINCT source)
+            FROM {view}
+            WHERE cap_date = :cap_date
+              AND strpos(lower(source), 'fjordline') = 0
+        """,
+        "routes_covered": f"""
+            SELECT COUNT(DISTINCT org || '-' || dest)
+            FROM {view}
+            WHERE cap_date = :cap_date
+        """,
+        "fjl_avg_fare": f"""
+            SELECT ROUND(AVG(total_fare)::numeric, 2)
+            FROM {view}
+            WHERE cap_date = :cap_date
+              AND strpos(lower(source), 'fjordline') > 0
+        """,
+        "competitors_avg_fare": f"""
+            SELECT ROUND(AVG(total_fare)::numeric, 2)
+            FROM {view}
+            WHERE cap_date = :cap_date
+              AND strpos(lower(source), 'fjordline') = 0
+        """,
+        "dep_dates_monitored": f"""
+            SELECT COUNT(DISTINCT out_dep_date)
+            FROM {view}
+            WHERE cap_date = :cap_date
+        """,
+    }
+
+
+_FJL_KPI_META = {
+    "competitors_tracked":  {"label": "Competitors Tracked", "subheader": "Competitor websites monitored"},
+    "routes_covered":       {"label": "Routes Covered", "subheader": "Origin-destination pairs analyzed"},
+    "fjl_avg_fare":         {"label": "FJL Avg Fare", "subheader": "Average total fare across all routes"},
+    "competitors_avg_fare": {"label": "Competitors Avg Fare", "subheader": "Average competitor fare across all routes"},
+    "dep_dates_monitored":  {"label": "Departure Dates Monitored", "subheader": "Future travel dates with pricing data"},
+}
+
+# Summary values returned as floats (2dp); everything else is an int.
+_FJL_FLOAT_KEYS = frozenset({"fjl_avg_fare", "competitors_avg_fare"})
+
+
+def _detail_fjl_competitors(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+    rows = db.execute(text(f"""
+        SELECT source,
+               COUNT(DISTINCT org || '-' || dest) AS routes,
+               ROUND(AVG(total_fare)::numeric, 2) AS avg_total,
+               ROUND(AVG(out_per_pax_fare)::numeric, 2) AS avg_pax,
+               COUNT(*) AS records
+        FROM {view}
+        WHERE cap_date = :cap_date
+          AND strpos(lower(source), 'fjordline') = 0
+        GROUP BY source
+        ORDER BY avg_total DESC
+    """), {"cap_date": cap_date}).fetchall()
+    return {
+        "columns": ["#", "Competitor", "Routes", "Avg Total Fare", "Avg Pax Fare", "Records"],
+        "rows": [
+            {"rank": i, "source": r[0], "routes": _i(r[1]),
+             "avg_total": _f(r[2]), "avg_pax": _f(r[3]), "records": _i(r[4])}
+            for i, r in enumerate(rows, start=1)
+        ],
+    }
+
+
+def _detail_fjl_routes(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+    rows = db.execute(text(f"""
+        SELECT org || ' → ' || dest AS route,
+               COUNT(DISTINCT source) AS competitors,
+               ROUND(AVG(total_fare)::numeric, 2) AS avg_fare,
+               ROUND(MIN(total_fare)::numeric, 2) AS min_fare,
+               ROUND(MAX(total_fare)::numeric, 2) AS max_fare
+        FROM {view}
+        WHERE cap_date = :cap_date
+        GROUP BY org, dest
+        ORDER BY avg_fare DESC
+    """), {"cap_date": cap_date}).fetchall()
+    return {
+        "columns": ["#", "Route", "Competitors", "Avg Fare", "Min Fare", "Max Fare"],
+        "rows": [
+            {"rank": i, "route": r[0], "competitors": _i(r[1]),
+             "avg_fare": _f(r[2]), "min_fare": _f(r[3]), "max_fare": _f(r[4])}
+            for i, r in enumerate(rows, start=1)
+        ],
+    }
+
+
+def _detail_fjl_avg_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+    rows = db.execute(text(f"""
+        SELECT org || ' → ' || dest AS route,
+               source,
+               ROUND(AVG(total_fare)::numeric, 2) AS total_fare,
+               ROUND(AVG(out_per_pax_fare)::numeric, 2) AS pax_fare,
+               ROUND(AVG(out_veh_fare)::numeric, 2) AS veh_fare,
+               ROUND(AVG(out_cab_fare)::numeric, 2) AS cab_fare
+        FROM {view}
+        WHERE cap_date = :cap_date
+        GROUP BY org, dest, source
+        ORDER BY total_fare DESC
+    """), {"cap_date": cap_date}).fetchall()
+    return {
+        "columns": ["#", "Route", "Competitor", "Total Fare", "Pax Fare", "Vehicle Fare", "Cabin Fare"],
+        "rows": [
+            {"rank": i, "route": r[0], "source": r[1], "total_fare": _f(r[2]),
+             "pax_fare": _f(r[3]), "veh_fare": _f(r[4]), "cab_fare": _f(r[5])}
+            for i, r in enumerate(rows, start=1)
+        ],
+    }
+
+
+def _detail_fjl_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+    rows = db.execute(text(f"""
+        SELECT source,
+               ROUND(AVG(total_fare)::numeric, 2) AS avg_total,
+               ROUND(AVG(out_per_pax_fare)::numeric, 2) AS avg_pax,
+               ROUND(AVG(out_veh_fare)::numeric, 2) AS avg_vehicle,
+               ROUND(AVG(out_cab_fare)::numeric, 2) AS avg_cabin,
+               COUNT(*) AS records
+        FROM {view}
+        WHERE cap_date = :cap_date
+          AND strpos(lower(source), 'fjordline') = 0
+        GROUP BY source
+        ORDER BY avg_total ASC
+    """), {"cap_date": cap_date}).fetchall()
+    return {
+        "columns": ["#", "Competitor", "Avg Total", "Avg Pax", "Avg Vehicle", "Avg Cabin", "Records"],
+        "rows": [
+            {"rank": i, "source": r[0], "avg_total": _f(r[1]), "avg_pax": _f(r[2]),
+             "avg_vehicle": _f(r[3]), "avg_cabin": _f(r[4]), "records": _i(r[5])}
+            for i, r in enumerate(rows, start=1)
+        ],
+    }
+
+
+def _detail_fjl_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+    rows = db.execute(text(f"""
+        SELECT out_dep_date,
+               COUNT(*) AS records,
+               COUNT(DISTINCT source) AS competitors,
+               COUNT(DISTINCT org || '-' || dest) AS routes
+        FROM {view}
+        WHERE cap_date = :cap_date
+        GROUP BY out_dep_date
+        ORDER BY out_dep_date
+    """), {"cap_date": cap_date}).fetchall()
+    return {
+        "columns": ["#", "Departure Date", "Records", "Competitors", "Routes"],
+        "rows": [
+            {"rank": i,
+             "out_dep_date": r[0].isoformat() if r[0] is not None else "",
+             "records": _i(r[1]), "competitors": _i(r[2]), "routes": _i(r[3])}
+            for i, r in enumerate(rows, start=1)
+        ],
+    }
+
+
 AIRLINE_CFG: dict[str, dict[str, Any]] = {
     "JY": {
         "view": "vw_airline_cpi_jy_snapshot",
@@ -387,6 +559,19 @@ AIRLINE_CFG: dict[str, dict[str, Any]] = {
             "pw_avg_fare": _detail_pw_pw_fare,
             "competitors_avg_fare": _detail_pw_comp_fare,
             "dep_dates_monitored": _detail_pw_dep_dates,
+        },
+    },
+    "FJL": {
+        "view": "vw_cfl_cpi_fjl_snapshot",
+        "summary_sql": _summary_sql_fjl,
+        "meta": _FJL_KPI_META,
+        "float_keys": _FJL_FLOAT_KEYS,
+        "details": {
+            "competitors_tracked": _detail_fjl_competitors,
+            "routes_covered": _detail_fjl_routes,
+            "fjl_avg_fare": _detail_fjl_avg_fare,
+            "competitors_avg_fare": _detail_fjl_comp_fare,
+            "dep_dates_monitored": _detail_fjl_dep_dates,
         },
     },
 }

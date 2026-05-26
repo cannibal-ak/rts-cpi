@@ -16,7 +16,7 @@ interface ColumnDef {
   render?: (row: Row) => React.ReactNode;
 }
 
-const TITLES: Record<KpiKey, string> = {
+const TITLES: Partial<Record<KpiKey, string>> = {
   // JY
   airlines_analyzed: 'Airlines Analyzed — competitor breakdown',
   markets_covered: 'Markets Covered — route breakdown',
@@ -75,7 +75,7 @@ const winnerBadge = (row: Row): React.ReactNode => {
   );
 };
 
-const COLUMN_CONFIG: Record<KpiKey, ColumnDef[]> = {
+const COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
   airlines_analyzed: [
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Competitor', field: 'comp_al' },
@@ -143,6 +143,58 @@ const COLUMN_CONFIG: Record<KpiKey, ColumnDef[]> = {
   ],
 };
 
+const FJL_TITLES: Partial<Record<KpiKey, string>> = {
+  competitors_tracked: 'Competitors Tracked — competitor breakdown',
+  routes_covered: 'Routes Covered — route breakdown',
+  fjl_avg_fare: 'FJL Avg Fare — fare breakdown by route',
+  competitors_avg_fare: 'Competitors Avg Fare — fare by competitor',
+  dep_dates_monitored: 'Departure Dates Monitored — coverage by date',
+};
+
+const FJL_COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
+  competitors_tracked: [
+    { header: '#', field: 'rank', align: 'right' },
+    { header: 'Competitor', field: 'source' },
+    { header: 'Routes', field: 'routes', align: 'right' },
+    { header: 'Avg Total Fare', field: 'avg_total', align: 'right' },
+    { header: 'Avg Pax Fare', field: 'avg_pax', align: 'right' },
+    { header: 'Records', field: 'records', align: 'right' },
+  ],
+  routes_covered: [
+    { header: '#', field: 'rank', align: 'right' },
+    { header: 'Route', field: 'route' },
+    { header: 'Competitors', field: 'competitors', align: 'right' },
+    { header: 'Avg Fare', field: 'avg_fare', align: 'right' },
+    { header: 'Min Fare', field: 'min_fare', align: 'right' },
+    { header: 'Max Fare', field: 'max_fare', align: 'right' },
+  ],
+  fjl_avg_fare: [
+    { header: '#', field: 'rank', align: 'right' },
+    { header: 'Route', field: 'route' },
+    { header: 'Competitor', field: 'source' },
+    { header: 'Total Fare', field: 'total_fare', align: 'right' },
+    { header: 'Pax Fare', field: 'pax_fare', align: 'right' },
+    { header: 'Vehicle Fare', field: 'veh_fare', align: 'right' },
+    { header: 'Cabin Fare', field: 'cab_fare', align: 'right' },
+  ],
+  competitors_avg_fare: [
+    { header: '#', field: 'rank', align: 'right' },
+    { header: 'Competitor', field: 'source' },
+    { header: 'Avg Total', field: 'avg_total', align: 'right' },
+    { header: 'Avg Pax', field: 'avg_pax', align: 'right' },
+    { header: 'Avg Vehicle', field: 'avg_vehicle', align: 'right' },
+    { header: 'Avg Cabin', field: 'avg_cabin', align: 'right' },
+    { header: 'Records', field: 'records', align: 'right' },
+  ],
+  dep_dates_monitored: [
+    { header: '#', field: 'rank', align: 'right' },
+    { header: 'Departure Date', field: 'out_dep_date' },
+    { header: 'Records', field: 'records', align: 'right' },
+    { header: 'Competitors', field: 'competitors', align: 'right' },
+    { header: 'Routes', field: 'routes', align: 'right' },
+  ],
+};
+
 export interface KPIDetailPanelProps {
   kpiKey: KpiKey | null;        // null ⇒ panel collapsed/hidden
   airlineCode: string;
@@ -174,7 +226,10 @@ export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, onClose }
     return () => { cancelled = true; };
   }, [kpiKey, airlineCode, capDate]);
 
-  const cols = kpiKey ? COLUMN_CONFIG[kpiKey] : [];
+  const isFjl = airlineCode.toUpperCase() === 'FJL';
+  const titles = isFjl ? FJL_TITLES : TITLES;
+  const columnCfg = isFjl ? FJL_COLUMN_CONFIG : COLUMN_CONFIG;
+  const cols = kpiKey ? (columnCfg[kpiKey] ?? []) : [];
   const rows = data && data.kpi_key === kpiKey ? data.rows : [];
 
   return (
@@ -185,7 +240,7 @@ export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, onClose }
           borderBottom: '1px solid', borderColor: 'divider', bgcolor: '#f1f6fe',
         }}>
           <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#4a6a8a' }}>
-            {kpiKey ? TITLES[kpiKey] : ''}
+            {kpiKey ? (titles[kpiKey] ?? '') : ''}
           </Typography>
           <Box sx={{ flexGrow: 1 }} />
           <Typography sx={{ fontSize: 11, color: 'text.secondary', mr: 1 }}>{capDate}</Typography>
