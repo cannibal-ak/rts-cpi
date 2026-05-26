@@ -16,17 +16,38 @@ Why UUIDs are stored here instead of fetched from the Superset API:
 
 import httpx
 import logging
-from typing import Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Query
+import re
+from datetime import datetime
+from typing import Dict, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.core.config import settings
-from app.core.deps import (
-    get_user_identity, get_user_roles, is_platform_admin,
-    get_tenant_db, sanitize_date,
-)
+from app.core.database import get_db
+from app.core.deps import get_user_identity, get_user_roles, is_platform_admin
 
 logger = logging.getLogger(__name__)
+
+# Surface lines via uvicorn — see project_logging_convention.md.
+_log = logging.getLogger("uvicorn.error")
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _validate_cap_date(value: str, field: str) -> str:
+    """Validate YYYY-MM-DD strings before injecting into an RLS WHERE clause.
+
+    Why: cap_date_* params land verbatim inside a string SQL clause sent to
+    Superset as part of the guest token RLS rules. A strict regex + strptime
+    is the only thing keeping that from being SQLi.
+    """
+    if not _DATE_RE.match(value or ""):
+        raise HTTPException(400, detail={"message": f"Invalid {field}: must be YYYY-MM-DD"})
+    try:
+        datetime.strptime(value, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, detail={"message": f"Invalid {field}: not a real date"})
+    return value
 
 router = APIRouter(prefix="/api/v1/superset", tags=["superset"])
 
@@ -70,12 +91,24 @@ DASHBOARDS = {
     },
 }
 
-# Tenant -> per-tenant Superset dataset view names (for RLS filtering)
+# Tenant -> per-tenant Superset dataset view names (for RLS filtering).
+# These datasets MUST expose a tenant_code column — they get both the
+# tenant_code RLS clause AND any optional cap_date clause.
 # Each dashboard now has its own dedicated dataset—no cross-tenant bleed.
 TENANT_TABLES = {
     "JY":  ["vw_airline_cpi_jy_snapshot"],
     "PW":  ["vw_airline_cpi_pw_snapshot"],
     "FJL": ["vw_cfl_cpi_fjl_snapshot"],
+}
+
+# Tenant -> Superset virtual/derived datasets that need cap_date RLS but
+# do NOT have a tenant_code column. These are typically KPI virtual datasets
+# whose inner SQL already references a per-tenant view (so tenant isolation
+# is enforced by construction). They get ONLY the cap_date clause — applying
+# the tenant_code clause would error ("column does not exist") because their
+# SELECT does not project tenant_code.
+TENANT_CAPDATE_ONLY_TABLES = {
+    "JY":  ["kpi_jy_cheaper_routes_pct", "kpi_jy_undercut_count"],
 }
 
 
@@ -196,18 +229,17 @@ superset_client = SupersetClient()
 @router.get("/guest-token")
 async def fetch_guest_token(
     dashboard_id: str,
-    cap_date_eq: str | None = Query(None, description="Single day filter: cap_date = value"),
-    cap_date_from: str | None = Query(None, description="Range start (inclusive)"),
-    cap_date_to: str | None = Query(None, description="Range end (inclusive)"),
+    cap_date_eq: Optional[str] = None,
+    cap_date_from: Optional[str] = None,
+    cap_date_to: Optional[str] = None,
     user_identity: str = Depends(get_user_identity),
     user_roles: list[str] = Depends(get_user_roles),
 ):
     """Return a Superset guest token + dashboard UUID for embedding.
 
-    Optional date params drive an extra RLS rule applied to every chart in scope:
-    - cap_date_eq: single-day mode
-    - cap_date_from / cap_date_to: range mode (both required together)
-    Mutually exclusive — `cap_date_eq` wins if both are present.
+    Optional cap_date_* params append an extra RLS clause so chart queries
+    are server-side scoped to a single day (cap_date_eq) or a window
+    (cap_date_from..cap_date_to). The React DateFilterToggle drives this.
     """
 
     # 1. Lookup dashboard config
@@ -216,11 +248,6 @@ async def fetch_guest_token(
         raise HTTPException(400, detail={
             "message": f"Unknown dashboard_id '{dashboard_id}'. Valid IDs: {list(DASHBOARDS.keys())}",
         })
-
-    # Sanitize date params (raises 400 on bad format)
-    cap_date_eq   = sanitize_date(cap_date_eq, "cap_date_eq")
-    cap_date_from = sanitize_date(cap_date_from, "cap_date_from")
-    cap_date_to   = sanitize_date(cap_date_to, "cap_date_to")
 
     # 2. Access control
     #    Platform admins (rts tenant) manage pipelines and tenants — they
@@ -244,27 +271,46 @@ async def fetch_guest_token(
     #    so by this point we always have a tenant user whose identity matches
     #    the dashboard's tenant.
     rls_rules: list[dict] = []
-    table_names = TENANT_TABLES.get(dash["tenant"], [])
+    tenant_tables = TENANT_TABLES.get(dash["tenant"], [])
+    capdate_only_tables = TENANT_CAPDATE_ONLY_TABLES.get(dash["tenant"], [])
     try:
-        dataset_ids = await superset_client.resolve_dataset_ids(table_names)
+        tenant_dataset_ids = await superset_client.resolve_dataset_ids(tenant_tables)
     except Exception as e:
-        logger.error(f"Dataset resolution failed: {e}")
-        dataset_ids = []
+        logger.error(f"Tenant dataset resolution failed: {e}")
+        tenant_dataset_ids = []
+    try:
+        capdate_only_dataset_ids = (
+            await superset_client.resolve_dataset_ids(capdate_only_tables)
+            if capdate_only_tables else []
+        )
+    except Exception as e:
+        logger.error(f"Cap-date-only dataset resolution failed: {e}")
+        capdate_only_dataset_ids = []
 
-    for ds_id in dataset_ids:
+    # tenant_code clause: only datasets that actually have a tenant_code column.
+    for ds_id in tenant_dataset_ids:
         rls_rules.append({"dataset": ds_id, "clause": f"tenant_code = '{user_identity}'"})
 
-    # 3b. Optional cap_date RLS rule from the React DateFilterToggle.
-    #     Values are already format-validated by sanitize_date() → safe to inline.
-    #     Single day takes precedence over range when both are sent.
-    cap_clause: str | None = None
+    # 3b. Optional cap_date scoping.
+    #     Validate first (regex + strptime) — these strings are interpolated
+    #     into a SQL clause string sent to Superset. Single day wins over range
+    #     if both are present.
+    cap_date_clause: Optional[str] = None
     if cap_date_eq:
-        cap_clause = f"cap_date = '{cap_date_eq}'"
+        _validate_cap_date(cap_date_eq, "cap_date_eq")
+        cap_date_clause = f"cap_date = '{cap_date_eq}'"
     elif cap_date_from and cap_date_to:
-        cap_clause = f"cap_date BETWEEN '{cap_date_from}' AND '{cap_date_to}'"
-    if cap_clause:
-        for ds_id in dataset_ids:
-            rls_rules.append({"dataset": ds_id, "clause": cap_clause})
+        _validate_cap_date(cap_date_from, "cap_date_from")
+        _validate_cap_date(cap_date_to, "cap_date_to")
+        if cap_date_from > cap_date_to:
+            raise HTTPException(400, detail={"message": "cap_date_from must be <= cap_date_to"})
+        cap_date_clause = f"cap_date >= '{cap_date_from}' AND cap_date <= '{cap_date_to}'"
+
+    # cap_date clause: applies to BOTH the tenant view datasets and the
+    # cap-date-only KPI virtual datasets. Both groups have a cap_date column.
+    if cap_date_clause:
+        for ds_id in tenant_dataset_ids + capdate_only_dataset_ids:
+            rls_rules.append({"dataset": ds_id, "clause": cap_date_clause})
 
     # 4. Get guest token (use numeric Superset ID – see create_guest_token docstring)
     try:
@@ -428,17 +474,38 @@ async def list_dashboard_charts(
     }
 
 
-# ── Available-dates endpoint (drives the React DateFilterToggle dropdown) ────
+# ── Available-dates endpoint (drives the React DateFilterToggle) ────────────
+
+# Map each app dashboard id to the PostgreSQL view whose cap_date column the
+# DateFilterToggle should enumerate. Mirrors TENANT_TABLES but is its own
+# constant so a tenant can have multiple Superset datasets without forcing
+# us to pick one for the date dropdown.
+_DASHBOARD_DATE_VIEW = {
+    "1": "vw_airline_cpi_jy_snapshot",
+    "2": "vw_airline_cpi_pw_snapshot",
+    "3": "vw_cfl_cpi_fjl_snapshot",
+}
+
+# Whitelist of view names we'll ever query from this endpoint. The view name
+# is interpolated into the SQL string (psycopg can't bind identifiers), so
+# this whitelist is the only thing preventing identifier injection if the
+# mapping above is ever extended carelessly.
+_ALLOWED_DATE_VIEWS = set(_DASHBOARD_DATE_VIEW.values())
+
 
 @router.get("/dashboards/{dashboard_id}/available-dates")
 def list_available_dates(
     dashboard_id: str,
-    db: Session = Depends(get_tenant_db),
+    db: Session = Depends(get_db),
     user_identity: str = Depends(get_user_identity),
     user_roles: list[str] = Depends(get_user_roles),
 ):
-    """Return distinct cap_date values (newest first) for the tenant view that
-    backs the given dashboard. Used by the DateFilterToggle's day picker.
+    """Return distinct cap_date values for a dashboard's tenant view, newest first.
+
+    Tenant-scoped: platform admins are rejected (they don't consume tenant
+    dashboards), and a tenant user can only enumerate their own dashboard's
+    dates. The underlying views already filter by tenant_code so we don't add
+    a WHERE clause — but we still gate access at the dashboard level.
     """
     dash = DASHBOARDS.get(dashboard_id)
     if not dash:
@@ -446,7 +513,6 @@ def list_available_dates(
             "message": f"Unknown dashboard_id '{dashboard_id}'. Valid IDs: {list(DASHBOARDS.keys())}",
         })
 
-    # Access control mirrors the guest-token endpoint
     if is_platform_admin(user_identity, user_roles):
         raise HTTPException(403, detail={
             "message": "Platform administrators do not have access to tenant dashboards.",
@@ -456,15 +522,19 @@ def list_available_dates(
             "message": f"Access denied: '{dash['title']}' is restricted to {dash['tenant']} users.",
         })
 
-    view_names = TENANT_TABLES.get(dash["tenant"], [])
-    if not view_names:
-        return {"dashboard_id": dashboard_id, "dates": []}
-    view_name = view_names[0]
+    view_name = _DASHBOARD_DATE_VIEW.get(dashboard_id)
+    if not view_name or view_name not in _ALLOWED_DATE_VIEWS:
+        raise HTTPException(500, detail={"message": f"No date view configured for dashboard '{dashboard_id}'"})
 
-    # View name comes from a hardcoded registry, not user input — safe to inline.
-    rows = db.execute(
-        text(f"SELECT DISTINCT cap_date FROM {view_name} ORDER BY cap_date DESC")
-    ).all()
-    dates = [r[0].isoformat() for r in rows if r[0] is not None]
+    try:
+        rows = db.execute(
+            text(f"SELECT DISTINCT cap_date FROM {view_name} ORDER BY cap_date DESC")
+        ).fetchall()
+    except Exception as e:
+        _log.error(f"[available-dates] query failed on {view_name}: {e}")
+        raise HTTPException(500, detail={"message": f"Could not load available dates: {e}"})
+
+    dates = [r[0].isoformat() if r[0] is not None else None for r in rows]
+    dates = [d for d in dates if d]
 
     return {"dashboard_id": dashboard_id, "dates": dates}

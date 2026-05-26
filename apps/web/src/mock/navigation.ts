@@ -38,6 +38,15 @@ export const navigationItems: NavItem[] = [
     category: 'Modules',
     hideForSuperAdmin: true,
   },
+  {
+    label: 'FJL Pricing Analytics',
+    path: '/dashboards/4',
+    icon: 'TrendingUp',
+    requiredModules: ['cfl_fjl'],
+    requiredRoles: ['TENANT_ADMIN'],
+    category: 'Modules',
+    hideForSuperAdmin: true,
+  },
 
   // ── Analytics ─────────────────────────────
   {
@@ -69,7 +78,7 @@ export const navigationItems: NavItem[] = [
   {
     label: 'Ingestion Runs',
     path: '/admin/ingestion-runs',
-    icon: 'History',
+    icon: 'PlayCircleFilled',
     requiredRoles: ['TENANT_ADMIN'],
     requireSuperAdmin: true,
     category: 'Admin',
@@ -97,7 +106,7 @@ export const navigationItems: NavItem[] = [
   {
     label: 'Ingestion Jobs',
     path: '/ingestion',
-    icon: 'Assignment',
+    icon: 'AssignmentTurnedIn',
     requiredRoles: ['TENANT_ADMIN'],
     requireSuperAdmin: true,
     category: 'Data Ops',

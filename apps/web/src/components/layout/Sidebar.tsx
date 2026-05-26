@@ -16,6 +16,8 @@ import {
   CloudUpload,
   Security, Settings, Description, ViewModule,
   Email,
+  Storage, Schedule, PlayCircleFilled, VpnKey, AssignmentTurnedIn,
+  TrendingUp,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSession } from '../../context/SessionContext';
@@ -32,6 +34,12 @@ const iconMap: Record<string, React.ReactElement> = {
   CloudUpload: <CloudUpload />,
   Security: <Security />, Settings: <Settings />, Description: <Description />,
   Email: <Email />,
+  Storage: <Storage />,
+  Schedule: <Schedule />,
+  PlayCircleFilled: <PlayCircleFilled />,
+  VpnKey: <VpnKey />,
+  AssignmentTurnedIn: <AssignmentTurnedIn />,
+  TrendingUp: <TrendingUp />,
 };
 
 interface SidebarProps {
@@ -48,6 +56,7 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
   const filteredItems = navigationItems.filter(item => {
     if (item.requireSuperAdmin && !isSuperAdmin(session)) return false;
+    if (item.hideForSuperAdmin && isSuperAdmin(session)) return false;
     return hasAccess({
       roles: item.requiredRoles,
       modules: item.requiredModules,
