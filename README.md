@@ -1,129 +1,170 @@
-# RTS CPI — Cost Performance Intelligence
-
-Multi-tenant, compliance-ready cost performance analytics platform for airline and rail freight operations, built on RTS enterprise principles.
-
-## Architecture Overview
-
-CPI follows a microservices architecture orchestrated via Docker Compose. A FastAPI backend enforces PostgreSQL Row-Level Security (RLS) for tenant isolation, exposes a RESTful API consumed by a React/Vite frontend, and delegates analytics to embedded Apache Superset dashboards. RabbitMQ handles asynchronous ingestion jobs; Redis provides caching and session storage.
-
-## Tech Stack
-
-| Layer | Technology | Purpose |
-|---|---|---|
-| API | FastAPI (Python) | REST endpoints, RBAC, RLS enforcement |
-| Frontend | React 18 + Vite | SPA with MUI components |
-| Database | PostgreSQL 16 | System of record, RLS-based multi-tenancy |
-| Analytics | Apache Superset | Embedded dashboards and ad-hoc analysis |
-| Messaging | RabbitMQ | Async job queue (data ingestion, notifications) |
-| Cache | Redis | Caching, rate limiting, session store |
-| Orchestration | Docker Compose | Local and production container orchestration |
-
+# Altitude CPI — Competitor Pricing Intelligence
+> **Revenue Technology Services (RTS)** | Internal Platform | Multi-Tenant SaaS
+Altitude CPI is a pricing analytics platform that ingests competitor fare data for airline and cruise tenants, processes it through automated pipelines, and surfaces insights via interactive Superset dashboards and a React frontend.
+---
+## Architecture
+```
+┌─────────────┐     ┌─────────────┐     ┌──────────────┐
+│  cpi-web     │     │  cpi-api     │     │  cpi-superset │
+│  React/Vite  │────▶│  FastAPI     │────▶│  Apache 3.1   │
+│  :9090       │     │  :8000       │     │  :8088        │
+└─────────────┘     └──────┬───────┘     └──────────────┘
+                           │
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+        ┌──────────┐ ┌──────────┐ ┌──────────┐
+        │ Postgres │ │  Redis   │ │ RabbitMQ │
+        │  :5432   │ │  :6379   │ │  :5672   │
+        └──────────┘ └──────────┘ └──────────┘
+```
+All services run as Docker Compose containers on host **IN1PSDOCKER** (192.168.101.10), bind-mounted to `/home/ankitprajapati/CPI`.
+---
 ## Quick Start
-
 ```bash
-# 1. Clone the repository
-git clone <repo-url> && cd CPI
-
-# 2. Set up environment
-cp .env.example .env
-# Edit .env with your values (see docs/SECRETS.md for guidance)
-
-# 3. Start all services
+# SSH into the host
+ssh ankitprajapati@192.168.101.10
+# Navigate to project
+cd /home/ankitprajapati/CPI
+# Check status of all containers
+docker compose ps
+# Start all services (if stopped)
 docker compose up -d
-
-# 4. Access the application
-# API:       http://localhost:8000
-# Frontend:  http://localhost:5173
-# Superset:  http://localhost:8088
+# Stop all services
+docker compose down
+# View logs (last 50 lines, all services)
+docker compose logs --tail=50
+# View logs for a specific service
+docker compose logs --tail=50 cpi-api-1
+# Restart a single service
+docker compose restart cpi-api-1
+# Rebuild after code changes
+docker compose up -d --build
 ```
-
-## Environment Setup
-
-1. Copy `.env.example` to `.env`.
-2. Replace placeholder values with real credentials (see [docs/SECRETS.md](docs/SECRETS.md) for generation commands).
-3. Never commit `.env` to version control.
-
-### First-boot setup — SMTP encryption key
-
-The `smtp_config` table (introduced in migration 027) stores the SMTP
-password as Fernet ciphertext keyed by `CPI_SMTP_ENCRYPTION_KEY`. Generate
-the key once and place it in `.env` before the admin saves any SMTP
-credentials:
-
+---
+## Services & Access
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| Frontend (Web App) | http://192.168.101.10:9090 | Use login credentials below |
+| API Docs (Swagger) | http://192.168.101.10:8000/docs | Open access |
+| Superset Dashboards | http://192.168.101.10:8088 | admin / admin |
+| RabbitMQ Management | http://192.168.101.10:15672 | guest / guest |
+| PostgreSQL | 192.168.101.10:5432 | User: `cpi` / Pass: `cpi_secret` / DB: `cpi_db` |
+| Redis | 192.168.101.10:6379 | No auth |
+---
+## Application Login Credentials
+The platform uses JWT authentication with bcrypt password hashing. First login forces a mandatory password change. Account lockout activates after repeated failed attempts.
+| Role | Tenant | Email (Login ID) | Password |
+|------|--------|-----------------|----------|
+| Super Admin | — | admin@rts.com | Rtsadmin@123 |
+| Airline | JY | jy@airline.com | JYairline@123 |
+| Airline | PW | pw@airline.com | PWairline@123 |
+| Cruise | FJL | fjl@cruise.com | FJLcruise@123 |
+---
+## Data Ingestion
+### File Naming Conventions
+The ingestion pipeline uses regex-based filename matching. **Files that don't match the exact pattern are silently skipped** — this is the most common failure mode.
+**CPI / Pricing files (xlsx only):**
+| Tenant | Format | Example |
+|--------|--------|---------|
+| JY | `JY_DDMMYY.xlsx` | `JY_051125.xlsx` |
+| PW | `PW_DDMMYY.xlsx` | `PW_051125.xlsx` |
+**Velocity files (csv or xlsx):**
+| Tenant | Format | Example |
+|--------|--------|---------|
+| JY | `JY_VL_DDMMYY.{csv\|xlsx}` | `JY_VL_051125.csv` |
+| PW | `PW_VL_DDMMYY.{csv\|xlsx}` | `PW_VL_051125.xlsx` |
+- Extension is case-insensitive (.csv, .CSV, .xlsx, .XLSX)
+- Prefix must be uppercase (JY_VL_, PW_VL_)
+### SFTP Ingestion Paths
+Files land on the host via SFTP and are picked up by the ingestion pipeline:
+```
+/home/ankitprajapati/CPI/dev-sftp-mount/jy/    ← JY files
+/home/ankitprajapati/CPI/dev-sftp-mount/pw/    ← PW files
+```
+### Triggering Ingestion
+Data ingestion is triggered via the admin UI (login as `admin@rts.com`). The Celery worker (`cpi-worker`) and beat scheduler (`cpi-beat`) handle background processing via RabbitMQ.
+---
+## Project Structure
+```
+CPI/
+├── apps/
+│   ├── api/              # FastAPI backend
+│   │   ├── app/          # Application code
+│   │   │   ├── routers/  # API endpoints
+│   │   │   ├── models/   # SQLAlchemy models
+│   │   │   ├── schemas/  # Pydantic schemas
+│   │   │   └── services/ # Business logic
+│   │   ├── alembic/      # Database migrations
+│   │   └── data/         # Ingestion data directories
+│   └── web/              # React/Vite frontend
+│       └── src/
+│           ├── api/      # API client
+│           ├── components/
+│           └── pages/
+├── infra/
+│   └── superset_config.py  # Superset config (custom color schemes)
+├── nginx/                # Reverse proxy configuration
+├── docker-compose.yml    # Service orchestration
+├── .env                  # Environment variables (secrets)
+└── .gitignore
+```
+---
+## Database
 ```bash
-# Generate inside the running api container (uses the installed cryptography pkg)
-docker exec cpi-api-1 python -c \
-  "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-
-# Then append to .env:
-#   CPI_SMTP_ENCRYPTION_KEY=<the value printed above>
+# Connect to the database
+docker exec -it cpi-postgres-1 psql -U cpi -d cpi_db
+# Run migrations (after code changes)
+docker exec -it cpi-api-1 alembic upgrade head
+# Check current migration version
+docker exec -it cpi-api-1 alembic current
 ```
-
-> **Back this key up.** Losing `CPI_SMTP_ENCRYPTION_KEY` permanently
-> forfeits the ability to decrypt every SMTP password stored under it —
-> the admin would have to delete the `smtp_config` row and re-enter the
-> credentials from scratch. Store it in the same place you keep
-> `POSTGRES_PASSWORD` and `JWT_SECRET_KEY` (password manager / KMS /
-> sealed envelope).
-
-## Authentication
-
-Phase 2 uses real JWT authentication with bcrypt-hashed passwords and forced
-first-login password change. See [docs/AUTH.md](docs/AUTH.md) for the full
-authentication flow, token lifetime, lockout policy, and password requirements.
-
-### Canonical Demo Users
-
-Migration 016 seeds 4 canonical users with temporary passwords. All users
-**must change their password on first login** (12+ chars, mixed case, digit,
-special character).
-
-| Email | Tenant | Temp Password |
-|---|---|---|
-| `admin@rts.com` | `rts` | `admin123` |
-| `jy@airline.com` | `jy` | `airline123` |
-| `pw@airline.com` | `pw` | `airline123` |
-| `fjl@cruise.com` | `fjl` | `cruise123` |
-
+The database uses Row-Level Security (RLS) for tenant data isolation. Each tenant's data is scoped by `airline_code` filters.
+---
+## Superset Dashboards
+Three dashboards are configured:
+| ID | Dashboard | Tenant | Key Feature |
+|----|-----------|--------|-------------|
+| 1 | JY CPI | JY | Ref vs Competitor fare analysis |
+| 2 | FJL CPI | FJL | 4-tab layout (Overview, By Dep/Cap Date, Competitive Monitor) |
+| 3 | PW CPI | PW | 8 charts with custom precisionAir color scheme |
+Superset login: `admin / admin` at http://192.168.101.10:8088
+The custom `precisionAir` color scheme is defined in `infra/superset_config.py` and must not be removed.
+---
+## Troubleshooting
+**Container won't start:**
 ```bash
-# Verify passwords are seeded (idempotent)
-docker compose exec api python scripts/seed_auth_passwords.py
+docker compose logs <service-name>    # Check for errors
+docker compose up -d --build          # Rebuild from source
 ```
-
-RBAC roles available: `TENANT_ADMIN`, `DATA_ENGINEER`, `ANALYST`, `REVENUE_MANAGER`, `AUDITOR`, `AIRLINE_USER`, `CRUISE_USER`.
-
-Default Superset credentials: `admin` / (set in `.env`).
-
-## Module Map
-
-| Module | Path | Description |
-|---|---|---|
-| API core | `apps/api/app/core/` | Configuration, database, RLS middleware |
-| API models | `apps/api/app/models/` | SQLAlchemy models (tenant-scoped) |
-| API routers | `apps/api/app/routers/` | REST endpoints |
-| API schemas | `apps/api/app/schemas/` | Pydantic request/response schemas |
-| API services | `apps/api/app/services/` | Business logic layer |
-| Airline JY/PW | `apps/api/app/routers/` | JY and PW airline cost modules |
-| CFL FJL | `apps/api/app/routers/` | CFL freight journal line ingestion |
-| Frontend | `apps/web/src/` | React SPA (pages, components, hooks) |
-| Ingestion service | `apps/api/app/ingestion/` | Filename parser, two-stage upload service (Phase A overhaul) |
-| Ingestion API | `apps/api/app/api/v1/ingestion.py` | `/api/v1/ingestion/*` upload → validate → commit endpoints |
-| Ingestion staging | `apps/api/data/staging/{job_id}/` | Per-job staged uploads (git-ignored) |
-| Legacy data archive | `apps/api/data/legacy-folder-watch-archive/` | Pre-overhaul folder-watch CSVs preserved for rollback |
-| Infrastructure | `infra/` | DB init scripts, Superset config |
-| Migrations | `apps/api/alembic/` | Alembic database migrations |
-| Scripts | `scripts/` | Utility and seed scripts |
-
-## Documentation
-
-- [MIGRATION_GUIDE.txt](MIGRATION_GUIDE.txt) — Database migration guide
-- [docs/AUTH.md](docs/AUTH.md) — Authentication flow, JWT, lockout, password policy
-- [docs/SECRETS.md](docs/SECRETS.md) — Secrets management and rotation
-- [docs/ingestion-uuid-discovery.md](docs/ingestion-uuid-discovery.md) — Phase A: ingestion overhaul UUID-bug findings + fix
-- [docs/phase-a-schema-verification.txt](docs/phase-a-schema-verification.txt) — Phase A: alembic 018 schema verification snapshot
-- [docs/phase-a-smoke-test-results.md](docs/phase-a-smoke-test-results.md) — Phase A: 10/10 live JY smoke-test results
-- [CONTRIBUTING.md](CONTRIBUTING.md) — Contribution guidelines
-
-## Project Status
-
-**Phase 2 of 7 — Real authentication (JWT + bcrypt) complete.**
+**API returns 500 errors:**
+```bash
+docker exec -it cpi-api-1 /bin/bash   # Enter the container
+cat /tmp/api.log                       # Check application logs
+```
+**Database connection issues:**
+```bash
+docker exec -it cpi-postgres-1 pg_isready -U cpi
+```
+**Ingestion files not processing:**
+1. Verify filename matches the exact pattern (see naming conventions above)
+2. Check the Celery worker logs: `docker compose logs --tail=100 cpi-worker`
+3. Verify RabbitMQ is healthy: http://192.168.101.10:15672
+**Superset dashboard not loading:**
+```bash
+docker compose restart cpi-superset-1
+```
+**Web app shows "unhealthy":**
+This is a known benign issue — the Docker healthcheck probes the wrong internal port. The web app is functional; access it at http://192.168.101.10:9090 to confirm.
+---
+## Source Code
+| Item | Detail |
+|------|--------|
+| Repository | `github.com/cannibal-ak/rts-cpi` (private) |
+| Branch | `master` |
+| Clone | `git clone git@github.com:cannibal-ak/rts-cpi.git` |
+---
+## Configuration
+All runtime configuration is in the `.env` file at the project root. This file is gitignored and contains database credentials, API keys, and service connection strings. **Do not commit `.env` to version control.**
+Key environment variables are consumed by `docker-compose.yml` and passed to the containers at startup.
+---
+*Altitude CPI v2.0 — Revenue Technology Services (RTS) — Internal Use Only*
