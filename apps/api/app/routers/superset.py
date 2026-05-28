@@ -107,8 +107,29 @@ TENANT_TABLES = {
 # is enforced by construction). They get ONLY the cap_date clause — applying
 # the tenant_code clause would error ("column does not exist") because their
 # SELECT does not project tenant_code.
+#
+# IMPORTANT: every dataset a tenant dashboard's charts query must be listed
+# here (or in TENANT_TABLES). The cap_date RLS clause is keyed by dataset id,
+# so any chart whose dataset is missing from these maps will silently ignore
+# the DateFilterToggle's selection and return all dates.
 TENANT_CAPDATE_ONLY_TABLES = {
-    "JY":  ["kpi_jy_cheaper_routes_pct", "kpi_jy_undercut_count"],
+    "JY":  [
+        "kpi_jy_cheaper_routes_pct",
+        "kpi_jy_undercut_count",
+        "jy_all_airlines_fares",
+        "jy_velocity_normalized",
+        "jy_pricing_recommendations",
+    ],
+    "PW":  [
+        "pw_all_carriers_fares",
+        "pw_velocity_normalized",
+    ],
+    "FJL": [
+        "vds_cfl_cheapest_competitor",
+        "FJL Pricing — Fare by Dep Date (Aggregated)",
+        "FJL Pricing — Fare by Cap Date (Aggregated)",
+        "FJL Pricing — Fare Monitor (Row-Level)",
+    ],
 }
 
 
@@ -164,15 +185,22 @@ class SupersetClient:
     # ── Dataset resolution (for RLS) ──
 
     async def resolve_dataset_ids(self, table_names: list[str]) -> list[int]:
-        """Get Superset-internal dataset IDs for the given table/view names."""
+        """Get Superset-internal dataset IDs for the given table/view names.
+
+        Superset's /api/v1/dataset/ paginates with page_size=20 by default, so
+        any dataset beyond the 20th would silently be invisible to the RLS
+        attachment loop. Pass a rison-encoded large page_size to fetch them
+        all in one go — the registry never approaches that count.
+        """
         if not table_names:
             return []
         cookies = await self._session_cookies_safe()
+        url = f"{self.base_url}/api/v1/dataset/?q=(page:0,page_size:1000)"
         async with httpx.AsyncClient(timeout=10.0) as c:
-            resp = await c.get(f"{self.base_url}/api/v1/dataset/", cookies=cookies)
+            resp = await c.get(url, cookies=cookies)
             if resp.status_code == 401:
                 await self._login_session()
-                resp = await c.get(f"{self.base_url}/api/v1/dataset/", cookies=self._session_cookies)
+                resp = await c.get(url, cookies=self._session_cookies)
             resp.raise_for_status()
             all_ds = resp.json().get("result", [])
             return [d["id"] for d in all_ds if d.get("table_name") in table_names]
