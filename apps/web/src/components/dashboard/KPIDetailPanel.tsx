@@ -105,16 +105,11 @@ const COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Competitor', field: 'comp_al' },
     { header: 'Routes', field: 'routes', align: 'right' },
-    { header: 'Avg fare', field: 'avg_fare', align: 'right' },
-    { header: 'Fare gap', field: 'fare_gap', align: 'right', render: fareGapCell },
   ],
   routes_covered: [
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Route', field: 'route' },
     { header: 'Competitors', field: 'competitors', align: 'right' },
-    { header: 'PW avg', field: 'pw_avg', align: 'right' },
-    { header: 'Comp avg', field: 'comp_avg', align: 'right' },
-    { header: 'Gap', field: 'fare_gap', align: 'right', render: fareGapCell },
   ],
   pw_avg_fare: [
     { header: '#', field: 'rank', align: 'right' },
@@ -261,14 +256,24 @@ export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, onClose }
 
         {!loading && !error && (
           <Box sx={{ overflow: 'auto', maxHeight: 320 }}>
-            <Table size="small" stickyHeader>
+            {/* tableLayout:fixed + equal per-cell widths distributes columns
+                evenly across the panel's full width, and `align="center"`
+                here overrides any per-column align in COLUMN_CONFIG so every
+                tenant's detail tables render with the same balanced look. */}
+            <Table size="small" stickyHeader sx={{ tableLayout: 'fixed' }}>
               <TableHead>
                 <TableRow>
                   {cols.map((c) => (
                     <TableCell
                       key={c.header}
-                      align={c.align ?? 'left'}
-                      sx={{ fontSize: 12, fontWeight: 700, color: '#4a6a8a', bgcolor: '#f8fbff', whiteSpace: 'nowrap' }}
+                      align="center"
+                      sx={{
+                        fontSize: 12,
+                        fontWeight: 700,
+                        color: '#4a6a8a',
+                        bgcolor: '#f8fbff',
+                        width: `${100 / cols.length}%`,
+                      }}
                     >
                       {c.header}
                     </TableCell>
@@ -286,7 +291,7 @@ export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, onClose }
                 {rows.map((row, i) => (
                   <TableRow key={i} hover>
                     {cols.map((c) => (
-                      <TableCell key={c.header} align={c.align ?? 'left'} sx={{ fontSize: 13, whiteSpace: 'nowrap' }}>
+                      <TableCell key={c.header} align="center" sx={{ fontSize: 13 }}>
                         {c.render ? c.render(row) : fmt(row[c.field])}
                       </TableCell>
                     ))}
