@@ -9,8 +9,8 @@ import KPIDetailPanel from './KPIDetailPanel';
 // the keys listed here for the matching airline_code.
 const KPI_LAYOUT: Record<string, { order: KpiKey[]; columns: number }> = {
   JY: {
-    order: ['airlines_analyzed', 'markets_covered', 'cheaper_routes_pct', 'undercut_count'],
-    columns: 4,
+    order: ['airlines_analyzed', 'markets_covered', 'jy_avg_fare', 'competitors_avg_fare', 'dep_dates_monitored'],
+    columns: 5,
   },
   PW: {
     order: ['competitors_analyzed', 'routes_covered', 'pw_avg_fare', 'competitors_avg_fare', 'dep_dates_monitored'],
@@ -23,9 +23,7 @@ const KPI_LAYOUT: Record<string, { order: KpiKey[]; columns: number }> = {
 };
 
 // KPIs whose summary value is a fare ⇒ render as $x.xx in the tile.
-const CURRENCY_KEYS = new Set<KpiKey>(['pw_avg_fare', 'competitors_avg_fare', 'fjl_avg_fare']);
-// KPIs rendered as a percentage.
-const PERCENT_KEYS = new Set<KpiKey>(['cheaper_routes_pct']);
+const CURRENCY_KEYS = new Set<KpiKey>(['jy_avg_fare', 'pw_avg_fare', 'competitors_avg_fare', 'fjl_avg_fare']);
 
 export interface KPIRowProps {
   airlineCode: string;
@@ -34,7 +32,7 @@ export interface KPIRowProps {
 
 /**
  * Orchestrates the KPI tile row + expandable detail panel.
- *  - Fetches the 4 summary values on mount and whenever capDate changes.
+ *  - Fetches the airline's KPI summary values on mount and whenever capDate changes.
  *  - Toggle logic: click opens; click the active one closes; click another switches.
  *  - When capDate changes with a panel open, the panel refetches itself
  *    (its effect depends on capDate) so the open detail stays in sync.
@@ -64,7 +62,6 @@ export default function KPIRow({ airlineCode, capDate }: KPIRowProps) {
   };
 
   const formatValue = (key: KpiKey, value: number): string => {
-    if (PERCENT_KEYS.has(key)) return `${value}%`;
     if (CURRENCY_KEYS.has(key)) {
       return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }

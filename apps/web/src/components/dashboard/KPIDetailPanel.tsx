@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Box, Collapse, Paper, Typography, IconButton, CircularProgress, Chip,
+  Box, Collapse, Paper, Typography, IconButton, CircularProgress,
   Table, TableHead, TableBody, TableRow, TableCell,
 } from '@mui/material';
 import { Close } from '@mui/icons-material';
@@ -20,36 +20,18 @@ const TITLES: Partial<Record<KpiKey, string>> = {
   // JY
   airlines_analyzed: 'Airlines Analyzed — competitor breakdown',
   markets_covered: 'Markets Covered — route breakdown',
-  cheaper_routes_pct: 'Cheaper on Routes — fare comparison',
-  undercut_count: 'Undercut Count — where competitors beat JY',
+  jy_avg_fare: 'JY Avg Fare — fare by route',
   // PW
   competitors_analyzed: 'Competitors Analyzed — competitor breakdown',
   routes_covered: 'Routes Covered — route breakdown',
   pw_avg_fare: 'PW Avg Fare — fare by route',
+  // Shared across JY/PW
   competitors_avg_fare: 'Competitors Avg Fare — fare by competitor',
   dep_dates_monitored: 'Dep Dates Monitored — coverage by date',
 };
 
 const fmt = (v: string | number): string =>
   typeof v === 'number' ? v.toLocaleString() : String(v ?? '');
-
-// Δ = JY avg − Comp avg. Negative ⇒ JY cheaper (good ⇒ green); positive ⇒ red.
-const deltaCell = (row: Row): React.ReactNode => {
-  const d = Number(row.delta);
-  const color = d < 0 ? 'success.main' : d > 0 ? 'error.main' : 'text.secondary';
-  return (
-    <Typography component="span" sx={{ fontSize: 13, fontWeight: 600, color }}>
-      {d > 0 ? `+${d.toLocaleString()}` : d.toLocaleString()}
-    </Typography>
-  );
-};
-
-// Gap is always negative for undercuts (comp beat JY) ⇒ red.
-const gapCell = (row: Row): React.ReactNode => (
-  <Typography component="span" sx={{ fontSize: 13, fontWeight: 600, color: 'error.main' }}>
-    {Number(row.gap).toLocaleString()}
-  </Typography>
-);
 
 // PW fare_gap = Comp avg − PW avg. Positive ⇒ PW cheaper than the competitor
 // (good ⇒ green); negative ⇒ competitor undercuts PW (⇒ red).
@@ -60,18 +42,6 @@ const fareGapCell = (row: Row): React.ReactNode => {
     <Typography component="span" sx={{ fontSize: 13, fontWeight: 600, color }}>
       {g > 0 ? `+${g.toLocaleString()}` : g.toLocaleString()}
     </Typography>
-  );
-};
-
-const winnerBadge = (row: Row): React.ReactNode => {
-  const jy = row.winner === 'JY';
-  return (
-    <Chip
-      label={String(row.winner)}
-      size="small"
-      color={jy ? 'success' : 'error'}
-      sx={{ height: 20, fontSize: 11, fontWeight: 700 }}
-    />
   );
 };
 
@@ -86,19 +56,13 @@ const COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
     { header: 'Route', field: 'route' },
     { header: 'Competitors', field: 'competitors', align: 'right' },
   ],
-  cheaper_routes_pct: [
-    { header: 'Route', field: 'route' },
-    { header: 'JY avg', field: 'jy_avg', align: 'right' },
-    { header: 'Comp avg', field: 'comp_avg', align: 'right' },
-    { header: 'Δ', field: 'delta', align: 'right', render: deltaCell },
-    { header: 'Winner', field: 'winner', align: 'center', render: winnerBadge },
-  ],
-  undercut_count: [
+  jy_avg_fare: [
+    { header: '#', field: 'rank', align: 'right' },
     { header: 'Route', field: 'route' },
     { header: 'Competitor', field: 'comp_al' },
-    { header: 'JY avg', field: 'jy_avg', align: 'right' },
-    { header: 'Comp avg', field: 'comp_avg', align: 'right' },
-    { header: 'Gap', field: 'gap', align: 'right', render: gapCell },
+    { header: 'JY Fare', field: 'jy_fare', align: 'right' },
+    { header: 'Comp Fare', field: 'comp_fare', align: 'right' },
+    { header: 'Difference', field: 'difference', align: 'right' },
   ],
   // ── PW ──
   competitors_analyzed: [

@@ -462,10 +462,9 @@ export const mockClient: CpiApiClient = {
       cap_date: capDate,
       airline_code: airlineCode.toUpperCase(),
       kpis: {
-        airlines_analyzed:  { value: 7,  label: 'Airlines Analyzed',   subheader: 'Distinct competitors tracked' },
-        markets_covered:    { value: 16, label: 'Markets Covered',      subheader: 'Origin-destination pairs analyzed' },
-        cheaper_routes_pct: { value: 50, label: 'Cheaper on Routes %',  subheader: 'Routes where JY is cheaper' },
-        undercut_count:     { value: 28, label: 'Undercut Count',       subheader: 'Route-competitor pairs beating JY' },
+        airlines_analyzed:  { value: 7,      label: 'Airlines Analyzed',    subheader: 'Distinct competitors tracked' },
+        markets_covered:    { value: 16,     label: 'Markets Covered',      subheader: 'Origin-destination pairs analyzed' },
+        jy_avg_fare:        { value: 266.18, label: 'JY Avg Fare',          subheader: 'Average JY fare across all routes' },
         // PW
         competitors_analyzed: { value: 4,      label: 'Competitors Analyzed',   subheader: 'Distinct competitors tracked' },
         routes_covered:       { value: 7,      label: 'Routes Covered',          subheader: 'Origin-destination pairs analyzed' },
@@ -489,13 +488,9 @@ export const mockClient: CpiApiClient = {
           columns: ['#', 'Route', 'Competitors', 'JY avg fare'],
           rows: [{ rank: 1, route: 'ANU → EIS', competitors: 4, jy_avg: 341 }],
         },
-        cheaper_routes_pct: {
-          columns: ['Route', 'JY avg', 'Comp avg', 'Δ', 'Winner'],
-          rows: [{ route: 'PLS → STI', jy_avg: 61, comp_avg: 336, delta: -276, winner: 'JY' }],
-        },
-        undercut_count: {
-          columns: ['Route', 'Competitor', 'JY avg', 'Comp avg', 'Gap'],
-          rows: [{ route: 'ANU → EIS', comp_al: 'BW', jy_avg: 311, comp_avg: 0, gap: -311 }],
+        jy_avg_fare: {
+          columns: ['#', 'Route', 'Competitor', 'JY Fare', 'Comp Fare', 'Difference'],
+          rows: [{ rank: 1, route: 'BGI-ANU', comp_al: 'S6', jy_fare: 381, comp_fare: 0, difference: 381 }],
         },
         // PW
         competitors_analyzed: {

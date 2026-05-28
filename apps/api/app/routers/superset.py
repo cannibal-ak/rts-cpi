@@ -114,8 +114,6 @@ TENANT_TABLES = {
 # the DateFilterToggle's selection and return all dates.
 TENANT_CAPDATE_ONLY_TABLES = {
     "JY":  [
-        "kpi_jy_cheaper_routes_pct",
-        "kpi_jy_undercut_count",
         "jy_all_airlines_fares",
         "jy_velocity_normalized",
         "jy_pricing_recommendations",

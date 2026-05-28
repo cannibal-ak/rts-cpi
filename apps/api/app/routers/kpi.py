@@ -5,12 +5,12 @@ Each tenant's KPI summary values AND their per-tile detail tables are computed
 here so they stay in sync with each other and respond to the Cap Date picker —
 previously the summary tiles were Superset big-number charts.
 
-Scope: JY and PW. Both use the same view schema but expose a *different* set
-of KPIs (JY: airlines/markets/cheaper%/undercut; PW: competitors/routes/avg
-fares/dep dates), so the KPI keys, SQL, meta and detail builders are kept in a
-per-airline registry (AIRLINE_CFG). The cruise/ferry (FJL) view has a different
-fare schema entirely and is intentionally not exposed; anything not in the
-registry returns 422.
+Scope: JY and PW. Both use the same view schema and now expose the same set
+of 5 KPIs each (airlines/competitors, markets/routes, own avg fare, competitors
+avg fare, dep dates) — JY and PW differ only in label wording. The KPI keys,
+SQL, meta and detail builders are kept in a per-airline registry (AIRLINE_CFG).
+The cruise/ferry (FJL) view has a different fare schema entirely and is
+intentionally not exposed; anything not in the registry returns 422.
 
 Security:
   * Tenant isolation is identity-based, mirroring superset.py. Platform (RTS)
@@ -78,43 +78,34 @@ def _summary_sql_jy(view: str) -> dict[str, str]:
             FROM {view}
             WHERE cap_date = :cap_date
         """,
-        "cheaper_routes_pct": f"""
-            WITH route_avg AS (
-              SELECT ref_org || '-' || ref_dst AS route,
-                     AVG(ref_tot_fare) AS jy_avg,
-                     AVG(comp_tot_fare) AS comp_avg
-              FROM {view}
-              WHERE cap_date = :cap_date
-              GROUP BY ref_org || '-' || ref_dst
-            )
-            SELECT ROUND(
-              COUNT(*) FILTER (WHERE jy_avg < comp_avg) * 100.0
-              / NULLIF(COUNT(*), 0)
-            , 0)
-            FROM route_avg
+        "jy_avg_fare": f"""
+            SELECT ROUND(AVG(ref_tot_fare)::numeric, 2)
+            FROM {view}
+            WHERE cap_date = :cap_date
         """,
-        "undercut_count": f"""
-            WITH route_comp_avg AS (
-              SELECT ref_org || '-' || ref_dst AS route, comp_al,
-                     AVG(ref_tot_fare) AS jy_avg,
-                     AVG(comp_tot_fare) AS comp_avg
-              FROM {view}
-              WHERE cap_date = :cap_date
-              GROUP BY ref_org || '-' || ref_dst, comp_al
-            )
-            SELECT COUNT(*)
-            FROM route_comp_avg
-            WHERE comp_avg < jy_avg
+        "competitors_avg_fare": f"""
+            SELECT ROUND(AVG(comp_tot_fare)::numeric, 2)
+            FROM {view}
+            WHERE cap_date = :cap_date
+        """,
+        "dep_dates_monitored": f"""
+            SELECT COUNT(DISTINCT ref_dep_date)
+            FROM {view}
+            WHERE cap_date = :cap_date
         """,
     }
 
 
 _JY_KPI_META = {
-    "airlines_analyzed": {"label": "Airlines Analyzed", "subheader": "Distinct competitors tracked"},
-    "markets_covered":   {"label": "Markets Covered", "subheader": "Origin-destination pairs analyzed"},
-    "cheaper_routes_pct": {"label": "Cheaper on Routes %", "subheader": "Routes where JY is cheaper"},
-    "undercut_count":    {"label": "Undercut Count", "subheader": "Route-competitor pairs beating JY"},
+    "airlines_analyzed":    {"label": "Airlines Analyzed",    "subheader": "Distinct competitors tracked"},
+    "markets_covered":      {"label": "Markets Covered",      "subheader": "Origin-destination pairs analyzed"},
+    "jy_avg_fare":          {"label": "JY Avg Fare",          "subheader": "Average JY fare across all routes"},
+    "competitors_avg_fare": {"label": "Competitors Avg Fare", "subheader": "Average competitor fare across all routes"},
+    "dep_dates_monitored":  {"label": "Dep Dates Monitored",  "subheader": "Future travel dates with pricing data"},
 }
+
+# Summary values returned as floats (2dp); everything else is an int.
+_JY_FLOAT_KEYS = frozenset({"jy_avg_fare", "competitors_avg_fare"})
 
 
 def _detail_jy_airlines(db: Session, view: str, cap_date: str) -> dict[str, Any]:
@@ -153,48 +144,70 @@ def _detail_jy_markets(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     }
 
 
-def _detail_jy_cheaper(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_jy_jy_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     rows = db.execute(text(f"""
-        SELECT ref_org || ' → ' || ref_dst AS route,
-               ROUND(AVG(ref_tot_fare)::numeric, 0) AS jy_avg,
-               ROUND(AVG(comp_tot_fare)::numeric, 0) AS comp_avg,
-               ROUND((AVG(ref_tot_fare) - AVG(comp_tot_fare))::numeric, 0) AS delta,
-               CASE WHEN AVG(ref_tot_fare) < AVG(comp_tot_fare)
-                    THEN 'JY' ELSE 'Comp' END AS winner
+        SELECT ref_org || '-' || ref_dst AS route,
+               comp_al,
+               ROUND(AVG(ref_tot_fare)::numeric, 0) AS jy_fare,
+               ROUND(AVG(comp_tot_fare)::numeric, 0) AS comp_fare,
+               ROUND((AVG(ref_tot_fare) - AVG(comp_tot_fare))::numeric, 0) AS difference
         FROM {view}
         WHERE cap_date = :cap_date
-        GROUP BY ref_org, ref_dst
-        ORDER BY delta ASC
+        GROUP BY ref_org, ref_dst, comp_al
+        ORDER BY jy_fare DESC
+        LIMIT 50
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["Route", "JY avg", "Comp avg", "Δ", "Winner"],
+        "columns": ["#", "Route", "Competitor", "JY Fare", "Comp Fare", "Difference"],
         "rows": [
-            {"route": r[0], "jy_avg": _i(r[1]), "comp_avg": _i(r[2]),
-             "delta": _i(r[3]), "winner": r[4]}
-            for r in rows
+            {"rank": i, "route": r[0], "comp_al": r[1], "jy_fare": _i(r[2]),
+             "comp_fare": _i(r[3]), "difference": _i(r[4])}
+            for i, r in enumerate(rows, start=1)
         ],
     }
 
 
-def _detail_jy_undercut(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_jy_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     rows = db.execute(text(f"""
-        SELECT ref_org || ' → ' || ref_dst AS route,
-               comp_al,
-               ROUND(AVG(ref_tot_fare)::numeric, 0) AS jy_avg,
-               ROUND(AVG(comp_tot_fare)::numeric, 0) AS comp_avg,
-               ROUND((AVG(comp_tot_fare) - AVG(ref_tot_fare))::numeric, 0) AS gap
+        SELECT comp_al,
+               ROUND(AVG(comp_tot_fare)::numeric, 0) AS avg_fare,
+               ROUND(MIN(comp_tot_fare)::numeric, 0) AS min_fare,
+               ROUND(MAX(comp_tot_fare)::numeric, 0) AS max_fare,
+               COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
         FROM {view}
         WHERE cap_date = :cap_date
-        GROUP BY ref_org, ref_dst, comp_al
-        HAVING AVG(comp_tot_fare) < AVG(ref_tot_fare)
-        ORDER BY gap ASC
+        GROUP BY comp_al
+        ORDER BY avg_fare DESC
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["Route", "Competitor", "JY avg", "Comp avg", "Gap"],
+        "columns": ["#", "Competitor", "Avg Fare", "Min Fare", "Max Fare", "Routes"],
         "rows": [
-            {"route": r[0], "comp_al": r[1], "jy_avg": _i(r[2]),
-             "comp_avg": _i(r[3]), "gap": _i(r[4])}
-            for r in rows
+            {"rank": i, "comp_al": r[0], "avg_fare": _i(r[1]),
+             "min_fare": _i(r[2]), "max_fare": _i(r[3]), "routes": _i(r[4])}
+            for i, r in enumerate(rows, start=1)
+        ],
+    }
+
+
+def _detail_jy_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+    rows = db.execute(text(f"""
+        SELECT ref_dep_date,
+               COUNT(*) AS records,
+               COUNT(DISTINCT comp_al) AS competitors,
+               COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
+        FROM {view}
+        WHERE cap_date = :cap_date
+        GROUP BY ref_dep_date
+        ORDER BY ref_dep_date DESC
+        LIMIT 50
+    """), {"cap_date": cap_date}).fetchall()
+    return {
+        "columns": ["#", "Dep Date", "Records", "Competitors", "Routes"],
+        "rows": [
+            {"rank": i,
+             "ref_dep_date": r[0].isoformat() if r[0] is not None else "",
+             "records": _i(r[1]), "competitors": _i(r[2]), "routes": _i(r[3])}
+            for i, r in enumerate(rows, start=1)
         ],
     }
 
@@ -538,12 +551,13 @@ AIRLINE_CFG: dict[str, dict[str, Any]] = {
         "view": "vw_airline_cpi_jy_snapshot",
         "summary_sql": _summary_sql_jy,
         "meta": _JY_KPI_META,
-        "float_keys": frozenset(),
+        "float_keys": _JY_FLOAT_KEYS,
         "details": {
             "airlines_analyzed": _detail_jy_airlines,
             "markets_covered": _detail_jy_markets,
-            "cheaper_routes_pct": _detail_jy_cheaper,
-            "undercut_count": _detail_jy_undercut,
+            "jy_avg_fare": _detail_jy_jy_fare,
+            "competitors_avg_fare": _detail_jy_comp_fare,
+            "dep_dates_monitored": _detail_jy_dep_dates,
         },
     },
     "PW": {
