@@ -85,7 +85,6 @@ const COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Route', field: 'route' },
     { header: 'Competitors', field: 'competitors', align: 'right' },
-    { header: 'JY avg fare', field: 'jy_avg', align: 'right' },
   ],
   cheaper_routes_pct: [
     { header: 'Route', field: 'route' },

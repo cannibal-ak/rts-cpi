@@ -138,17 +138,16 @@ def _detail_jy_airlines(db: Session, view: str, cap_date: str) -> dict[str, Any]
 def _detail_jy_markets(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT ref_org || ' → ' || ref_dst AS route,
-               COUNT(DISTINCT comp_al) AS competitors,
-               ROUND(AVG(ref_tot_fare)::numeric, 0) AS jy_avg
+               COUNT(DISTINCT comp_al) AS competitors
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY ref_org, ref_dst
         ORDER BY competitors DESC, route
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Route", "Competitors", "JY avg fare"],
+        "columns": ["#", "Route", "Competitors"],
         "rows": [
-            {"rank": i, "route": r[0], "competitors": _i(r[1]), "jy_avg": _i(r[2])}
+            {"rank": i, "route": r[0], "competitors": _i(r[1])}
             for i, r in enumerate(rows, start=1)
         ],
     }
