@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import {
   Box, Paper, IconButton, Typography, Fade, Chip, Tooltip,
   ToggleButton, ToggleButtonGroup, useMediaQuery,
+  FormControl, Select, MenuItem,
 } from '@mui/material';
 import {
   ArrowBack, Flight, DirectionsBoat, CalendarMonth, Refresh,
@@ -25,7 +26,7 @@ import KPIRow from '../../components/dashboard/KPIRow';
  * The SDK creates:  {SUPERSET_URL}/embedded/{embedded_uuid}?uiConfig=...&show_filters=1&expand_filters=1
  * That endpoint renders the dashboard canvas only (no Superset nav/menu).
  */
-const SUPERSET_URL = 'http://192.168.101.10:8088';
+const SUPERSET_URL = (import.meta.env.VITE_SUPERSET_URL as string) || `https://${window.location.hostname}:8488`;
 
 // Dashboard metadata (must match backend DASHBOARDS registry)
 const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline: boolean; freshnessDomain: string }> = {
@@ -80,6 +81,11 @@ export default function DashboardViewerPage() {
   const [dateFilter, setDateFilter] = useState<DashboardDateFilter>({ mode: 'single' });
   const dateFilterRef = useRef<DashboardDateFilter>(dateFilter);
   useEffect(() => { dateFilterRef.current = dateFilter; }, [dateFilter]);
+
+  // FJL KPIs are computed within a single currency at a time (raw rows span
+  // EUR/DKK/NOK across regional sites). NOK is the default since Fjord Line
+  // is Norwegian. JY/PW have no currency dimension and ignore this state.
+  const [fjlCurrency, setFjlCurrency] = useState<'NOK' | 'EUR' | 'DKK'>('NOK');
 
   const meta = id ? DASHBOARD_META[id] : undefined;
 
@@ -370,26 +376,54 @@ export default function DashboardViewerPage() {
         flexGrow: 1,
         minHeight: 0,
       }}>
-        {/* Date filter bar — drives cap_date RLS on every chart in this dashboard */}
-        <Box sx={{ mb: 0.5 }}>
+        {/* Date filter bar — drives cap_date RLS on every chart in this dashboard.
+            For FJL, a Currency dropdown sits to the right of the date toggle and
+            is threaded into KPIRow so the tiles stay within a single currency. */}
+        <Box sx={{ mb: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>
           <DateFilterToggle
             availableDates={availableDates}
             value={dateFilter}
             onChange={handleDateFilterChange}
             disabled={datesLoading || availableDates.length === 0}
           />
+          <Box sx={{ flexGrow: 1 }} />
+          {meta?.tenant === 'FJL' && (
+            <FormControl size="small" sx={{ ml: 1.5, minWidth: 88 }}>
+              {/* No floating <InputLabel> here — at size="small" with the
+                  outlined variant it tends to clip the notch and visually
+                  push into the row above. renderValue keeps the control
+                  self-describing ("Currency: NOK") without the label. */}
+              <Select
+                value={fjlCurrency}
+                onChange={(e) => setFjlCurrency(e.target.value as 'NOK' | 'EUR' | 'DKK')}
+                renderValue={(v) => `Currency: ${v}`}
+                inputProps={{ 'aria-label': 'Currency' }}
+                sx={{
+                  fontSize: 13,
+                  height: 32,
+                  '& .MuiSelect-select': { py: '6px', pl: 1.25, pr: '24px !important' },
+                }}
+              >
+                <MenuItem value="NOK" sx={{ fontSize: 13 }}>NOK</MenuItem>
+                <MenuItem value="EUR" sx={{ fontSize: 13 }}>EUR</MenuItem>
+                <MenuItem value="DKK" sx={{ fontSize: 13 }}>DKK</MenuItem>
+              </Select>
+            </FormControl>
+          )}
         </Box>
 
-        {/* KPI row — CPI-rendered tiles + click-to-expand detail (JY + PW).
+        {/* KPI row — CPI-rendered tiles + click-to-expand detail (JY + PW + FJL).
             These replace the Superset big-number tiles so the values and their
             drill-downs share a single source of truth and respond to the Cap
             Date picker above. The KPI set is per-airline (see KPIRow).
             cap_date: single-day uses the picked day; range uses the window's
-            end (most recent) day, since the KPI queries are single-day. */}
+            end (most recent) day, since the KPI queries are single-day.
+            currency: only meaningful for FJL; JY/PW ignore it server-side. */}
         {(meta?.tenant === 'JY' || meta?.tenant === 'PW' || meta?.tenant === 'FJL') && (
           <KPIRow
             airlineCode={meta.tenant}
             capDate={(dateFilter.mode === 'single' ? dateFilter.capDateEq : dateFilter.capDateTo) ?? ''}
+            currency={meta.tenant === 'FJL' ? fjlCurrency : undefined}
           />
         )}
 

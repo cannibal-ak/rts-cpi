@@ -225,14 +225,6 @@ export default function DateFilterToggle({
           </Stack>
         )}
 
-        <Box flexGrow={1} />
-        <Typography color="text.secondary" sx={{ whiteSpace: 'nowrap', fontSize: 11 }}>
-          {value.mode === 'single'
-            ? value.capDateEq ? `Showing: ${value.capDateEq}` : 'Pick a date'
-            : value.capDateFrom && value.capDateTo
-              ? `Showing: ${value.capDateFrom} → ${value.capDateTo}`
-              : 'Pick a range'}
-        </Typography>
       </Stack>
     </Box>
   );

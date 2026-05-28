@@ -62,6 +62,26 @@ def _f(value: Any) -> float:
     return float(value) if value is not None else 0.0
 
 
+# FJL data spans three regional Color Line / Fjord Line sites, each publishing
+# in its local currency. Without a currency filter, fare averages mix EUR/DKK/
+# NOK (~8x apart) and counts triple because every route/competitor/date
+# appears once per currency. JY/PW have no equivalent dimension.
+_FJL_CURRENCIES = frozenset({"NOK", "EUR", "DKK"})
+_FJL_DEFAULT_CURRENCY = "NOK"
+
+
+def _resolve_currency(code: str, currency: str | None) -> str | None:
+    """For FJL: default to NOK and validate. For others: ignore (return None)."""
+    if code != "FJL":
+        return None
+    resolved = (currency or _FJL_DEFAULT_CURRENCY).upper()
+    if resolved not in _FJL_CURRENCIES:
+        raise HTTPException(422, detail={
+            "message": f"Invalid currency '{currency}'. Allowed: {sorted(_FJL_CURRENCIES)}",
+        })
+    return resolved
+
+
 # ════════════════════════════════════════════════════════════
 #  JY KPIs
 # ════════════════════════════════════════════════════════════
@@ -108,7 +128,7 @@ _JY_KPI_META = {
 _JY_FLOAT_KEYS = frozenset({"jy_avg_fare", "competitors_avg_fare"})
 
 
-def _detail_jy_airlines(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_jy_airlines(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT comp_al,
                COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
@@ -126,7 +146,7 @@ def _detail_jy_airlines(db: Session, view: str, cap_date: str) -> dict[str, Any]
     }
 
 
-def _detail_jy_markets(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_jy_markets(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT ref_org || ' → ' || ref_dst AS route,
                COUNT(DISTINCT comp_al) AS competitors
@@ -144,7 +164,7 @@ def _detail_jy_markets(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     }
 
 
-def _detail_jy_jy_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_jy_jy_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT ref_org || '-' || ref_dst AS route,
                comp_al,
@@ -167,7 +187,7 @@ def _detail_jy_jy_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     }
 
 
-def _detail_jy_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_jy_comp_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT comp_al,
                ROUND(AVG(comp_tot_fare)::numeric, 0) AS avg_fare,
@@ -189,7 +209,7 @@ def _detail_jy_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, Any
     }
 
 
-def _detail_jy_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_jy_dep_dates(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT ref_dep_date,
                COUNT(DISTINCT comp_al) AS competitors,
@@ -257,7 +277,7 @@ _PW_KPI_META = {
 _PW_FLOAT_KEYS = frozenset({"pw_avg_fare", "competitors_avg_fare"})
 
 
-def _detail_pw_competitors(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_pw_competitors(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT comp_al,
                COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes,
@@ -278,7 +298,7 @@ def _detail_pw_competitors(db: Session, view: str, cap_date: str) -> dict[str, A
     }
 
 
-def _detail_pw_routes(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_pw_routes(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT ref_org || ' → ' || ref_dst AS route,
                COUNT(DISTINCT comp_al) AS competitors,
@@ -300,7 +320,7 @@ def _detail_pw_routes(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     }
 
 
-def _detail_pw_pw_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_pw_pw_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT ref_org || ' → ' || ref_dst AS route,
                ROUND(AVG(ref_tot_fare)::numeric, 0) AS avg_fare,
@@ -321,7 +341,7 @@ def _detail_pw_pw_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     }
 
 
-def _detail_pw_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_pw_comp_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT comp_al,
                ROUND(AVG(comp_tot_fare)::numeric, 0) AS avg_fare,
@@ -343,7 +363,7 @@ def _detail_pw_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, Any
     }
 
 
-def _detail_pw_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_pw_dep_dates(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT ref_dep_date,
                COUNT(DISTINCT comp_al) AS competitors,
@@ -380,8 +400,8 @@ def _detail_pw_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any
 # (total / per-pax / vehicle / cabin). "FJL's own" rows are the fjordline.com
 # variants (nb/dk/de); everything else is a competitor — detected with
 # strpos(lower(source), 'fjordline') (there is no single own-source value).
-# NOTE: total_fare blends currencies (EUR/DKK/NOK) across sources, so the fare
-# averages are intentionally currency-mixed, mirroring the raw data.
+# Every SQL filters by :currency so fare averages stay within one currency and
+# counts don't multiply by the number of currencies present.
 
 
 def _summary_sql_fjl(view: str) -> dict[str, str]:
@@ -390,29 +410,34 @@ def _summary_sql_fjl(view: str) -> dict[str, str]:
             SELECT COUNT(DISTINCT source)
             FROM {view}
             WHERE cap_date = :cap_date
+              AND curr_code = :currency
               AND strpos(lower(source), 'fjordline') = 0
         """,
         "routes_covered": f"""
             SELECT COUNT(DISTINCT org || '-' || dest)
             FROM {view}
             WHERE cap_date = :cap_date
+              AND curr_code = :currency
         """,
         "fjl_avg_fare": f"""
             SELECT ROUND(AVG(total_fare)::numeric, 2)
             FROM {view}
             WHERE cap_date = :cap_date
+              AND curr_code = :currency
               AND strpos(lower(source), 'fjordline') > 0
         """,
         "competitors_avg_fare": f"""
             SELECT ROUND(AVG(total_fare)::numeric, 2)
             FROM {view}
             WHERE cap_date = :cap_date
+              AND curr_code = :currency
               AND strpos(lower(source), 'fjordline') = 0
         """,
         "dep_dates_monitored": f"""
             SELECT COUNT(DISTINCT out_dep_date)
             FROM {view}
             WHERE cap_date = :cap_date
+              AND curr_code = :currency
         """,
     }
 
@@ -429,16 +454,17 @@ _FJL_KPI_META = {
 _FJL_FLOAT_KEYS = frozenset({"fjl_avg_fare", "competitors_avg_fare"})
 
 
-def _detail_fjl_competitors(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_fjl_competitors(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT source,
                COUNT(DISTINCT org || '-' || dest) AS routes
         FROM {view}
         WHERE cap_date = :cap_date
+          AND curr_code = :currency
           AND strpos(lower(source), 'fjordline') = 0
         GROUP BY source
         ORDER BY routes DESC, source
-    """), {"cap_date": cap_date}).fetchall()
+    """), {"cap_date": cap_date, "currency": currency}).fetchall()
     return {
         "columns": ["#", "Competitor", "Routes"],
         "rows": [
@@ -448,15 +474,16 @@ def _detail_fjl_competitors(db: Session, view: str, cap_date: str) -> dict[str, 
     }
 
 
-def _detail_fjl_routes(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_fjl_routes(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT org || ' → ' || dest AS route,
                COUNT(DISTINCT source) AS competitors
         FROM {view}
         WHERE cap_date = :cap_date
+          AND curr_code = :currency
         GROUP BY org, dest
         ORDER BY competitors DESC, route
-    """), {"cap_date": cap_date}).fetchall()
+    """), {"cap_date": cap_date, "currency": currency}).fetchall()
     return {
         "columns": ["#", "Route", "Competitors"],
         "rows": [
@@ -466,7 +493,7 @@ def _detail_fjl_routes(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     }
 
 
-def _detail_fjl_avg_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_fjl_avg_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT org || ' → ' || dest AS route,
                source,
@@ -476,9 +503,10 @@ def _detail_fjl_avg_fare(db: Session, view: str, cap_date: str) -> dict[str, Any
                ROUND(AVG(out_cab_fare)::numeric, 2) AS cab_fare
         FROM {view}
         WHERE cap_date = :cap_date
+          AND curr_code = :currency
         GROUP BY org, dest, source
         ORDER BY total_fare DESC
-    """), {"cap_date": cap_date}).fetchall()
+    """), {"cap_date": cap_date, "currency": currency}).fetchall()
     return {
         "columns": ["#", "Route", "Competitor", "Total Fare", "Pax Fare", "Vehicle Fare", "Cabin Fare"],
         "rows": [
@@ -489,7 +517,7 @@ def _detail_fjl_avg_fare(db: Session, view: str, cap_date: str) -> dict[str, Any
     }
 
 
-def _detail_fjl_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_fjl_comp_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT source,
                ROUND(AVG(total_fare)::numeric, 2) AS avg_total,
@@ -498,10 +526,11 @@ def _detail_fjl_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, An
                ROUND(AVG(out_cab_fare)::numeric, 2) AS avg_cabin
         FROM {view}
         WHERE cap_date = :cap_date
+          AND curr_code = :currency
           AND strpos(lower(source), 'fjordline') = 0
         GROUP BY source
         ORDER BY avg_total ASC
-    """), {"cap_date": cap_date}).fetchall()
+    """), {"cap_date": cap_date, "currency": currency}).fetchall()
     return {
         "columns": ["#", "Competitor", "Avg Total", "Avg Pax", "Avg Vehicle", "Avg Cabin"],
         "rows": [
@@ -512,16 +541,17 @@ def _detail_fjl_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, An
     }
 
 
-def _detail_fjl_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any]:
+def _detail_fjl_dep_dates(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT out_dep_date,
                COUNT(DISTINCT source) AS competitors,
                COUNT(DISTINCT org || '-' || dest) AS routes
         FROM {view}
         WHERE cap_date = :cap_date
+          AND curr_code = :currency
         GROUP BY out_dep_date
         ORDER BY out_dep_date
-    """), {"cap_date": cap_date}).fetchall()
+    """), {"cap_date": cap_date, "currency": currency}).fetchall()
     return {
         "columns": ["#", "Departure Date", "Competitors", "Routes"],
         "rows": [
@@ -611,6 +641,7 @@ def _resolve_cfg(
 def get_kpi_summary(
     airline_code: str,
     cap_date: str = Query(..., description="YYYY-MM-DD"),
+    currency: str | None = Query(None, description="FJL only: NOK | EUR | DKK (default NOK)"),
     db: Session = Depends(get_db),
     user_identity: str = Depends(get_user_identity),
     user_roles: list[str] = Depends(get_user_roles),
@@ -618,15 +649,19 @@ def get_kpi_summary(
     """Return all KPI summary values for one cap_date."""
     code, cfg = _resolve_cfg(airline_code, user_identity, user_roles)
     _validate_cap_date(cap_date)
+    resolved_currency = _resolve_currency(code, currency)
 
     view = cfg["view"]
     meta = cfg["meta"]
     float_keys = cfg["float_keys"]
     sql = cfg["summary_sql"](view)
+    params: dict[str, Any] = {"cap_date": cap_date}
+    if resolved_currency is not None:
+        params["currency"] = resolved_currency
     kpis: dict[str, Any] = {}
     try:
         for key, query in sql.items():
-            scalar = db.execute(text(query), {"cap_date": cap_date}).scalar()
+            scalar = db.execute(text(query), params).scalar()
             kpis[key] = {
                 "value": _f(scalar) if key in float_keys else _i(scalar),
                 "label": meta[key]["label"],
@@ -638,7 +673,12 @@ def get_kpi_summary(
         _log.error(f"[kpi] summary query failed ({code}, {cap_date}): {e}")
         raise HTTPException(500, detail={"message": "Could not compute KPI summary"})
 
-    return {"cap_date": cap_date, "airline_code": code, "kpis": kpis}
+    return {
+        "cap_date": cap_date,
+        "airline_code": code,
+        "currency": resolved_currency,
+        "kpis": kpis,
+    }
 
 
 @router.get("/{airline_code}/detail/{kpi_key}")
@@ -646,6 +686,7 @@ def get_kpi_detail(
     airline_code: str,
     kpi_key: str,
     cap_date: str = Query(..., description="YYYY-MM-DD"),
+    currency: str | None = Query(None, description="FJL only: NOK | EUR | DKK (default NOK)"),
     db: Session = Depends(get_db),
     user_identity: str = Depends(get_user_identity),
     user_roles: list[str] = Depends(get_user_roles),
@@ -658,9 +699,10 @@ def get_kpi_detail(
             "message": f"Invalid kpi_key '{kpi_key}'. Valid keys: {list(builders)}",
         })
     _validate_cap_date(cap_date)
+    resolved_currency = _resolve_currency(code, currency)
 
     try:
-        result = builders[kpi_key](db, cfg["view"], cap_date)
+        result = builders[kpi_key](db, cfg["view"], cap_date, resolved_currency)
     except HTTPException:
         raise
     except Exception as e:
@@ -670,6 +712,7 @@ def get_kpi_detail(
     return {
         "cap_date": cap_date,
         "airline_code": code,
+        "currency": resolved_currency,
         "kpi_key": kpi_key,
         "columns": result["columns"],
         "rows": result["rows"],

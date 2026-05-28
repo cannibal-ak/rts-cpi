@@ -90,12 +90,14 @@ export interface KpiSummaryItem {
 export interface KpiSummaryResponse {
   cap_date: string;
   airline_code: string;
+  currency: string | null;   // null for JY/PW; "NOK" | "EUR" | "DKK" for FJL
   kpis: Record<KpiKey, KpiSummaryItem>;
 }
 
 export interface KpiDetailResponse {
   cap_date: string;
   airline_code: string;
+  currency: string | null;
   kpi_key: KpiKey;
   columns: string[];
   rows: Array<Record<string, string | number>>;
@@ -210,8 +212,8 @@ export interface CpiApiClient {
     getDashboardCharts(dashboardId: string): Promise<DashboardChartsResponse>;
   };
   kpi: {
-    getSummary(airlineCode: string, capDate: string): Promise<KpiSummaryResponse>;
-    getDetail(airlineCode: string, kpiKey: KpiKey, capDate: string): Promise<KpiDetailResponse>;
+    getSummary(airlineCode: string, capDate: string, currency?: string): Promise<KpiSummaryResponse>;
+    getDetail(airlineCode: string, kpiKey: KpiKey, capDate: string, currency?: string): Promise<KpiDetailResponse>;
   };
   ingestion: {
     listJobs(q?: JobQuery): Promise<Paginated<IngestionJob>>;

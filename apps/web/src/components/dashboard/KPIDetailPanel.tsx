@@ -146,6 +146,7 @@ export interface KPIDetailPanelProps {
   kpiKey: KpiKey | null;        // null ⇒ panel collapsed/hidden
   airlineCode: string;
   capDate: string;
+  currency?: string;            // FJL only — passed through to the API + shown in header
   onClose: () => void;
 }
 
@@ -154,7 +155,7 @@ export interface KPIDetailPanelProps {
  * key OR the cap date changes (so the Cap Date picker refreshes an open
  * panel). Animates open/close via MUI Collapse.
  */
-export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, onClose }: KPIDetailPanelProps) {
+export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, currency, onClose }: KPIDetailPanelProps) {
   const [data, setData] = useState<KpiDetailResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -164,14 +165,14 @@ export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, onClose }
     let cancelled = false;
     setLoading(true);
     setError(null);
-    api.kpi.getDetail(airlineCode, kpiKey, capDate)
+    api.kpi.getDetail(airlineCode, kpiKey, capDate, currency)
       .then((res) => { if (!cancelled) setData(res); })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load detail');
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [kpiKey, airlineCode, capDate]);
+  }, [kpiKey, airlineCode, capDate, currency]);
 
   const isFjl = airlineCode.toUpperCase() === 'FJL';
   const titles = isFjl ? FJL_TITLES : TITLES;
@@ -190,6 +191,22 @@ export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, onClose }
             {kpiKey ? (titles[kpiKey] ?? '') : ''}
           </Typography>
           <Box sx={{ flexGrow: 1 }} />
+          {data?.currency && (
+            <Typography
+              sx={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: '#4a6a8a',
+                bgcolor: '#e3edf7',
+                px: 0.75,
+                py: 0.25,
+                borderRadius: '4px',
+                mr: 1,
+              }}
+            >
+              {data.currency}
+            </Typography>
+          )}
           <Typography sx={{ fontSize: 11, color: 'text.secondary', mr: 1 }}>{capDate}</Typography>
           <IconButton size="small" onClick={onClose} aria-label="Close detail panel">
             <Close fontSize="small" />

@@ -458,9 +458,10 @@ export const mockClient: CpiApiClient = {
     }),
   },
   kpi: {
-    getSummary: (airlineCode: string, capDate: string): Promise<KpiSummaryResponse> => delay({
+    getSummary: (airlineCode: string, capDate: string, currency?: string): Promise<KpiSummaryResponse> => delay({
       cap_date: capDate,
       airline_code: airlineCode.toUpperCase(),
+      currency: airlineCode.toUpperCase() === 'FJL' ? (currency ?? 'NOK') : null,
       kpis: {
         airlines_analyzed:  { value: 7,      label: 'Airlines Analyzed',    subheader: 'Distinct competitors tracked' },
         markets_covered:    { value: 16,     label: 'Markets Covered',      subheader: 'Origin-destination pairs analyzed' },
@@ -475,7 +476,7 @@ export const mockClient: CpiApiClient = {
         fjl_avg_fare:        { value: 769.54, label: 'FJL Avg Fare', subheader: 'Average total fare across all routes' },
       },
     }),
-    getDetail: (airlineCode: string, kpiKey: KpiKey, capDate: string): Promise<KpiDetailResponse> => {
+    getDetail: (airlineCode: string, kpiKey: KpiKey, capDate: string, currency?: string): Promise<KpiDetailResponse> => {
       const tables: Record<KpiKey, { columns: string[]; rows: Array<Record<string, string | number>> }> = {
         airlines_analyzed: {
           columns: ['#', 'Competitor', 'Routes', 'Avg Fare'],
@@ -525,6 +526,7 @@ export const mockClient: CpiApiClient = {
       return delay({
         cap_date: capDate,
         airline_code: airlineCode.toUpperCase(),
+        currency: airlineCode.toUpperCase() === 'FJL' ? (currency ?? 'NOK') : null,
         kpi_key: kpiKey,
         columns: tables[kpiKey].columns,
         rows: tables[kpiKey].rows,

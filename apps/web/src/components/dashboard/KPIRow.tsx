@@ -22,12 +22,24 @@ const KPI_LAYOUT: Record<string, { order: KpiKey[]; columns: number }> = {
   },
 };
 
-// KPIs whose summary value is a fare ⇒ render as $x.xx in the tile.
+// KPIs whose summary value is a fare ⇒ render with a currency prefix in the tile.
 const CURRENCY_KEYS = new Set<KpiKey>(['jy_avg_fare', 'pw_avg_fare', 'competitors_avg_fare', 'fjl_avg_fare']);
+
+// FJL fare prefix: localised symbol, not the ISO code. The currency picker
+// shows the code (NOK/EUR/DKK), so the tiles can be unambiguous with the
+// symbol alone. EUR is set tight against the number (€152.71); the Nordic
+// "kr" convention is symbol-then-space-then-number (kr 1,054.41) — so we
+// bake the trailing space into the map value.
+const CURRENCY_SYMBOL: Record<string, string> = {
+  EUR: '€',
+  NOK: 'kr ',
+  DKK: 'kr ',
+};
 
 export interface KPIRowProps {
   airlineCode: string;
   capDate: string;   // YYYY-MM-DD; empty while the date filter is resolving
+  currency?: string; // FJL only — passes through to the API and prefixes fare tile values
 }
 
 /**
@@ -37,7 +49,7 @@ export interface KPIRowProps {
  *  - When capDate changes with a panel open, the panel refetches itself
  *    (its effect depends on capDate) so the open detail stays in sync.
  */
-export default function KPIRow({ airlineCode, capDate }: KPIRowProps) {
+export default function KPIRow({ airlineCode, capDate, currency }: KPIRowProps) {
   const [activeKPI, setActiveKPI] = useState<KpiKey | null>(null);
   const [summary, setSummary] = useState<KpiSummaryResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -48,22 +60,27 @@ export default function KPIRow({ airlineCode, capDate }: KPIRowProps) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    api.kpi.getSummary(airlineCode, capDate)
+    api.kpi.getSummary(airlineCode, capDate, currency)
       .then((res) => { if (!cancelled) setSummary(res); })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load KPIs');
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [airlineCode, capDate]);
+  }, [airlineCode, capDate, currency]);
 
   const handleClick = (key: KpiKey) => {
     setActiveKPI((prev) => (prev === key ? null : key));
   };
 
+  // Prefix fare tiles with the active currency symbol if the API returned one
+  // (FJL → "€152.71" / "kr 1,054.41"), else fall back to "$" for JY/PW.
+  const fareUnit = summary?.currency
+    ? (CURRENCY_SYMBOL[summary.currency] ?? `${summary.currency} `)
+    : '$';
   const formatValue = (key: KpiKey, value: number): string => {
     if (CURRENCY_KEYS.has(key)) {
-      return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      return `${fareUnit}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
     return value.toLocaleString();
   };
@@ -105,6 +122,7 @@ export default function KPIRow({ airlineCode, capDate }: KPIRowProps) {
         kpiKey={activeKPI}
         airlineCode={airlineCode}
         capDate={capDate}
+        currency={currency}
         onClose={() => setActiveKPI(null)}
       />
 

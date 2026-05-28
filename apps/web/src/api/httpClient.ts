@@ -456,15 +456,15 @@ export const httpClient: CpiApiClient = {
       ),
   },
   kpi: {
-    getSummary: (airlineCode: string, capDate: string) =>
+    getSummary: (airlineCode: string, capDate: string, currency?: string) =>
       get<KpiSummaryResponse>(
         `/api/v1/kpi/${encodeURIComponent(airlineCode)}/summary`,
-        { cap_date: capDate },
+        currency ? { cap_date: capDate, currency } : { cap_date: capDate },
       ),
-    getDetail: (airlineCode: string, kpiKey: KpiKey, capDate: string) =>
+    getDetail: (airlineCode: string, kpiKey: KpiKey, capDate: string, currency?: string) =>
       get<KpiDetailResponse>(
         `/api/v1/kpi/${encodeURIComponent(airlineCode)}/detail/${encodeURIComponent(kpiKey)}`,
-        { cap_date: capDate },
+        currency ? { cap_date: capDate, currency } : { cap_date: capDate },
       ),
   },
 };
