@@ -120,17 +120,16 @@ _JY_KPI_META = {
 def _detail_jy_airlines(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT comp_al,
-               COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes,
-               ROUND(AVG(comp_tot_fare)::numeric, 0) AS avg_fare
+               COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY comp_al
         ORDER BY routes DESC
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Competitor", "Routes", "Avg Fare"],
+        "columns": ["#", "Competitor", "Routes"],
         "rows": [
-            {"rank": i, "comp_al": r[0], "routes": _i(r[1]), "avg_fare": _i(r[2])}
+            {"rank": i, "comp_al": r[0], "routes": _i(r[1])}
             for i, r in enumerate(rows, start=1)
         ],
     }

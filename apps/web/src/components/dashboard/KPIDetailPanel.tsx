@@ -80,7 +80,6 @@ const COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Competitor', field: 'comp_al' },
     { header: 'Routes present', field: 'routes', align: 'right' },
-    { header: 'Avg fare', field: 'avg_fare', align: 'right' },
   ],
   markets_covered: [
     { header: '#', field: 'rank', align: 'right' },
