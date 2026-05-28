@@ -81,7 +81,6 @@ const COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
     { header: 'Avg fare', field: 'avg_fare', align: 'right' },
     { header: 'Min', field: 'min_fare', align: 'right' },
     { header: 'Max', field: 'max_fare', align: 'right' },
-    { header: 'Records', field: 'records', align: 'right' },
   ],
   competitors_avg_fare: [
     { header: '#', field: 'rank', align: 'right' },
@@ -94,7 +93,6 @@ const COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
   dep_dates_monitored: [
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Dep date', field: 'ref_dep_date' },
-    { header: 'Records', field: 'records', align: 'right' },
     { header: 'Competitors', field: 'competitors', align: 'right' },
     { header: 'Routes', field: 'routes', align: 'right' },
   ],
@@ -113,17 +111,11 @@ const FJL_COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Competitor', field: 'source' },
     { header: 'Routes', field: 'routes', align: 'right' },
-    { header: 'Avg Total Fare', field: 'avg_total', align: 'right' },
-    { header: 'Avg Pax Fare', field: 'avg_pax', align: 'right' },
-    { header: 'Records', field: 'records', align: 'right' },
   ],
   routes_covered: [
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Route', field: 'route' },
     { header: 'Competitors', field: 'competitors', align: 'right' },
-    { header: 'Avg Fare', field: 'avg_fare', align: 'right' },
-    { header: 'Min Fare', field: 'min_fare', align: 'right' },
-    { header: 'Max Fare', field: 'max_fare', align: 'right' },
   ],
   fjl_avg_fare: [
     { header: '#', field: 'rank', align: 'right' },
@@ -141,12 +133,10 @@ const FJL_COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
     { header: 'Avg Pax', field: 'avg_pax', align: 'right' },
     { header: 'Avg Vehicle', field: 'avg_vehicle', align: 'right' },
     { header: 'Avg Cabin', field: 'avg_cabin', align: 'right' },
-    { header: 'Records', field: 'records', align: 'right' },
   ],
   dep_dates_monitored: [
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Departure Date', field: 'out_dep_date' },
-    { header: 'Records', field: 'records', align: 'right' },
     { header: 'Competitors', field: 'competitors', align: 'right' },
     { header: 'Routes', field: 'routes', align: 'right' },
   ],

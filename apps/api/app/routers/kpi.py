@@ -192,7 +192,6 @@ def _detail_jy_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, Any
 def _detail_jy_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT ref_dep_date,
-               COUNT(*) AS records,
                COUNT(DISTINCT comp_al) AS competitors,
                COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
         FROM {view}
@@ -202,11 +201,11 @@ def _detail_jy_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any
         LIMIT 50
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Dep Date", "Records", "Competitors", "Routes"],
+        "columns": ["#", "Dep Date", "Competitors", "Routes"],
         "rows": [
             {"rank": i,
              "ref_dep_date": r[0].isoformat() if r[0] is not None else "",
-             "records": _i(r[1]), "competitors": _i(r[2]), "routes": _i(r[3])}
+             "competitors": _i(r[1]), "routes": _i(r[2])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -306,18 +305,17 @@ def _detail_pw_pw_fare(db: Session, view: str, cap_date: str) -> dict[str, Any]:
         SELECT ref_org || ' → ' || ref_dst AS route,
                ROUND(AVG(ref_tot_fare)::numeric, 0) AS avg_fare,
                ROUND(MIN(ref_tot_fare)::numeric, 0) AS min_fare,
-               ROUND(MAX(ref_tot_fare)::numeric, 0) AS max_fare,
-               COUNT(*) AS records
+               ROUND(MAX(ref_tot_fare)::numeric, 0) AS max_fare
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY ref_org, ref_dst
         ORDER BY avg_fare DESC
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Route", "PW Avg Fare", "Min Fare", "Max Fare", "Records"],
+        "columns": ["#", "Route", "PW Avg Fare", "Min Fare", "Max Fare"],
         "rows": [
             {"rank": i, "route": r[0], "avg_fare": _i(r[1]),
-             "min_fare": _i(r[2]), "max_fare": _i(r[3]), "records": _i(r[4])}
+             "min_fare": _i(r[2]), "max_fare": _i(r[3])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -348,7 +346,6 @@ def _detail_pw_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, Any
 def _detail_pw_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT ref_dep_date,
-               COUNT(*) AS records,
                COUNT(DISTINCT comp_al) AS competitors,
                COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
         FROM {view}
@@ -358,11 +355,11 @@ def _detail_pw_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any
         LIMIT 50
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Dep Date", "Records", "Competitors", "Routes"],
+        "columns": ["#", "Dep Date", "Competitors", "Routes"],
         "rows": [
             {"rank": i,
              "ref_dep_date": r[0].isoformat() if r[0] is not None else "",
-             "records": _i(r[1]), "competitors": _i(r[2]), "routes": _i(r[3])}
+             "competitors": _i(r[1]), "routes": _i(r[2])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -435,21 +432,17 @@ _FJL_FLOAT_KEYS = frozenset({"fjl_avg_fare", "competitors_avg_fare"})
 def _detail_fjl_competitors(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT source,
-               COUNT(DISTINCT org || '-' || dest) AS routes,
-               ROUND(AVG(total_fare)::numeric, 2) AS avg_total,
-               ROUND(AVG(out_per_pax_fare)::numeric, 2) AS avg_pax,
-               COUNT(*) AS records
+               COUNT(DISTINCT org || '-' || dest) AS routes
         FROM {view}
         WHERE cap_date = :cap_date
           AND strpos(lower(source), 'fjordline') = 0
         GROUP BY source
-        ORDER BY avg_total DESC
+        ORDER BY routes DESC, source
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Competitor", "Routes", "Avg Total Fare", "Avg Pax Fare", "Records"],
+        "columns": ["#", "Competitor", "Routes"],
         "rows": [
-            {"rank": i, "source": r[0], "routes": _i(r[1]),
-             "avg_total": _f(r[2]), "avg_pax": _f(r[3]), "records": _i(r[4])}
+            {"rank": i, "source": r[0], "routes": _i(r[1])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -458,20 +451,16 @@ def _detail_fjl_competitors(db: Session, view: str, cap_date: str) -> dict[str, 
 def _detail_fjl_routes(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT org || ' → ' || dest AS route,
-               COUNT(DISTINCT source) AS competitors,
-               ROUND(AVG(total_fare)::numeric, 2) AS avg_fare,
-               ROUND(MIN(total_fare)::numeric, 2) AS min_fare,
-               ROUND(MAX(total_fare)::numeric, 2) AS max_fare
+               COUNT(DISTINCT source) AS competitors
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY org, dest
-        ORDER BY avg_fare DESC
+        ORDER BY competitors DESC, route
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Route", "Competitors", "Avg Fare", "Min Fare", "Max Fare"],
+        "columns": ["#", "Route", "Competitors"],
         "rows": [
-            {"rank": i, "route": r[0], "competitors": _i(r[1]),
-             "avg_fare": _f(r[2]), "min_fare": _f(r[3]), "max_fare": _f(r[4])}
+            {"rank": i, "route": r[0], "competitors": _i(r[1])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -506,8 +495,7 @@ def _detail_fjl_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, An
                ROUND(AVG(total_fare)::numeric, 2) AS avg_total,
                ROUND(AVG(out_per_pax_fare)::numeric, 2) AS avg_pax,
                ROUND(AVG(out_veh_fare)::numeric, 2) AS avg_vehicle,
-               ROUND(AVG(out_cab_fare)::numeric, 2) AS avg_cabin,
-               COUNT(*) AS records
+               ROUND(AVG(out_cab_fare)::numeric, 2) AS avg_cabin
         FROM {view}
         WHERE cap_date = :cap_date
           AND strpos(lower(source), 'fjordline') = 0
@@ -515,10 +503,10 @@ def _detail_fjl_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, An
         ORDER BY avg_total ASC
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Competitor", "Avg Total", "Avg Pax", "Avg Vehicle", "Avg Cabin", "Records"],
+        "columns": ["#", "Competitor", "Avg Total", "Avg Pax", "Avg Vehicle", "Avg Cabin"],
         "rows": [
             {"rank": i, "source": r[0], "avg_total": _f(r[1]), "avg_pax": _f(r[2]),
-             "avg_vehicle": _f(r[3]), "avg_cabin": _f(r[4]), "records": _i(r[5])}
+             "avg_vehicle": _f(r[3]), "avg_cabin": _f(r[4])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -527,7 +515,6 @@ def _detail_fjl_comp_fare(db: Session, view: str, cap_date: str) -> dict[str, An
 def _detail_fjl_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT out_dep_date,
-               COUNT(*) AS records,
                COUNT(DISTINCT source) AS competitors,
                COUNT(DISTINCT org || '-' || dest) AS routes
         FROM {view}
@@ -536,11 +523,11 @@ def _detail_fjl_dep_dates(db: Session, view: str, cap_date: str) -> dict[str, An
         ORDER BY out_dep_date
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Departure Date", "Records", "Competitors", "Routes"],
+        "columns": ["#", "Departure Date", "Competitors", "Routes"],
         "rows": [
             {"rank": i,
              "out_dep_date": r[0].isoformat() if r[0] is not None else "",
-             "records": _i(r[1]), "competitors": _i(r[2]), "routes": _i(r[3])}
+             "competitors": _i(r[1]), "routes": _i(r[2])}
             for i, r in enumerate(rows, start=1)
         ],
     }
