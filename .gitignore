@@ -128,6 +128,9 @@ dev-sftp-mount/pw/*
 # Backup files (underscore-suffixed, e.g. .bak_pre_pw)
 *.bak_*
 
+# Dated backup JSON dumps (e.g. fjl_dash2_filters_backup_20260526_124204.json)
+*_backup_*.json
+
 # ---------------------------------------------------------------------------
 # IT handoff cleanup additions (2026-05-25)
 # ---------------------------------------------------------------------------
