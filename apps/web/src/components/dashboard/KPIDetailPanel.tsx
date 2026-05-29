@@ -40,6 +40,28 @@ const fmt = (v: string | number | null): string => {
   return typeof v === 'number' ? v.toLocaleString() : String(v);
 };
 
+// jy_avg_fare returns one row per route×competitor; collapse to one row per
+// route with the mean JY fare. Routes keep their first-occurrence order from
+// the source rows; null/blank/'—' fares are excluded from the mean.
+const groupRouteAvgFare = (rows: Row[]): Row[] => {
+  const order: string[] = [];
+  const buckets = new Map<string, number[]>();
+  for (const r of rows) {
+    const route = String(r.route ?? '');
+    if (!route) continue;
+    if (!buckets.has(route)) { buckets.set(route, []); order.push(route); }
+    const raw = r.jy_fare;
+    if (raw === null || raw === undefined || raw === '' || raw === '—') continue;
+    const n = Number(raw);
+    if (Number.isFinite(n)) buckets.get(route)!.push(n);
+  }
+  return order.map((route, i) => {
+    const vals = buckets.get(route)!;
+    const avg = vals.length ? Math.round(vals.reduce((a, b) => a + b, 0) / vals.length) : null;
+    return { rank: i + 1, route, avg_fare: avg };
+  });
+};
+
 // PW fare_gap = Comp avg − PW avg. Positive ⇒ PW cheaper than the competitor
 // (good ⇒ green); negative ⇒ competitor undercuts PW (⇒ red).
 const fareGapCell = (row: Row): React.ReactNode => {
@@ -65,11 +87,8 @@ const COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
   ],
   jy_avg_fare: [
     { header: '#', field: 'rank', align: 'right' },
-    { header: 'Route', field: 'route' },
-    { header: 'Competitor', field: 'comp_al' },
-    { header: 'JY Fare', field: 'jy_fare', align: 'right' },
-    { header: 'Comp Fare', field: 'comp_fare', align: 'right' },
-    { header: 'Difference', field: 'difference', align: 'right' },
+    { header: 'Route', field: 'route', align: 'center' },
+    { header: 'JY Avg Fare', field: 'avg_fare', align: 'right' },
   ],
   // ── PW ──
   competitors_analyzed: [
@@ -183,7 +202,8 @@ export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, currency,
   const titles = isFjl ? FJL_TITLES : TITLES;
   const columnCfg = isFjl ? FJL_COLUMN_CONFIG : COLUMN_CONFIG;
   const cols = kpiKey ? (columnCfg[kpiKey] ?? []) : [];
-  const rows = data && data.kpi_key === kpiKey ? data.rows : [];
+  const rawRows = data && data.kpi_key === kpiKey ? data.rows : [];
+  const rows = !isFjl && kpiKey === 'jy_avg_fare' ? groupRouteAvgFare(rawRows) : rawRows;
 
   return (
     <Collapse in={kpiKey !== null} timeout="auto" unmountOnExit>
