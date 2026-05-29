@@ -225,6 +225,46 @@ def _detail_jy_comp_fare(db: Session, view: str, cap_date: str, currency: str | 
     }
 
 
+def _detail_jy_comp_fare_by_route(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
+    # Per-route average competitor fare. Source rows are one per route×comp_al
+    # (same grouping/order as _detail_jy_jy_fare so route first-occurrence order
+    # matches the JY Avg Fare table); each route's per-competitor comp_fare
+    # values are then averaged with equal weight per competitor. NULL comp_fare
+    # values are excluded from the mean and routes with no valid competitor fare
+    # are dropped entirely.
+    rows = db.execute(text(f"""
+        SELECT ref_org || '-' || ref_dst AS route,
+               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS comp_fare,
+               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS jy_fare
+        FROM {view}
+        WHERE cap_date = :cap_date
+        GROUP BY ref_org, ref_dst, comp_al
+        ORDER BY jy_fare DESC
+    """), {"cap_date": cap_date}).fetchall()
+    order: list[str] = []
+    totals: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    for route, comp_fare, _jy in rows:
+        if route not in counts:
+            order.append(route)
+            totals[route] = 0.0
+            counts[route] = 0
+        if comp_fare is not None:
+            totals[route] += float(comp_fare)
+            counts[route] += 1
+    out: list[dict[str, Any]] = []
+    rank = 1
+    for route in order:
+        if counts[route] == 0:
+            continue
+        out.append({"rank": rank, "route": route, "avg_comp_fare": round(totals[route] / counts[route])})
+        rank += 1
+    return {
+        "columns": ["#", "Route", "Competitors Avg Fare"],
+        "rows": out,
+    }
+
+
 def _detail_jy_dep_dates(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT ref_dep_date,
@@ -593,7 +633,7 @@ AIRLINE_CFG: dict[str, dict[str, Any]] = {
             "airlines_analyzed": _detail_jy_airlines,
             "markets_covered": _detail_jy_markets,
             "jy_avg_fare": _detail_jy_jy_fare,
-            "competitors_avg_fare": _detail_jy_comp_fare,
+            "competitors_avg_fare": _detail_jy_comp_fare_by_route,
             "dep_dates_monitored": _detail_jy_dep_dates,
         },
     },

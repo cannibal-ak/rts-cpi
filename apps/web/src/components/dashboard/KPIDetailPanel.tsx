@@ -166,6 +166,14 @@ const FJL_COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
   ],
 };
 
+// JY's competitors_avg_fare detail is per-route (backend _detail_jy_comp_fare_by_route);
+// PW's competitors_avg_fare stays per-competitor via COLUMN_CONFIG above.
+const JY_COMPETITORS_AVG_FARE_COLS: ColumnDef[] = [
+  { header: '#', field: 'rank', align: 'right' },
+  { header: 'Route', field: 'route', align: 'center' },
+  { header: 'Competitors Avg Fare', field: 'avg_comp_fare', align: 'right' },
+];
+
 export interface KPIDetailPanelProps {
   kpiKey: KpiKey | null;        // null ⇒ panel collapsed/hidden
   airlineCode: string;
@@ -201,7 +209,12 @@ export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, currency,
   const isFjl = airlineCode.toUpperCase() === 'FJL';
   const titles = isFjl ? FJL_TITLES : TITLES;
   const columnCfg = isFjl ? FJL_COLUMN_CONFIG : COLUMN_CONFIG;
-  const cols = kpiKey ? (columnCfg[kpiKey] ?? []) : [];
+  const isJy = airlineCode.toUpperCase() === 'JY';
+  const cols = kpiKey
+    ? (isJy && kpiKey === 'competitors_avg_fare'
+        ? JY_COMPETITORS_AVG_FARE_COLS
+        : (columnCfg[kpiKey] ?? []))
+    : [];
   const rawRows = data && data.kpi_key === kpiKey ? data.rows : [];
   const rows = !isFjl && kpiKey === 'jy_avg_fare' ? groupRouteAvgFare(rawRows) : rawRows;
 
