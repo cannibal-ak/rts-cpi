@@ -100,8 +100,6 @@ const COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
   dep_dates_monitored: [
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Dep date', field: 'ref_dep_date' },
-    { header: 'Competitors', field: 'competitors', align: 'right' },
-    { header: 'Routes', field: 'routes', align: 'right' },
   ],
 };
 
