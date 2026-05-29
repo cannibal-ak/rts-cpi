@@ -32,8 +32,13 @@ const TITLES: Partial<Record<KpiKey, string>> = {
   dep_dates_monitored: 'Dep Dates Monitored — coverage by date',
 };
 
-const fmt = (v: string | number | null): string =>
-  typeof v === 'number' ? v.toLocaleString() : String(v ?? '');
+// Match KPIRow's summary-tile null guard: render null/undefined as the same
+// em dash ('—' U+2014). Legitimately empty strings still render blank
+// (String('') === '') — only null/undefined gets the dash.
+const fmt = (v: string | number | null): string => {
+  if (v === null || v === undefined) return '—';
+  return typeof v === 'number' ? v.toLocaleString() : String(v);
+};
 
 // PW fare_gap = Comp avg − PW avg. Positive ⇒ PW cheaper than the competitor
 // (good ⇒ green); negative ⇒ competitor undercuts PW (⇒ red).
