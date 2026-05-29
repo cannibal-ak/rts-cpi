@@ -62,6 +62,18 @@ def _f(value: Any) -> float:
     return float(value) if value is not None else 0.0
 
 
+# None-preserving variants — used only on fare AVG/MIN aggregates wrapped in
+# NULLIF(col, 0). A 100%-zero group yields NULL from the DB and must surface as
+# JSON null (rendered as "—") rather than being coalesced to 0, which would
+# masquerade as a real low/avg fare.
+def _n_i(value: Any) -> int | None:
+    return int(value) if value is not None else None
+
+
+def _n_f(value: Any) -> float | None:
+    return float(value) if value is not None else None
+
+
 # FJL data spans three regional Color Line / Fjord Line sites, each publishing
 # in its local currency. Without a currency filter, fare averages mix EUR/DKK/
 # NOK (~8x apart) and counts triple because every route/competitor/date
@@ -99,12 +111,12 @@ def _summary_sql_jy(view: str) -> dict[str, str]:
             WHERE cap_date = :cap_date
         """,
         "jy_avg_fare": f"""
-            SELECT ROUND(AVG(ref_tot_fare)::numeric, 2)
+            SELECT ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 2)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
         "competitors_avg_fare": f"""
-            SELECT ROUND(AVG(comp_tot_fare)::numeric, 2)
+            SELECT ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 2)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
@@ -126,6 +138,10 @@ _JY_KPI_META = {
 
 # Summary values returned as floats (2dp); everything else is an int.
 _JY_FLOAT_KEYS = frozenset({"jy_avg_fare", "competitors_avg_fare"})
+
+# Summary values whose underlying AVG is wrapped in NULLIF — NULL must surface
+# as JSON null (rendered as "—") instead of being coerced to 0 by _f/_i.
+_JY_NULL_KEYS = frozenset({"jy_avg_fare", "competitors_avg_fare"})
 
 
 def _detail_jy_airlines(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
@@ -168,9 +184,9 @@ def _detail_jy_jy_fare(db: Session, view: str, cap_date: str, currency: str | No
     rows = db.execute(text(f"""
         SELECT ref_org || '-' || ref_dst AS route,
                comp_al,
-               ROUND(AVG(ref_tot_fare)::numeric, 0) AS jy_fare,
-               ROUND(AVG(comp_tot_fare)::numeric, 0) AS comp_fare,
-               ROUND((AVG(ref_tot_fare) - AVG(comp_tot_fare))::numeric, 0) AS difference
+               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS jy_fare,
+               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS comp_fare,
+               ROUND((AVG(NULLIF(ref_tot_fare, 0)) - AVG(NULLIF(comp_tot_fare, 0)))::numeric, 0) AS difference
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY ref_org, ref_dst, comp_al
@@ -180,8 +196,8 @@ def _detail_jy_jy_fare(db: Session, view: str, cap_date: str, currency: str | No
     return {
         "columns": ["#", "Route", "Competitor", "JY Fare", "Comp Fare", "Difference"],
         "rows": [
-            {"rank": i, "route": r[0], "comp_al": r[1], "jy_fare": _i(r[2]),
-             "comp_fare": _i(r[3]), "difference": _i(r[4])}
+            {"rank": i, "route": r[0], "comp_al": r[1], "jy_fare": _n_i(r[2]),
+             "comp_fare": _n_i(r[3]), "difference": _n_i(r[4])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -190,8 +206,8 @@ def _detail_jy_jy_fare(db: Session, view: str, cap_date: str, currency: str | No
 def _detail_jy_comp_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT comp_al,
-               ROUND(AVG(comp_tot_fare)::numeric, 0) AS avg_fare,
-               ROUND(MIN(comp_tot_fare)::numeric, 0) AS min_fare,
+               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS avg_fare,
+               ROUND(MIN(NULLIF(comp_tot_fare, 0))::numeric, 0) AS min_fare,
                ROUND(MAX(comp_tot_fare)::numeric, 0) AS max_fare,
                COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
         FROM {view}
@@ -202,8 +218,8 @@ def _detail_jy_comp_fare(db: Session, view: str, cap_date: str, currency: str | 
     return {
         "columns": ["#", "Competitor", "Avg Fare", "Min Fare", "Max Fare", "Routes"],
         "rows": [
-            {"rank": i, "comp_al": r[0], "avg_fare": _i(r[1]),
-             "min_fare": _i(r[2]), "max_fare": _i(r[3]), "routes": _i(r[4])}
+            {"rank": i, "comp_al": r[0], "avg_fare": _n_i(r[1]),
+             "min_fare": _n_i(r[2]), "max_fare": _i(r[3]), "routes": _i(r[4])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -248,12 +264,12 @@ def _summary_sql_pw(view: str) -> dict[str, str]:
             WHERE cap_date = :cap_date
         """,
         "pw_avg_fare": f"""
-            SELECT ROUND(AVG(ref_tot_fare)::numeric, 2)
+            SELECT ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 2)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
         "competitors_avg_fare": f"""
-            SELECT ROUND(AVG(comp_tot_fare)::numeric, 2)
+            SELECT ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 2)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
@@ -276,13 +292,16 @@ _PW_KPI_META = {
 # Summary values returned as floats (2dp). Everything else is an int.
 _PW_FLOAT_KEYS = frozenset({"pw_avg_fare", "competitors_avg_fare"})
 
+# See _JY_NULL_KEYS for rationale.
+_PW_NULL_KEYS = frozenset({"pw_avg_fare", "competitors_avg_fare"})
+
 
 def _detail_pw_competitors(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT comp_al,
                COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes,
-               ROUND(AVG(comp_tot_fare)::numeric, 0) AS avg_fare,
-               ROUND((AVG(comp_tot_fare) - AVG(ref_tot_fare))::numeric, 0) AS fare_gap
+               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS avg_fare,
+               ROUND((AVG(NULLIF(comp_tot_fare, 0)) - AVG(NULLIF(ref_tot_fare, 0)))::numeric, 0) AS fare_gap
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY comp_al
@@ -292,7 +311,7 @@ def _detail_pw_competitors(db: Session, view: str, cap_date: str, currency: str 
         "columns": ["#", "Competitor", "Routes", "Avg Fare", "Fare Gap"],
         "rows": [
             {"rank": i, "comp_al": r[0], "routes": _i(r[1]),
-             "avg_fare": _i(r[2]), "fare_gap": _i(r[3])}
+             "avg_fare": _n_i(r[2]), "fare_gap": _n_i(r[3])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -302,9 +321,9 @@ def _detail_pw_routes(db: Session, view: str, cap_date: str, currency: str | Non
     rows = db.execute(text(f"""
         SELECT ref_org || ' → ' || ref_dst AS route,
                COUNT(DISTINCT comp_al) AS competitors,
-               ROUND(AVG(ref_tot_fare)::numeric, 0) AS pw_avg,
-               ROUND(AVG(comp_tot_fare)::numeric, 0) AS comp_avg,
-               ROUND((AVG(comp_tot_fare) - AVG(ref_tot_fare))::numeric, 0) AS fare_gap
+               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS pw_avg,
+               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS comp_avg,
+               ROUND((AVG(NULLIF(comp_tot_fare, 0)) - AVG(NULLIF(ref_tot_fare, 0)))::numeric, 0) AS fare_gap
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY ref_org, ref_dst
@@ -314,7 +333,7 @@ def _detail_pw_routes(db: Session, view: str, cap_date: str, currency: str | Non
         "columns": ["#", "Route", "Competitors", "PW Avg Fare", "Comp Avg Fare", "Fare Gap"],
         "rows": [
             {"rank": i, "route": r[0], "competitors": _i(r[1]),
-             "pw_avg": _i(r[2]), "comp_avg": _i(r[3]), "fare_gap": _i(r[4])}
+             "pw_avg": _n_i(r[2]), "comp_avg": _n_i(r[3]), "fare_gap": _n_i(r[4])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -323,8 +342,8 @@ def _detail_pw_routes(db: Session, view: str, cap_date: str, currency: str | Non
 def _detail_pw_pw_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT ref_org || ' → ' || ref_dst AS route,
-               ROUND(AVG(ref_tot_fare)::numeric, 0) AS avg_fare,
-               ROUND(MIN(ref_tot_fare)::numeric, 0) AS min_fare,
+               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS avg_fare,
+               ROUND(MIN(NULLIF(ref_tot_fare, 0))::numeric, 0) AS min_fare,
                ROUND(MAX(ref_tot_fare)::numeric, 0) AS max_fare
         FROM {view}
         WHERE cap_date = :cap_date
@@ -334,8 +353,8 @@ def _detail_pw_pw_fare(db: Session, view: str, cap_date: str, currency: str | No
     return {
         "columns": ["#", "Route", "PW Avg Fare", "Min Fare", "Max Fare"],
         "rows": [
-            {"rank": i, "route": r[0], "avg_fare": _i(r[1]),
-             "min_fare": _i(r[2]), "max_fare": _i(r[3])}
+            {"rank": i, "route": r[0], "avg_fare": _n_i(r[1]),
+             "min_fare": _n_i(r[2]), "max_fare": _i(r[3])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -344,8 +363,8 @@ def _detail_pw_pw_fare(db: Session, view: str, cap_date: str, currency: str | No
 def _detail_pw_comp_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT comp_al,
-               ROUND(AVG(comp_tot_fare)::numeric, 0) AS avg_fare,
-               ROUND(MIN(comp_tot_fare)::numeric, 0) AS min_fare,
+               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS avg_fare,
+               ROUND(MIN(NULLIF(comp_tot_fare, 0))::numeric, 0) AS min_fare,
                ROUND(MAX(comp_tot_fare)::numeric, 0) AS max_fare,
                COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
         FROM {view}
@@ -356,8 +375,8 @@ def _detail_pw_comp_fare(db: Session, view: str, cap_date: str, currency: str | 
     return {
         "columns": ["#", "Competitor", "Avg Fare", "Min Fare", "Max Fare", "Routes"],
         "rows": [
-            {"rank": i, "comp_al": r[0], "avg_fare": _i(r[1]),
-             "min_fare": _i(r[2]), "max_fare": _i(r[3]), "routes": _i(r[4])}
+            {"rank": i, "comp_al": r[0], "avg_fare": _n_i(r[1]),
+             "min_fare": _n_i(r[2]), "max_fare": _i(r[3]), "routes": _i(r[4])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -569,6 +588,7 @@ AIRLINE_CFG: dict[str, dict[str, Any]] = {
         "summary_sql": _summary_sql_jy,
         "meta": _JY_KPI_META,
         "float_keys": _JY_FLOAT_KEYS,
+        "null_keys": _JY_NULL_KEYS,
         "details": {
             "airlines_analyzed": _detail_jy_airlines,
             "markets_covered": _detail_jy_markets,
@@ -582,6 +602,7 @@ AIRLINE_CFG: dict[str, dict[str, Any]] = {
         "summary_sql": _summary_sql_pw,
         "meta": _PW_KPI_META,
         "float_keys": _PW_FLOAT_KEYS,
+        "null_keys": _PW_NULL_KEYS,
         "details": {
             "competitors_analyzed": _detail_pw_competitors,
             "routes_covered": _detail_pw_routes,
@@ -654,6 +675,7 @@ def get_kpi_summary(
     view = cfg["view"]
     meta = cfg["meta"]
     float_keys = cfg["float_keys"]
+    null_keys = cfg.get("null_keys", frozenset())
     sql = cfg["summary_sql"](view)
     params: dict[str, Any] = {"cap_date": cap_date}
     if resolved_currency is not None:
@@ -662,8 +684,12 @@ def get_kpi_summary(
     try:
         for key, query in sql.items():
             scalar = db.execute(text(query), params).scalar()
+            if key in null_keys:
+                value = _n_f(scalar) if key in float_keys else _n_i(scalar)
+            else:
+                value = _f(scalar) if key in float_keys else _i(scalar)
             kpis[key] = {
-                "value": _f(scalar) if key in float_keys else _i(scalar),
+                "value": value,
                 "label": meta[key]["label"],
                 "subheader": meta[key]["subheader"],
             }

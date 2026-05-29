@@ -7,7 +7,9 @@ import { Close } from '@mui/icons-material';
 import { api } from '../../api';
 import type { KpiKey, KpiDetailResponse } from '../../api/client';
 
-type Row = Record<string, string | number>;
+// Cells may be null when the backing AVG/MIN (wrapped in NULLIF) had no
+// non-zero rows for that group; `fmt` renders null as a blank cell.
+type Row = Record<string, string | number | null>;
 
 interface ColumnDef {
   header: string;
@@ -30,7 +32,7 @@ const TITLES: Partial<Record<KpiKey, string>> = {
   dep_dates_monitored: 'Dep Dates Monitored — coverage by date',
 };
 
-const fmt = (v: string | number): string =>
+const fmt = (v: string | number | null): string =>
   typeof v === 'number' ? v.toLocaleString() : String(v ?? '');
 
 // PW fare_gap = Comp avg − PW avg. Positive ⇒ PW cheaper than the competitor

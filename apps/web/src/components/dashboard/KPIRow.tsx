@@ -78,7 +78,10 @@ export default function KPIRow({ airlineCode, capDate, currency }: KPIRowProps) 
   const fareUnit = summary?.currency
     ? (CURRENCY_SYMBOL[summary.currency] ?? `${summary.currency} `)
     : '$';
-  const formatValue = (key: KpiKey, value: number): string => {
+  const formatValue = (key: KpiKey, value: number | null): string => {
+    // NULLIF-wrapped fare AVG returns null when the period has no non-zero
+    // fares — show an em dash rather than "$0.00" or crashing on toLocaleString.
+    if (value === null) return '—';
     if (CURRENCY_KEYS.has(key)) {
       return `${fareUnit}${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }

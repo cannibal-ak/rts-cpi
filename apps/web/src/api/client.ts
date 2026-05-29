@@ -82,7 +82,9 @@ export type KpiKey =
   | 'fjl_avg_fare';
 
 export interface KpiSummaryItem {
-  value: number;
+  // null when the underlying AVG (wrapped in NULLIF) had no non-zero rows
+  // for the period — renderers show this as "—".
+  value: number | null;
   label: string;
   subheader: string;
 }
@@ -100,7 +102,9 @@ export interface KpiDetailResponse {
   currency: string | null;
   kpi_key: KpiKey;
   columns: string[];
-  rows: Array<Record<string, string | number>>;
+  // Cells are null when the per-group AVG/MIN (wrapped in NULLIF) had no
+  // non-zero rows for that group; rendered as a blank cell.
+  rows: Array<Record<string, string | number | null>>;
 }
 
 
