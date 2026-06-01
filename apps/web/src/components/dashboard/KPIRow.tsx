@@ -9,7 +9,7 @@ import KPIDetailPanel from './KPIDetailPanel';
 // the keys listed here for the matching airline_code.
 const KPI_LAYOUT: Record<string, { order: KpiKey[]; columns: number }> = {
   JY: {
-    order: ['airlines_analyzed', 'markets_covered', 'jy_avg_fare', 'competitors_avg_fare', 'dep_dates_monitored'],
+    order: ['competitors_analyzed', 'routes_covered', 'jy_avg_fare', 'competitors_avg_fare', 'dep_dates_monitored'],
     columns: 5,
   },
   PW: {

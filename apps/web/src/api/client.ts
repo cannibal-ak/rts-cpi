@@ -62,17 +62,17 @@ export interface DashboardDateFilter {
 }
 
 // ── KPI summary + detail (click-to-expand KPI row) ──
-// Keys are per-airline. JY and PW each expose 5 keys; competitors_avg_fare and
-// dep_dates_monitored are shared between them. The backend returns only the
-// subset registered for the requested airline_code.
+// Keys are per-airline. JY and PW each expose 5 keys; JY reuses PW's
+// competitors_analyzed / routes_covered keys (JY-appropriate values, PW labels).
+// competitors_avg_fare and dep_dates_monitored are shared. The backend returns
+// only the subset registered for the requested airline_code.
 export type KpiKey =
-  // JY-specific
-  | 'airlines_analyzed'
-  | 'markets_covered'
-  | 'jy_avg_fare'
-  // PW-specific
+  // JY + PW (shared keys; JY supplies its own values/SQL)
   | 'competitors_analyzed'
   | 'routes_covered'
+  // JY-specific
+  | 'jy_avg_fare'
+  // PW-specific
   | 'pw_avg_fare'
   // Shared (JY + PW + FJL)
   | 'competitors_avg_fare'

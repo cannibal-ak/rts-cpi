@@ -20,10 +20,8 @@ interface ColumnDef {
 
 const TITLES: Partial<Record<KpiKey, string>> = {
   // JY
-  airlines_analyzed: 'Airlines Analyzed — competitor breakdown',
-  markets_covered: 'Markets Covered — route breakdown',
   jy_avg_fare: 'JY Avg Fare — fare by route',
-  // PW
+  // PW (competitors_analyzed / routes_covered are shared with JY)
   competitors_analyzed: 'Competitors Analyzed — competitor breakdown',
   routes_covered: 'Routes Covered — route breakdown',
   pw_avg_fare: 'PW Avg Fare — fare by route',
@@ -75,22 +73,12 @@ const fareGapCell = (row: Row): React.ReactNode => {
 };
 
 const COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
-  airlines_analyzed: [
-    { header: '#', field: 'rank', align: 'right' },
-    { header: 'Competitor', field: 'comp_al' },
-    { header: 'Routes present', field: 'routes', align: 'right' },
-  ],
-  markets_covered: [
-    { header: '#', field: 'rank', align: 'right' },
-    { header: 'Route', field: 'route' },
-    { header: 'Competitors', field: 'competitors', align: 'right' },
-  ],
   jy_avg_fare: [
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Route', field: 'route', align: 'center' },
     { header: 'JY Avg Fare', field: 'avg_fare', align: 'right' },
   ],
-  // ── PW ──
+  // ── PW (competitors_analyzed / routes_covered are shared with JY) ──
   competitors_analyzed: [
     { header: '#', field: 'rank', align: 'right' },
     { header: 'Competitor', field: 'comp_al' },

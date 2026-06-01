@@ -463,10 +463,8 @@ export const mockClient: CpiApiClient = {
       airline_code: airlineCode.toUpperCase(),
       currency: airlineCode.toUpperCase() === 'FJL' ? (currency ?? 'NOK') : null,
       kpis: {
-        airlines_analyzed:  { value: 7,      label: 'Airlines Analyzed',    subheader: 'Distinct competitors tracked' },
-        markets_covered:    { value: 16,     label: 'Markets Covered',      subheader: 'Origin-destination pairs analyzed' },
         jy_avg_fare:        { value: 266.18, label: 'JY Avg Fare',          subheader: 'Average JY fare across all routes' },
-        // PW
+        // competitors_analyzed / routes_covered are shared by JY + PW
         competitors_analyzed: { value: 4,      label: 'Competitors Analyzed',   subheader: 'Distinct competitors tracked' },
         routes_covered:       { value: 7,      label: 'Routes Covered',          subheader: 'Origin-destination pairs analyzed' },
         pw_avg_fare:          { value: 179.10, label: 'PW Avg Fare',             subheader: 'Average PW fare across all routes' },
@@ -478,22 +476,11 @@ export const mockClient: CpiApiClient = {
     }),
     getDetail: (airlineCode: string, kpiKey: KpiKey, capDate: string, currency?: string): Promise<KpiDetailResponse> => {
       const tables: Record<KpiKey, { columns: string[]; rows: Array<Record<string, string | number>> }> = {
-        airlines_analyzed: {
-          columns: ['#', 'Competitor', 'Routes', 'Avg Fare'],
-          rows: [
-            { rank: 1, comp_al: 'BW', routes: 15, avg_fare: 324 },
-            { rank: 2, comp_al: '5L', routes: 12, avg_fare: 73 },
-          ],
-        },
-        markets_covered: {
-          columns: ['#', 'Route', 'Competitors', 'JY avg fare'],
-          rows: [{ rank: 1, route: 'ANU → EIS', competitors: 4, jy_avg: 341 }],
-        },
         jy_avg_fare: {
           columns: ['#', 'Route', 'Competitor', 'JY Fare', 'Comp Fare', 'Difference'],
           rows: [{ rank: 1, route: 'BGI-ANU', comp_al: 'S6', jy_fare: 381, comp_fare: 0, difference: 381 }],
         },
-        // PW
+        // competitors_analyzed / routes_covered are shared by JY + PW
         competitors_analyzed: {
           columns: ['#', 'Competitor', 'Routes', 'Avg Fare', 'Fare Gap'],
           rows: [{ rank: 1, comp_al: 'CQ', routes: 3, avg_fare: 402, fare_gap: 326 }],

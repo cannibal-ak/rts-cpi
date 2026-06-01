@@ -100,12 +100,13 @@ def _resolve_currency(code: str, currency: str | None) -> str | None:
 
 def _summary_sql_jy(view: str) -> dict[str, str]:
     return {
-        "airlines_analyzed": f"""
+        # JY-appropriate values, but PW-aligned KPI keys/labels (see _JY_KPI_META).
+        "competitors_analyzed": f"""
             SELECT COUNT(DISTINCT comp_al)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
-        "markets_covered": f"""
+        "routes_covered": f"""
             SELECT COUNT(DISTINCT ref_org || '-' || ref_dst)
             FROM {view}
             WHERE cap_date = :cap_date
@@ -129,8 +130,8 @@ def _summary_sql_jy(view: str) -> dict[str, str]:
 
 
 _JY_KPI_META = {
-    "airlines_analyzed":    {"label": "Airlines Analyzed",    "subheader": "Distinct competitors tracked"},
-    "markets_covered":      {"label": "Markets Covered",      "subheader": "Origin-destination pairs analyzed"},
+    "competitors_analyzed": {"label": "Competitors Analyzed", "subheader": "Distinct competitors tracked"},
+    "routes_covered":       {"label": "Routes Covered",       "subheader": "Origin-destination pairs analyzed"},
     "jy_avg_fare":          {"label": "JY Avg Fare",          "subheader": "Average JY fare across all routes"},
     "competitors_avg_fare": {"label": "Competitors Avg Fare", "subheader": "Average competitor fare across all routes"},
     "dep_dates_monitored":  {"label": "Dep Dates Monitored",  "subheader": "Future travel dates with pricing data"},
@@ -630,8 +631,8 @@ AIRLINE_CFG: dict[str, dict[str, Any]] = {
         "float_keys": _JY_FLOAT_KEYS,
         "null_keys": _JY_NULL_KEYS,
         "details": {
-            "airlines_analyzed": _detail_jy_airlines,
-            "markets_covered": _detail_jy_markets,
+            "competitors_analyzed": _detail_jy_airlines,
+            "routes_covered": _detail_jy_markets,
             "jy_avg_fare": _detail_jy_jy_fare,
             "competitors_avg_fare": _detail_jy_comp_fare_by_route,
             "dep_dates_monitored": _detail_jy_dep_dates,
