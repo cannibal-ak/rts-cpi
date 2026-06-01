@@ -543,7 +543,6 @@ export default function DashboardViewerPage() {
                 onPrev={handlePrev}
                 onNext={handleNext}
                 dateFilter={dateFilter}
-                vizType={analyticsCharts[Math.max(0, selectedIndex)]?.viz_type ?? null}
                 capDateFilterEnabled={CAP_DATE_CHARTVIEW_DASHBOARDS.includes(Number(id))}
                 refreshKey={refreshKey}
               />

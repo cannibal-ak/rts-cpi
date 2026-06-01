@@ -454,6 +454,23 @@ export const httpClient: CpiApiClient = {
       get<DashboardChartsResponse>(
         `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/charts`,
       ),
+    // Mint a Superset explore form_data_key carrying the active cap_date filter
+    // for the standalone Chart-view iframe. The backend builds the form_data
+    // server-side from these params (same cap_date semantics as the guest token);
+    // the returned key goes into /explore/?slice_id=ID&form_data_key=KEY.
+    getChartFormDataKey: (sliceId: number, dateFilter?: DashboardDateFilter) => {
+      const params: Record<string, string | number | undefined> = {};
+      if (dateFilter?.mode === 'single' && dateFilter.capDateEq) {
+        params.cap_date_eq = dateFilter.capDateEq;
+      } else if (dateFilter?.mode === 'range' && dateFilter.capDateFrom && dateFilter.capDateTo) {
+        params.cap_date_from = dateFilter.capDateFrom;
+        params.cap_date_to   = dateFilter.capDateTo;
+      }
+      return get<{ key: string }>(
+        `/api/v1/superset/charts/${encodeURIComponent(sliceId)}/form-data-key`,
+        params,
+      );
+    },
   },
   kpi: {
     getSummary: (airlineCode: string, capDate: string, currency?: string) =>
