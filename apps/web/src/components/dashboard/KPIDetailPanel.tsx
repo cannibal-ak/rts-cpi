@@ -89,20 +89,23 @@ const COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
     { header: 'Route', field: 'route' },
     { header: 'Competitors', field: 'competitors', align: 'right' },
   ],
+  // PW own-fare detail: aligned to JY's jy_avg_fare rendered table (#, Route,
+  // <carrier> Avg Fare). PW backend returns one row per route, so no grouping
+  // is needed here (unlike JY, whose route×competitor rows are collapsed by
+  // groupRouteAvgFare).
   pw_avg_fare: [
     { header: '#', field: 'rank', align: 'right' },
-    { header: 'Route', field: 'route' },
-    { header: 'Avg fare', field: 'avg_fare', align: 'right' },
-    { header: 'Min', field: 'min_fare', align: 'right' },
-    { header: 'Max', field: 'max_fare', align: 'right' },
+    { header: 'Route', field: 'route', align: 'center' },
+    { header: 'PW Avg Fare', field: 'avg_fare', align: 'right' },
   ],
+  // PW competitors_avg_fare: aligned to JY's per-route shape (backend
+  // _detail_pw_comp_fare now mirrors _detail_jy_comp_fare_by_route). JY renders
+  // this key via its own JY_COMPETITORS_AVG_FARE_COLS override, so this shared
+  // entry only affects PW.
   competitors_avg_fare: [
     { header: '#', field: 'rank', align: 'right' },
-    { header: 'Competitor', field: 'comp_al' },
-    { header: 'Avg fare', field: 'avg_fare', align: 'right' },
-    { header: 'Min', field: 'min_fare', align: 'right' },
-    { header: 'Max', field: 'max_fare', align: 'right' },
-    { header: 'Routes', field: 'routes', align: 'right' },
+    { header: 'Route', field: 'route', align: 'center' },
+    { header: 'Competitors Avg Fare', field: 'avg_comp_fare', align: 'right' },
   ],
   dep_dates_monitored: [
     { header: '#', field: 'rank', align: 'right' },

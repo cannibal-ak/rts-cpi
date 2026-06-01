@@ -338,88 +338,101 @@ _PW_NULL_KEYS = frozenset({"pw_avg_fare", "competitors_avg_fare"})
 
 
 def _detail_pw_competitors(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
+    # Aligned to JY (_detail_jy_airlines): competitor → route count only.
     rows = db.execute(text(f"""
         SELECT comp_al,
-               COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes,
-               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS avg_fare,
-               ROUND((AVG(NULLIF(comp_tot_fare, 0)) - AVG(NULLIF(ref_tot_fare, 0)))::numeric, 0) AS fare_gap
+               COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY comp_al
         ORDER BY routes DESC
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Competitor", "Routes", "Avg Fare", "Fare Gap"],
+        "columns": ["#", "Competitor", "Routes"],
         "rows": [
-            {"rank": i, "comp_al": r[0], "routes": _i(r[1]),
-             "avg_fare": _n_i(r[2]), "fare_gap": _n_i(r[3])}
+            {"rank": i, "comp_al": r[0], "routes": _i(r[1])}
             for i, r in enumerate(rows, start=1)
         ],
     }
 
 
 def _detail_pw_routes(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
+    # Aligned to JY (_detail_jy_markets): route → distinct competitor count.
     rows = db.execute(text(f"""
         SELECT ref_org || ' → ' || ref_dst AS route,
-               COUNT(DISTINCT comp_al) AS competitors,
-               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS pw_avg,
-               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS comp_avg,
-               ROUND((AVG(NULLIF(comp_tot_fare, 0)) - AVG(NULLIF(ref_tot_fare, 0)))::numeric, 0) AS fare_gap
+               COUNT(DISTINCT comp_al) AS competitors
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY ref_org, ref_dst
         ORDER BY competitors DESC, route
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Route", "Competitors", "PW Avg Fare", "Comp Avg Fare", "Fare Gap"],
+        "columns": ["#", "Route", "Competitors"],
         "rows": [
-            {"rank": i, "route": r[0], "competitors": _i(r[1]),
-             "pw_avg": _n_i(r[2]), "comp_avg": _n_i(r[3]), "fare_gap": _n_i(r[4])}
+            {"rank": i, "route": r[0], "competitors": _i(r[1])}
             for i, r in enumerate(rows, start=1)
         ],
     }
 
 
 def _detail_pw_pw_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
+    # Aligned to JY's rendered own-fare table (#, Route, PW Avg Fare): one row
+    # per route with the average PW fare. Route uses the '-' separator to match
+    # JY's jy_avg_fare detail. Min/Max removed (JY shows neither). NULLIF keeps a
+    # 100%-zero route as JSON null ("—") rather than a fake low fare.
     rows = db.execute(text(f"""
-        SELECT ref_org || ' → ' || ref_dst AS route,
-               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS avg_fare,
-               ROUND(MIN(NULLIF(ref_tot_fare, 0))::numeric, 0) AS min_fare,
-               ROUND(MAX(ref_tot_fare)::numeric, 0) AS max_fare
+        SELECT ref_org || '-' || ref_dst AS route,
+               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS avg_fare
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY ref_org, ref_dst
         ORDER BY avg_fare DESC
     """), {"cap_date": cap_date}).fetchall()
     return {
-        "columns": ["#", "Route", "PW Avg Fare", "Min Fare", "Max Fare"],
+        "columns": ["#", "Route", "PW Avg Fare"],
         "rows": [
-            {"rank": i, "route": r[0], "avg_fare": _n_i(r[1]),
-             "min_fare": _n_i(r[2]), "max_fare": _i(r[3])}
+            {"rank": i, "route": r[0], "avg_fare": _n_i(r[1])}
             for i, r in enumerate(rows, start=1)
         ],
     }
 
 
 def _detail_pw_comp_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
+    # Aligned to JY (_detail_jy_comp_fare_by_route): per-route average competitor
+    # fare. Source rows are one per route×comp_al (same grouping/order as the PW
+    # own-fare detail); each route's per-competitor comp_fare values are then
+    # averaged with equal weight per competitor. NULL comp_fare values are
+    # excluded from the mean and routes with no valid competitor fare are dropped.
     rows = db.execute(text(f"""
-        SELECT comp_al,
-               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS avg_fare,
-               ROUND(MIN(NULLIF(comp_tot_fare, 0))::numeric, 0) AS min_fare,
-               ROUND(MAX(comp_tot_fare)::numeric, 0) AS max_fare,
-               COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
+        SELECT ref_org || '-' || ref_dst AS route,
+               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS comp_fare,
+               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS pw_fare
         FROM {view}
         WHERE cap_date = :cap_date
-        GROUP BY comp_al
-        ORDER BY avg_fare DESC
+        GROUP BY ref_org, ref_dst, comp_al
+        ORDER BY pw_fare DESC
     """), {"cap_date": cap_date}).fetchall()
+    order: list[str] = []
+    totals: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    for route, comp_fare, _pw in rows:
+        if route not in counts:
+            order.append(route)
+            totals[route] = 0.0
+            counts[route] = 0
+        if comp_fare is not None:
+            totals[route] += float(comp_fare)
+            counts[route] += 1
+    out: list[dict[str, Any]] = []
+    rank = 1
+    for route in order:
+        if counts[route] == 0:
+            continue
+        out.append({"rank": rank, "route": route, "avg_comp_fare": round(totals[route] / counts[route])})
+        rank += 1
     return {
-        "columns": ["#", "Competitor", "Avg Fare", "Min Fare", "Max Fare", "Routes"],
-        "rows": [
-            {"rank": i, "comp_al": r[0], "avg_fare": _n_i(r[1]),
-             "min_fare": _n_i(r[2]), "max_fare": _i(r[3]), "routes": _i(r[4])}
-            for i, r in enumerate(rows, start=1)
-        ],
+        "columns": ["#", "Route", "Competitors Avg Fare"],
+        "rows": out,
     }
 
 
