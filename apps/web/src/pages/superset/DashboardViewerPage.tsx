@@ -35,12 +35,14 @@ const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline:
   '3': { title: 'FJL Dashboard', tenant: 'FJL', isAirline: false, freshnessDomain: 'Cruise/Ferry CPI \u2013 FJL' },
 };
 
-// Phased rollout of the Chart-view cap_date filter. JY (dashboard id 1) only.
-// Extend after the chart manifest exposes has_cap_date AND every chart on the
-// target dashboard is confirmed to have 0 active saved adhoc_filters (so the
-// form_data `adhoc_filters` override is safe to apply wholesale without
-// clobbering a real saved filter). See SingleChartViewer for the injection.
-const CAP_DATE_CHARTVIEW_DASHBOARDS = [1];
+// Phased rollout of the Chart-view cap_date filter.
+// NOTE: these are APP-ROUTE ids (JY=1, PW=2, FJL=3), NOT Superset dashboard
+// ids (JY=1, PW=3, FJL=2) — the value is checked against Number(useParams id).
+// Enabled: JY (1), PW (2). PW verified 8/8 chart-view slices sit on cap_date
+// datasets with 0 active saved adhoc_filters, so the form_data `adhoc_filters`
+// override is safe to apply wholesale without clobbering a real saved filter.
+// FJL (3) intentionally left out. See SingleChartViewer for the injection.
+const CAP_DATE_CHARTVIEW_DASHBOARDS = [1, 2];
 
 // Superset Embedded SDK type (UMD bundle loaded via CDN in index.html)
 declare global {
