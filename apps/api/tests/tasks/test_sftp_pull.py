@@ -31,10 +31,10 @@ from app.tasks.sftp_pull import run_pull, sftp_pull_for_schedule
 
 def _admin_user_id(db_session):
     row = db_session.execute(
-        text("SELECT id FROM app_user WHERE email = 'admin@skywave.com'")
+        text("SELECT id FROM app_user WHERE email = 'admin@rts.com'")
     ).first()
     assert row, (
-        "test prerequisite: admin@skywave.com must exist (migration 016)"
+        "test prerequisite: admin@rts.com must exist (migration 016)"
     )
     return row[0]
 
@@ -168,7 +168,7 @@ def test_happy_path(db_session, sftpserver, tmp_path: Path):
     with sftpserver.serve_content({"upload": {fname: payload}}):
         cid = _insert_connection(db_session, sftpserver)
         sid = _insert_schedule(db_session, cid)
-        result = run_pull(db_session, sid, staging_root=tmp_path)
+        result = run_pull(db_session, sid, scope="all", staging_root=tmp_path)
 
     assert result["status"] == "SUCCESS"
     assert result["files_seen"] == 1
@@ -207,7 +207,7 @@ def test_idempotency_second_run_skips(db_session, sftpserver, tmp_path: Path):
         cid = _insert_connection(db_session, sftpserver)
         sid = _insert_schedule(db_session, cid)
 
-        result1 = run_pull(db_session, sid, staging_root=tmp_path)
+        result1 = run_pull(db_session, sid, scope="all", staging_root=tmp_path)
         assert result1["jobs_committed"] == 1
 
         snap_after_1 = db_session.execute(
@@ -218,7 +218,7 @@ def test_idempotency_second_run_skips(db_session, sftpserver, tmp_path: Path):
             {"f": fname},
         ).scalar()
 
-        result2 = run_pull(db_session, sid, staging_root=tmp_path)
+        result2 = run_pull(db_session, sid, scope="all", staging_root=tmp_path)
 
     assert result2["status"] == "SUCCESS"
     assert result2["files_seen"] == 1

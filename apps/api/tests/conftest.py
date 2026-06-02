@@ -46,15 +46,15 @@ def db_session():
 
 @pytest.fixture
 def admin_user(db_session):
-    """The canonical Skywave admin app_user row (UUID + email)."""
+    """The canonical RTS platform admin app_user row (UUID + email)."""
     row = db_session.execute(
         text(
             "SELECT id, email, tenant_id FROM app_user "
-            "WHERE email = 'admin@skywave.com'"
+            "WHERE email = 'admin@rts.com'"
         )
     ).first()
     if not row:
-        pytest.skip("Canonical admin@skywave.com user not found in DB")
+        pytest.skip("Canonical admin@rts.com user not found in DB")
     return {"id": row[0], "email": row[1], "tenant_id": row[2]}
 
 
@@ -64,7 +64,7 @@ def admin_jwt_payload(admin_user):
     return {
         "sub": str(admin_user["id"]),
         "tenant_id": str(admin_user["tenant_id"]),
-        "tenant_slug": "skywave",
+        "tenant_slug": "rts",
         "roles": ["TENANT_ADMIN"],
         "token_type": "access",
     }
