@@ -312,3 +312,230 @@ def test_decryption_failure_no_retry(db_session, sftpserver, tmp_path: Path):
 
     # Confirm InvalidToken is NOT in autoretry_for (celery wouldn't retry)
     assert InvalidToken not in (sftp_pull_for_schedule.autoretry_for or ())
+
+# ── velocity batch isolation (added after run 5e041969) ─────────────
+# Self-contained helpers: the module-level _admin_user_id() above still
+# hardcodes the pre-rename admin@skywave.com (migration 026 renamed the
+# platform tenant skywave -> rts), so it skips. These resolve the admin
+# tolerantly so this regression test for the run_pull hardening runs.
+
+
+def _resolve_admin_id(db_session):
+    row = db_session.execute(
+        text(
+            "SELECT id FROM app_user "
+            "WHERE email IN ('admin@rts.com', 'admin@skywave.com') "
+            "ORDER BY (email = 'admin@rts.com') DESC LIMIT 1"
+        )
+    ).first()
+    if not row:
+        pytest.skip("no platform admin user (admin@rts.com) in DB")
+    return row[0]
+
+
+def _insert_velocity_connection(db_session, sftpserver):
+    cid = str(uuid.uuid4())
+    db_session.execute(
+        text(
+            "INSERT INTO sftp_connection "
+            "(id, tenant_code, name, host, port, username, "
+            " password_ciphertext, remote_base_path, is_active, "
+            " created_by_user_id) "
+            "VALUES (:id, 'jy', :name, :host, :port, 'testuser', "
+            "        :pw, '/upload', true, :uid)"
+        ),
+        {
+            "id": cid,
+            "name": "vel-conn-" + cid[:8],
+            "host": sftpserver.host,
+            "port": sftpserver.port,
+            "pw": encrypt_str("testpass"),
+            "uid": _resolve_admin_id(db_session),
+        },
+    )
+    return cid
+
+
+def _safe_velocity_dates(db_session, n: int, *, days_back_start=300):
+    """Pick ``n`` distinct dates with no jy VELOCITY ingestion_jobs row."""
+    used = set(
+        db_session.execute(
+            text(
+                "SELECT file_date FROM ingestion_jobs "
+                "WHERE tenant_code = 'jy' AND domain = 'VELOCITY'"
+            )
+        ).scalars().all()
+    )
+    out: list[date] = []
+    offset = days_back_start
+    while len(out) < n and offset < days_back_start + 400:
+        d = date.today() - timedelta(days=offset)
+        if d not in used:
+            out.append(d)
+        offset += 1
+    assert len(out) == n, "no clear velocity date window"
+    return out
+
+
+def _vfname(fd: date) -> str:
+    return f"JY_VL_{fd.strftime('%d%m%y')}.csv"
+
+
+def _valid_velocity_csv(fd: date, *, n_rows: int = 2) -> bytes:
+    """Headerless 13-col velocity rows with a parseable M/D/YYYY DepDate.
+
+    ``n_rows`` varies the row count (and thus the content sha) so callers
+    can build two same-date files with different content to force a
+    CONFLICT (vs. an identical-content DUPLICATE).
+    """
+    dd = f"{fd.month}/{fd.day}/{fd.year}"
+    rows = [
+        f"{dd},{900 + i:04d},0416,DELBOM,AT4,Leg,{i + 1},0,Y,"
+        f"{20 + i},48,44,85"
+        for i in range(n_rows)
+    ]
+    return ("\r\n".join(rows) + "\r\n").encode("utf-8")
+
+
+def _insert_velocity_schedule(db_session, conn_id):
+    sid = str(uuid.uuid4())
+    db_session.execute(
+        text(
+            "INSERT INTO ingestion_schedule "
+            "(id, sftp_connection_id, tenant_code, domain, "
+            " cron_expression, timezone, filename_regex, "
+            " replace_existing, is_enabled, created_by_user_id) "
+            "VALUES (:id, :cid, 'jy', 'VELOCITY', '* * * * *', 'UTC', "
+            "        :rx, false, true, :uid)"
+        ),
+        {
+            "id": sid,
+            "cid": conn_id,
+            "rx": r"^JY_VL_(\d{6})\.csv$",
+            "uid": _resolve_admin_id(db_session),
+        },
+    )
+    db_session.commit()
+    return sid
+
+
+def test_batch_valid_empty_valid_isolates_and_persists(
+    db_session, sftpserver, tmp_path: Path
+):
+    """(f) Batch [valid, empty, valid]: both valids COMMIT, empty is
+    SKIPPED (no abort), run finalises PARTIAL with persisted telemetry."""
+    d1, d2, d3 = _safe_velocity_dates(db_session, 3)
+    f1, f2, f3 = _vfname(d1), _vfname(d2), _vfname(d3)
+    content = {
+        f1: _valid_velocity_csv(d1),
+        f2: b"\r\n\r\n\r\n\r\n",  # all-blank -> SKIPPED
+        f3: _valid_velocity_csv(d3),
+    }
+
+    with sftpserver.serve_content({"upload": content}):
+        cid = _insert_velocity_connection(db_session, sftpserver)
+        sid = _insert_velocity_schedule(db_session, cid)
+        result = run_pull(
+            db_session, sid, scope="all", staging_root=tmp_path
+        )
+
+    assert result["status"] == "PARTIAL"
+    assert result["files_seen"] == 3
+    assert result["files_pulled"] == 3
+    assert result["jobs_committed"] == 2
+
+    rows = dict(
+        db_session.execute(
+            text(
+                "SELECT remote_filename, outcome FROM ingested_file "
+                "WHERE schedule_id = :sid"
+            ),
+            {"sid": sid},
+        ).all()
+    )
+    assert rows[f1] == "COMMITTED"
+    assert rows[f2] == "SKIPPED"
+    assert rows[f3] == "COMMITTED"
+
+    # the empty file must NOT have produced velocity facts
+    assert db_session.execute(
+        text("SELECT COUNT(*) FROM velocity_snapshot WHERE source_file = :f"),
+        {"f": f2},
+    ).scalar() == 0
+
+    # run-level telemetry persisted (NOT all-zeros) on a non-SUCCESS run
+    run_row = db_session.execute(
+        text(
+            "SELECT files_seen, files_pulled, jobs_committed, status, "
+            "detail_log FROM ingestion_run WHERE id = :id"
+        ),
+        {"id": result["run_id"]},
+    ).first()
+    assert run_row[0] == 3
+    assert run_row[1] == 3
+    assert run_row[2] == 2
+    assert run_row[3] == "PARTIAL"
+    detail = run_row[4]
+    assert any(
+        e.get("event") == "RUN_SUMMARY" and e.get("jobs_skipped") == 1
+        for e in detail
+    )
+    assert any(e.get("outcome") == "SKIPPED" for e in detail)
+
+
+def test_batch_conflict_is_success_not_partial(
+    db_session, sftpserver, tmp_path: Path
+):
+    """A benign CONFLICT (file_date already committed) must NOT downgrade
+    the run to PARTIAL: [valid, same-date-different-content, valid] ->
+    SUCCESS, with 2 COMMITTED + 1 CONFLICT + 0 skipped/errored."""
+    d1, dmid, d3 = _safe_velocity_dates(db_session, 3, days_back_start=520)
+    cid = _insert_velocity_connection(db_session, sftpserver)
+    sid = _insert_velocity_schedule(db_session, cid)
+
+    # Seed: commit dmid first (separate run).
+    with sftpserver.serve_content(
+        {"upload": {_vfname(dmid): _valid_velocity_csv(dmid, n_rows=2)}}
+    ):
+        seed = run_pull(db_session, sid, scope="all", staging_root=tmp_path)
+    assert seed["jobs_committed"] == 1
+
+    # Measured run: dmid reappears with DIFFERENT content (different sha,
+    # same file_date) -> not a sha-duplicate -> commit -> CONFLICT.
+    batch = {
+        _vfname(d1): _valid_velocity_csv(d1, n_rows=2),
+        _vfname(dmid): _valid_velocity_csv(dmid, n_rows=3),
+        _vfname(d3): _valid_velocity_csv(d3, n_rows=2),
+    }
+    with sftpserver.serve_content({"upload": batch}):
+        result = run_pull(db_session, sid, scope="all", staging_root=tmp_path)
+
+    assert result["status"] == "SUCCESS"
+    assert result["jobs_committed"] == 2
+
+    outcomes = dict(
+        db_session.execute(
+            text(
+                "SELECT remote_filename, outcome FROM ingested_file "
+                "WHERE run_id = :rid"
+            ),
+            {"rid": result["run_id"]},
+        ).all()
+    )
+    assert outcomes[_vfname(d1)] == "COMMITTED"
+    assert outcomes[_vfname(dmid)] == "CONFLICT"
+    assert outcomes[_vfname(d3)] == "COMMITTED"
+
+    run_row = db_session.execute(
+        text(
+            "SELECT status, detail_log FROM ingestion_run WHERE id = :id"
+        ),
+        {"id": result["run_id"]},
+    ).first()
+    assert run_row[0] == "SUCCESS"
+    assert any(
+        e.get("event") == "RUN_SUMMARY"
+        and e.get("jobs_conflict") == 1
+        and e.get("jobs_rejected") == 0
+        for e in run_row[1]
+    )
