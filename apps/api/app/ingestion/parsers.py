@@ -184,33 +184,54 @@ def read_data_file(
             wb.close()
         return
 
-    inject_velocity_header = False
     if domain == "VELOCITY":
+        # Velocity exports occasionally arrive with leading blank lines,
+        # or as nothing but blank lines (an empty data day -- e.g. the
+        # all-CRLF PW_VL_030326.csv that aborted run 5e041969). Skip any
+        # leading blank lines to find the first content line. If there is
+        # none, the file is empty: yield nothing (the caller records a
+        # non-fatal SKIPPED outcome) instead of raising.
         with open(file_path, "r", encoding="utf-8-sig") as fh:
-            first_line = fh.readline()
-        if first_line:
-            first_row = next(csv.reader([first_line]), [])
-            first_field = first_row[0].strip() if first_row else ""
-            n_fields = len(first_row)
-            if first_field != "DepDate":
-                if n_fields != 13:
-                    raise ValueError(
-                        f"Headerless velocity file has {n_fields} "
-                        "columns, expected 13"
-                    )
-                inject_velocity_header = True
-                log.info(
-                    "Auto-detected headerless velocity file; injecting "
-                    "canonical 13-column header (file=%s)",
-                    file_path,
+            lines = fh.readlines()
+        start = next(
+            (i for i, ln in enumerate(lines) if ln.strip() != ""), None
+        )
+        if start is None:
+            log.info(
+                "Velocity file has no content lines (empty); skipping "
+                "(file=%s)",
+                file_path,
+            )
+            return
+        content_lines = lines[start:]
+        first_row = next(csv.reader([content_lines[0]]), [])
+        first_field = first_row[0].strip() if first_row else ""
+        n_fields = len(first_row)
+        if first_field == "DepDate":
+            reader = csv.DictReader(content_lines)
+        else:
+            # Headerless: the first content line must carry exactly the 13
+            # canonical columns. A file that DOES have content but the
+            # wrong column count still raises loudly -- only all-blank
+            # files are skipped above.
+            if n_fields != 13:
+                raise ValueError(
+                    f"Headerless velocity file has {n_fields} "
+                    "columns, expected 13"
                 )
+            log.info(
+                "Auto-detected headerless velocity file; injecting "
+                "canonical 13-column header (file=%s)",
+                file_path,
+            )
+            reader = csv.DictReader(
+                content_lines, fieldnames=_VELOCITY_CANONICAL_HEADERS
+            )
+        for row in reader:
+            yield row
+        return
 
     with open(file_path, "r", encoding="utf-8-sig") as fh:
-        if inject_velocity_header:
-            reader = csv.DictReader(
-                fh, fieldnames=_VELOCITY_CANONICAL_HEADERS
-            )
-        else:
-            reader = csv.DictReader(fh)
+        reader = csv.DictReader(fh)
         for row in reader:
             yield row

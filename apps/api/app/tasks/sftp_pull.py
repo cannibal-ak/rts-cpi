@@ -351,17 +351,25 @@ def _process_one_file(
         if up_result.duplicate:
             outcome = "DUPLICATE"
         else:
-            svc.validate_job(up_result.job.id, system_payload)
-            try:
-                svc.commit_job(
-                    up_result.job.id,
-                    system_payload,
-                    replace_existing=schedule["replace_existing"],
-                )
-                outcome = "COMMITTED"
-            except IngestionConflictError as exc:
-                outcome = "CONFLICT"
-                error_msg = str(exc)
+            vr = svc.validate_job(up_result.job.id, system_payload)
+            if vr.row_count_total == 0:
+                # Empty file (no data rows) -- e.g. an all-blank velocity
+                # export. validate_job has already marked the job REJECTED;
+                # we do NOT commit an empty job. Record a non-fatal SKIPPED
+                # outcome so the batch carries on.
+                outcome = "SKIPPED"
+                error_msg = "empty file -- no data rows; skipped"
+            else:
+                try:
+                    svc.commit_job(
+                        up_result.job.id,
+                        system_payload,
+                        replace_existing=schedule["replace_existing"],
+                    )
+                    outcome = "COMMITTED"
+                except IngestionConflictError as exc:
+                    outcome = "CONFLICT"
+                    error_msg = str(exc)
     except IngestionError as exc:
         outcome = "REJECTED"
         error_msg = str(exc)
@@ -430,6 +438,13 @@ def run_pull(
     target_date = _resolve_target_date(scope)
 
     run_id: Optional[str] = None
+    # Pre-initialise run tallies + detail_log so the except (infra-failure)
+    # path can still persist partial telemetry instead of all-zeros if we
+    # fail before or during the per-file loop.
+    files_seen = files_pulled = jobs_created = jobs_committed = 0
+    jobs_skipped = files_errored = 0
+    jobs_conflict = jobs_rejected = 0
+    detail_log: list[dict] = []
     try:
         schedule = _load_schedule(db, schedule_id)
         connection = _load_connection(db, schedule["sftp_connection_id"])
@@ -492,28 +507,111 @@ def run_pull(
                     "note": "operator cancel observed before next file",
                 })
                 break
-            result = _process_one_file(
-                db, svc, client, connection, schedule,
-                run_id, entry, system_payload,
-            )
+            try:
+                result = _process_one_file(
+                    db, svc, client, connection, schedule,
+                    run_id, entry, system_payload,
+                )
+            except Exception as exc:
+                # Per-file isolation: an unexpected error on one file must
+                # never abort the rest of the batch. Roll back its partial
+                # transaction, record an ERROR row in a fresh transaction,
+                # and carry on to the next file.
+                db.rollback()
+                filename = entry["filename"]
+                err = str(exc)[:2000]
+                logger.exception(
+                    "ingestion.run_pull: file %s failed; recording ERROR "
+                    "and continuing (run_id=%s)", filename, run_id,
+                )
+                # ingested_file.sha256 is NOT NULL and we may not have
+                # hashed the content, so synthesise a per-run marker hash
+                # (unique within the run via the filename) for the row.
+                marker_sha = hashlib.sha256(
+                    f"ERROR|{run_id}|{filename}".encode("utf-8")
+                ).hexdigest()
+                try:
+                    db.execute(
+                        text(
+                            "INSERT INTO ingested_file "
+                            "(id, run_id, schedule_id, remote_filename, "
+                            " remote_size_bytes, remote_mtime_utc, sha256, "
+                            " ingestion_job_id, outcome, error_message) "
+                            "VALUES (:id, :rid, :sid, :name, :size, "
+                            "        :mtime, :sha, NULL, 'ERROR', :err)"
+                        ),
+                        {
+                            "id": str(uuid.uuid4()),
+                            "rid": run_id,
+                            "sid": str(schedule["id"]),
+                            "name": filename,
+                            "size": entry.get("size", 0),
+                            "mtime": entry["mtime_utc"],
+                            "sha": marker_sha,
+                            "err": err,
+                        },
+                    )
+                    db.commit()
+                except Exception:
+                    db.rollback()
+                    logger.exception(
+                        "ingestion.run_pull: failed to record ERROR row "
+                        "for %s (run_id=%s)", filename, run_id,
+                    )
+                detail_log.append(
+                    {"filename": filename, "outcome": "ERROR", "error": err}
+                )
+                files_pulled += 1
+                files_errored += 1
+                continue
             detail_log.append(result)
-            if result["outcome"] != "DUPLICATE":
+            outcome = result["outcome"]
+            if outcome == "DUPLICATE":
+                pass
+            elif outcome == "SKIPPED":
+                files_pulled += 1
+                jobs_skipped += 1
+            elif outcome == "ERROR":
+                files_pulled += 1
+                files_errored += 1
+            else:
                 files_pulled += 1
                 jobs_created += 1
-            if result["outcome"] == "COMMITTED":
-                jobs_committed += 1
+                if outcome == "COMMITTED":
+                    jobs_committed += 1
+                elif outcome == "CONFLICT":
+                    jobs_conflict += 1
+                elif outcome == "REJECTED":
+                    jobs_rejected += 1
 
+        # Status reflects DATA outcomes only, and only GENUINE problems
+        # drive PARTIAL: hard per-file errors, empty-file skips, or real
+        # rejects. Benign CONFLICT (date already committed -- idempotent)
+        # and DUPLICATE (same sha+name re-seen) do NOT count, so a clean
+        # idempotent re-pull stays SUCCESS. FAILED is reserved for the
+        # infra/connection-level except path below.
+        problems = files_errored + jobs_skipped + jobs_rejected
         if cancelled:
             final_status = "CANCELLED"
-        elif jobs_created == 0:
+        elif files_pulled == 0:
             final_status = "SUCCESS"
-        elif jobs_committed == jobs_created:
+        elif problems == 0:
             final_status = "SUCCESS"
-        elif jobs_committed > 0:
-            final_status = "PARTIAL"
         else:
-            final_status = "FAILED"
+            final_status = "PARTIAL"
 
+        detail_log.append({
+            "event": "RUN_SUMMARY",
+            "files_seen": files_seen,
+            "files_pulled": files_pulled,
+            "jobs_created": jobs_created,
+            "jobs_committed": jobs_committed,
+            "jobs_conflict": jobs_conflict,
+            "jobs_rejected": jobs_rejected,
+            "jobs_skipped": jobs_skipped,
+            "files_errored": files_errored,
+            "status": final_status,
+        })
         _finalize_run(
             db, run_id, final_status,
             files_seen=files_seen,
@@ -542,7 +640,30 @@ def run_pull(
     except Exception as exc:
         if run_id is not None:
             try:
-                _finalize_run(db, run_id, "FAILED", error_summary=str(exc)[:1000])
+                # Persist whatever telemetry we accumulated before the
+                # infra-level failure so the UI does not show all-zeros.
+                db.rollback()
+                detail_log.append({
+                    "event": "RUN_ABORTED",
+                    "error": str(exc)[:1000],
+                    "files_seen": files_seen,
+                    "files_pulled": files_pulled,
+                    "jobs_created": jobs_created,
+                    "jobs_committed": jobs_committed,
+                    "jobs_conflict": jobs_conflict,
+                    "jobs_rejected": jobs_rejected,
+                    "jobs_skipped": jobs_skipped,
+                    "files_errored": files_errored,
+                })
+                _finalize_run(
+                    db, run_id, "FAILED",
+                    files_seen=files_seen,
+                    files_pulled=files_pulled,
+                    jobs_created=jobs_created,
+                    jobs_committed=jobs_committed,
+                    error_summary=str(exc)[:1000],
+                    detail_log=detail_log,
+                )
             except Exception:
                 logger.exception("failed to finalise run %s after error", run_id)
         raise
