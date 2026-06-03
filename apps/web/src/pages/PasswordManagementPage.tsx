@@ -32,6 +32,20 @@ function formatTenantCell(user: AdminUserListItem): string {
   return `${orgName} - ${user.tenant_slug.toUpperCase()}`;
 }
 
+// Display-only role-label overrides for the Password Management table.
+// These do NOT change the stored role (still TENANT_ADMIN), the API response,
+// or any RBAC check — they only relabel the chip text for two specific
+// accounts. Keyed on lowercased email; anything not listed falls through to
+// the real role value (TENANT_ADMIN).
+const ROLE_LABEL_OVERRIDES: Record<string, string> = {
+  'admin@rts.com': 'RTS_SuperAdmin',
+  'alt@airline.com': 'Demo_Admin',
+};
+
+function displayRole(user: AdminUserListItem): string {
+  return ROLE_LABEL_OVERRIDES[user.email.toLowerCase()] ?? (user.role || '—');
+}
+
 const REFRESH_INTERVAL_MS = 30_000;
 
 interface SnackbarState {
@@ -370,7 +384,7 @@ export default function PasswordManagementPage() {
                     <TableCell sx={{ fontFamily: 'inherit' }}>{user.email}</TableCell>
                     <TableCell>{formatTenantCell(user)}</TableCell>
                     <TableCell>
-                      <Chip size="small" label={user.role || '—'} variant="outlined" />
+                      <Chip size="small" label={displayRole(user)} variant="outlined" />
                     </TableCell>
                     <TableCell>{userStatusChip(user)}</TableCell>
                     <TableCell sx={{ color: 'text.secondary', fontSize: 13 }}>
