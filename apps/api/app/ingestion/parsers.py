@@ -67,7 +67,7 @@ def parse_velocity_date(value: str | None) -> date | None:
     s = str(value).strip()
     if not s or s == "0":
         return None
-    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y"):
+    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
         try:
             return datetime.strptime(s, fmt).date()
         except (ValueError, TypeError):
