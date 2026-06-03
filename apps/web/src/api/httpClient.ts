@@ -429,7 +429,7 @@ export const httpClient: CpiApiClient = {
     updateUserRoles: (roles, tenant_id) => post<{ roles: string[] }>('/api/v1/tenant/update-roles', { tenant_id, roles }),
   },
   superset: {
-    getGuestToken: (dashboardId: string, dateFilter?: DashboardDateFilter) => {
+    getGuestToken: (dashboardId: string, dateFilter?: DashboardDateFilter, currency?: string) => {
       const params: Record<string, string | number | undefined> = {
         dashboard_id: dashboardId,
       };
@@ -438,6 +438,9 @@ export const httpClient: CpiApiClient = {
       } else if (dateFilter?.mode === 'range' && dateFilter.capDateFrom && dateFilter.capDateTo) {
         params.cap_date_from = dateFilter.capDateFrom;
         params.cap_date_to   = dateFilter.capDateTo;
+      }
+      if (currency) {
+        params.currency = currency;
       }
       return get<{
         token: string;

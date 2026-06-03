@@ -144,6 +144,22 @@ TENANT_CAPDATE_ONLY_TABLES = {
     ],
 }
 
+# FJL currency scoping. FJL fares are stored as PER-CURRENCY rows (native
+# scraped values, never FX-converted), so syncing the app's currency selector
+# into Superset means ANDing a currency row-filter onto the cap_date RLS clause.
+# Unlike cap_date (uniform `cap_date` column everywhere), the currency column
+# name differs by dataset: the row-level views project `curr_code`, while the
+# aggregated virtual datasets project it as `currency`. Keyed by Superset
+# dataset id so the right column is used per dataset. Datasets absent from this
+# map (all JY/PW datasets, dataset 22 which has no currency column) get the
+# plain cap_date-only clause, unchanged.
+FJL_CURRENCY_COLUMN_BY_DATASET = {
+    5: "curr_code", 16: "curr_code",
+    19: "currency", 20: "currency", 21: "currency",
+    23: "currency", 24: "currency",  # not on dashboard 2, harmless
+}
+ALLOWED_FJL_CURRENCIES = {"NOK", "EUR", "DKK"}
+
 
 # ── Superset client ─────────────────────────────────────────
 
@@ -272,6 +288,7 @@ async def fetch_guest_token(
     cap_date_eq: Optional[str] = None,
     cap_date_from: Optional[str] = None,
     cap_date_to: Optional[str] = None,
+    currency: Optional[str] = None,
     user_identity: str = Depends(get_user_identity),
     user_roles: list[str] = Depends(get_user_roles),
 ):
@@ -280,6 +297,10 @@ async def fetch_guest_token(
     Optional cap_date_* params append an extra RLS clause so chart queries
     are server-side scoped to a single day (cap_date_eq) or a window
     (cap_date_from..cap_date_to). The React DateFilterToggle drives this.
+
+    Optional `currency` (FJL only: NOK | EUR | DKK) ANDs a per-dataset currency
+    row-filter onto the cap_date clause so the FJL app currency selector scopes
+    every chart to a single currency. The React Currency dropdown drives this.
     """
 
     # 1. Lookup dashboard config
@@ -346,11 +367,28 @@ async def fetch_guest_token(
             raise HTTPException(400, detail={"message": "cap_date_from must be <= cap_date_to"})
         cap_date_clause = f"cap_date >= '{cap_date_from}' AND cap_date <= '{cap_date_to}'"
 
+    # 3c. Optional FJL currency scoping. Like cap_date, this value is
+    #     interpolated into an RLS clause string, so it must be validated
+    #     against a fixed allow-list — never interpolate unvalidated input.
+    if currency is not None:
+        currency = currency.upper()
+        if currency not in ALLOWED_FJL_CURRENCIES:
+            raise HTTPException(400, detail={
+                "message": f"Invalid currency: must be one of {sorted(ALLOWED_FJL_CURRENCIES)}",
+            })
+
     # cap_date clause: applies to BOTH the tenant view datasets and the
     # cap-date-only KPI virtual datasets. Both groups have a cap_date column.
+    # For FJL, AND a per-dataset currency row-filter onto the same rule when a
+    # currency was supplied (column name varies by dataset — see
+    # FJL_CURRENCY_COLUMN_BY_DATASET). Datasets not in that map keep the exact
+    # cap_date-only clause they had before.
     if cap_date_clause:
         for ds_id in tenant_dataset_ids + capdate_only_dataset_ids:
-            rls_rules.append({"dataset": ds_id, "clause": cap_date_clause})
+            clause = cap_date_clause
+            if currency and ds_id in FJL_CURRENCY_COLUMN_BY_DATASET:
+                clause += f" AND {FJL_CURRENCY_COLUMN_BY_DATASET[ds_id]} = '{currency}'"
+            rls_rules.append({"dataset": ds_id, "clause": clause})
 
     # 4. Get guest token (use numeric Superset ID – see create_guest_token docstring)
     try:

@@ -203,6 +203,7 @@ export interface CpiApiClient {
     getGuestToken(
       dashboardId: string,
       dateFilter?: DashboardDateFilter,
+      currency?: string,
     ): Promise<{
         token: string;
         dashboard_uuid: string;

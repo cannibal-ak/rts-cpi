@@ -62,6 +62,14 @@ const pulse = keyframes`
   100% { transform: scale(1); opacity: 0.8; }
 `;
 
+// FJL fares are rendered symbol-less in the embedded Superset charts (the wrong
+// '$' was stripped, and a static D3 symbol can't track the live currency); this
+// map backs the "Values in <CUR>" indicator. Mirrors KPIRow's CURRENCY_SYMBOL —
+// kept local rather than exporting that const across modules.
+const FJL_CURRENCY_SYMBOL: Record<'NOK' | 'EUR' | 'DKK', string> = {
+  NOK: 'kr', EUR: '€', DKK: 'kr',
+};
+
 export default function DashboardViewerPage() {
   const { id } = useParams<{ id: string }>();
   const { session } = useSession();
@@ -87,6 +95,10 @@ export default function DashboardViewerPage() {
   // EUR/DKK/NOK across regional sites). NOK is the default since Fjord Line
   // is Norwegian. JY/PW have no currency dimension and ignore this state.
   const [fjlCurrency, setFjlCurrency] = useState<'NOK' | 'EUR' | 'DKK'>('NOK');
+  // Kept in a ref so the SDK's fetchGuestToken closure always reads the latest
+  // currency (same pattern as dateFilterRef above).
+  const fjlCurrencyRef = useRef(fjlCurrency);
+  useEffect(() => { fjlCurrencyRef.current = fjlCurrency; }, [fjlCurrency]);
 
   const meta = id ? DASHBOARD_META[id] : undefined;
 
@@ -212,7 +224,10 @@ export default function DashboardViewerPage() {
         //   the cap_date RLS clause — otherwise the iframe briefly loads
         //   unfiltered data before the SDK re-fetches.
         setIsLoading(true);
-        const metadata = await api.superset.getGuestToken(id, dateFilterRef.current);
+        const metadata = await api.superset.getGuestToken(
+          id, dateFilterRef.current,
+          meta.tenant === 'FJL' ? fjlCurrencyRef.current : undefined,
+        );
 
         // ── 3b. Fetch data freshness to get the report date ──
         try {
@@ -234,7 +249,10 @@ export default function DashboardViewerPage() {
           supersetDomain: SUPERSET_URL,
           mountPoint: mountRef.current!,
           fetchGuestToken: async () => {
-            const { token } = await api.superset.getGuestToken(id, dateFilterRef.current);
+            const { token } = await api.superset.getGuestToken(
+              id, dateFilterRef.current,
+              meta.tenant === 'FJL' ? fjlCurrencyRef.current : undefined,
+            );
             return token;
           },
           dashboardUiConfig: {
@@ -389,14 +407,27 @@ export default function DashboardViewerPage() {
           />
           <Box sx={{ flexGrow: 1 }} />
           {meta?.tenant === 'FJL' && (
-            <FormControl size="small" sx={{ ml: 1.5, minWidth: 88 }}>
+            <>
+              {/* Embedded charts now show fares without a symbol; this indicator
+                  names the active currency. Plain label — re-renders on toggle,
+                  no re-embed needed. */}
+              <Typography
+                sx={{ fontSize: 12, color: 'text.secondary', whiteSpace: 'nowrap' }}
+                aria-live="polite"
+              >
+                Values in {fjlCurrency} ({FJL_CURRENCY_SYMBOL[fjlCurrency]})
+              </Typography>
+              <FormControl size="small" sx={{ ml: 1.5, minWidth: 88 }}>
               {/* No floating <InputLabel> here — at size="small" with the
                   outlined variant it tends to clip the notch and visually
                   push into the row above. renderValue keeps the control
                   self-describing ("Currency: NOK") without the label. */}
               <Select
                 value={fjlCurrency}
-                onChange={(e) => setFjlCurrency(e.target.value as 'NOK' | 'EUR' | 'DKK')}
+                onChange={(e) => {
+                  setFjlCurrency(e.target.value as 'NOK' | 'EUR' | 'DKK');
+                  setRefreshKey(k => k + 1);   // re-embed with the new currency-scoped guest token
+                }}
                 renderValue={(v) => `Currency: ${v}`}
                 inputProps={{ 'aria-label': 'Currency' }}
                 sx={{
@@ -409,7 +440,8 @@ export default function DashboardViewerPage() {
                 <MenuItem value="EUR" sx={{ fontSize: 13 }}>EUR</MenuItem>
                 <MenuItem value="DKK" sx={{ fontSize: 13 }}>DKK</MenuItem>
               </Select>
-            </FormControl>
+              </FormControl>
+            </>
           )}
         </Box>
 
