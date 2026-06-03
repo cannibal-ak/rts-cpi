@@ -174,6 +174,20 @@ const JY_COMPETITORS_AVG_FARE_COLS: ColumnDef[] = [
   { header: 'Competitors Avg Fare', field: 'avg_comp_fare', align: 'right' },
 ];
 
+// Sky (demo) reuses JY's KPI keys/builders; only the own-fare label differs.
+const ALT_TITLES: Partial<Record<KpiKey, string>> = {
+  ...TITLES,
+  jy_avg_fare: 'Sky Avg Fare — fare by route',
+};
+const ALT_COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
+  ...COLUMN_CONFIG,
+  jy_avg_fare: [
+    { header: '#', field: 'rank', align: 'right' },
+    { header: 'Route', field: 'route', align: 'center' },
+    { header: 'Sky Avg Fare', field: 'avg_fare', align: 'right' },
+  ],
+};
+
 export interface KPIDetailPanelProps {
   kpiKey: KpiKey | null;        // null ⇒ panel collapsed/hidden
   airlineCode: string;
@@ -207,9 +221,11 @@ export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, currency,
   }, [kpiKey, airlineCode, capDate, currency]);
 
   const isFjl = airlineCode.toUpperCase() === 'FJL';
-  const titles = isFjl ? FJL_TITLES : TITLES;
-  const columnCfg = isFjl ? FJL_COLUMN_CONFIG : COLUMN_CONFIG;
-  const isJy = airlineCode.toUpperCase() === 'JY';
+  const isAlt = airlineCode.toUpperCase() === 'ALT';
+  const titles = isFjl ? FJL_TITLES : (isAlt ? ALT_TITLES : TITLES);
+  const columnCfg = isFjl ? FJL_COLUMN_CONFIG : (isAlt ? ALT_COLUMN_CONFIG : COLUMN_CONFIG);
+  // ALT reuses JY's per-route competitors_avg_fare layout (same backend builder).
+  const isJy = airlineCode.toUpperCase() === 'JY' || isAlt;
   const cols = kpiKey
     ? (isJy && kpiKey === 'competitors_avg_fare'
         ? JY_COMPETITORS_AVG_FARE_COLS

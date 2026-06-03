@@ -4,6 +4,7 @@ export const DASHBOARD_MODULE_MAP: Record<string, ModuleCode> = {
   '1': 'airline_jy',
   '2': 'airline_pw',
   '3': 'cfl_fjl',
+  '4': 'airline_alt',
 };
 
 export function canAccessDashboard(

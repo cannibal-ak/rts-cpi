@@ -7,13 +7,14 @@ import { api } from '../../api';
 import type { DataFreshness } from '../../types';
 
 interface AirlineCpiPageProps {
-  /** Tenant code determines which snapshot view to query (JY or PW). */
-  tenantCode: 'JY' | 'PW';
+  /** Tenant code determines which snapshot view to query (JY, PW or ALT). */
+  tenantCode: 'JY' | 'PW' | 'ALT';
 }
 
 const TENANT_LABELS: Record<string, string> = {
   JY: 'Airline CPI – JY',
   PW: 'Airline CPI – PW',
+  ALT: 'Airline CPI – SKY',
 };
 
 export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
@@ -32,7 +33,7 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   const velocityExportRef = useRef<() => void>(() => {});
 
   const pageTitle = TENANT_LABELS[tenantCode] || `Airline CPI – ${tenantCode}`;
-  const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW'];
+  const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT'];
   const showTabs = TENANTS_WITH_VELOCITY.includes(tenantCode);
 
   useEffect(() => {
@@ -43,7 +44,7 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
 
   useEffect(() => {
     api.stats.getFreshnessMetrics().then(data => {
-      const air = data.find(d => d.domain === 'Airline CPI' || d.domain === `Airline CPI – ${tenantCode}`);
+      const air = data.find(d => d.domain === 'Airline CPI' || d.domain === pageTitle);
       if (air) setFreshness(air);
     });
   }, [tenantCode]);

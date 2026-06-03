@@ -14,7 +14,7 @@ import type { VelocitySnapshot, FilterMetadata } from '../../types';
 
 interface AirlineCpiVelocityTabProps {
   /** Tenant code selects which airline's velocity snapshot to query. */
-  tenantCode: 'JY' | 'PW';
+  tenantCode: 'JY' | 'PW' | 'ALT';
   filters: Record<string, string>;
   onFiltersChange: (f: Record<string, string>) => void;
   /** Parent populates this ref so the page toolbar's Export button can fire CSV. */
@@ -128,7 +128,7 @@ const FETCH_CONCURRENCY = 10;
 
 async function fetchAllRows(
   baseQuery: Record<string, string>,
-  tenantCode: 'JY' | 'PW',
+  tenantCode: 'JY' | 'PW' | 'ALT',
   onProgress?: (loaded: number, total: number) => void,
 ): Promise<VelocitySnapshot[]> {
   const first = await api.airline.velocity.listSnapshots({

@@ -33,7 +33,7 @@ def list_snapshots(
     airline: str | None = None,
 ):
     # Enforce tenant scoping — non-platform users are locked to their own airline
-    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot"}
+    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot"}
     if is_platform_admin(user_identity, user_roles):
         effective_tenant = tenant or "JY"  # platform admin can pick, defaults to JY
     else:
@@ -85,7 +85,7 @@ def get_filter_metadata(
     tenant: str | None = Query(None),
 ):
     # Enforce tenant scoping — non-platform users locked to own airline
-    AIRLINE_TENANTS = {"JY", "PW"}
+    AIRLINE_TENANTS = {"JY", "PW", "ALT"}
     if is_platform_admin(user_identity, user_roles):
         effective_tenant = tenant  # platform admin can pick or see all
     else:
@@ -104,7 +104,7 @@ def get_filter_metadata(
     result = []
     
     # Dates from filenames - filter by resolved tenant
-    search_tenants = [effective_tenant] if effective_tenant else ["JY", "PW"]
+    search_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT"]
     file_dates = get_available_file_dates(data_path, search_tenants)
     if file_dates == ["No file dates available"]:
         file_dates = []
@@ -114,7 +114,7 @@ def get_filter_metadata(
     if effective_tenant:
         db_dates_query = db_dates_query.where(AirlineCpiSnapshot.tenant_code == effective_tenant)
     else:
-        db_dates_query = db_dates_query.where(AirlineCpiSnapshot.tenant_code.in_(["JY", "PW"]))
+        db_dates_query = db_dates_query.where(AirlineCpiSnapshot.tenant_code.in_(["JY", "PW", "ALT"]))
     
     db_dates = [d.isoformat() for d in db.execute(db_dates_query).scalars().all() if d]
     
@@ -129,7 +129,7 @@ def get_filter_metadata(
     if effective_tenant:
         vals = [effective_tenant]
     else:
-        vals = ["JY", "PW"]  # only reachable by platform admin with no tenant param
+        vals = ["JY", "PW", "ALT"]  # only reachable by platform admin with no tenant param
         
     result.append({"field": "airline", "label": "Airline", "values": vals})
 
@@ -146,7 +146,7 @@ def export_snapshots(
     airline: str | None = None,
 ):
     # Enforce tenant scoping — non-platform users locked to own airline
-    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot"}
+    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot"}
     if is_platform_admin(user_identity, user_roles):
         effective_tenant = tenant or "JY"
     else:
@@ -214,6 +214,7 @@ def export_snapshots(
 VELOCITY_VIEW_MAP = {
     "JY": "vw_velocity_jy_snapshot",
     "PW": "vw_velocity_pw_snapshot",
+    "ALT": "vw_velocity_alt_snapshot",
 }
 VELOCITY_TENANTS = set(VELOCITY_VIEW_MAP.keys())
 

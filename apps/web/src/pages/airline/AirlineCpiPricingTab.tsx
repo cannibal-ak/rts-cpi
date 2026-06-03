@@ -13,7 +13,7 @@ import { api } from '../../api';
 import type { AirlineSnapshot, FilterMetadata } from '../../types';
 
 interface AirlineCpiPricingTabProps {
-  tenantCode: 'JY' | 'PW';
+  tenantCode: 'JY' | 'PW' | 'ALT';
   filters: Record<string, string>;
   onFiltersChange: (f: Record<string, string>) => void;
   /** Parent populates this ref so the page toolbar's Export button can fire CSV. */
@@ -345,7 +345,7 @@ const FETCH_CONCURRENCY = 10;
 
 async function fetchAllRows(
   baseQuery: Record<string, string>,
-  tenantCode: 'JY' | 'PW',
+  tenantCode: 'JY' | 'PW' | 'ALT',
   onProgress?: (loaded: number, total: number) => void,
 ): Promise<AirlineSnapshot[]> {
   const first = await api.airline.listSnapshots({
