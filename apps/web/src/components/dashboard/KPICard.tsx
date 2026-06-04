@@ -42,7 +42,7 @@ export default function KPICard({ label, value, subheader, isActive, onClick }: 
         <Typography sx={{ fontSize: 13, fontWeight: 600, color: '#4a6a8a', lineHeight: 1.3 }}>
           {label}
         </Typography>
-        <Typography sx={{ fontSize: 30, fontWeight: 700, color: 'text.primary', lineHeight: 1.2, mt: '2px' }}>
+        <Typography sx={{ fontSize: 30, fontWeight: 700, color: '#1A2027', lineHeight: 1.2, mt: '2px' }}>
           {value}
         </Typography>
         <Typography sx={{ fontSize: 11, color: '#7a9abb', lineHeight: 1.3, mt: '2px' }}>
