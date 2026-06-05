@@ -56,7 +56,7 @@ export const mockRolePresets: Record<string, TenantSession> = {
     tenant_name: 'Sky Airways',
     enabled_modules: ['airline_alt'],
     is_super_admin: false,
-    user: { id: 'user-alt', name: 'Sky Airways', email: 'alt@airline.com', roles: ['TENANT_ADMIN'] },
+    user: { id: 'user-alt', name: 'Sky Airways', email: 'skyair@airline.com', roles: ['TENANT_ADMIN'] },
   },
 };
 

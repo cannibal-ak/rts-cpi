@@ -6,7 +6,7 @@ separately by scripts/seed_demo_altitude.py.
 
 Creates:
   * tenant row              slug='alt', display 'Sky Airways'
-  * app_user                alt@airline.com / bcrypt('airline123'),
+  * app_user                skyair@airline.com / bcrypt('airline123'),
                             must_change_password=FALSE, TENANT_ADMIN
   * role_binding            TENANT_ADMIN for the ALT user
   * tenant_feature          10 rows mirroring JY verbatim
@@ -69,7 +69,7 @@ def upgrade() -> None:
     conn.execute(sa.text("""
         INSERT INTO app_user (id, tenant_id, email, display_name, password_hash,
                               must_change_password, is_active, failed_login_count, locked_until)
-        VALUES (:uid, :tid, 'alt@airline.com', 'Sky Airline Admin', :h,
+        VALUES (:uid, :tid, 'skyair@airline.com', 'Sky Airline Admin', :h,
                 false, true, 0, NULL)
         ON CONFLICT (id) DO NOTHING
     """), {"uid": USER_ALT, "tid": TENANT_ALT, "h": alt_hash})
