@@ -39,7 +39,7 @@ function formatTenantCell(user: AdminUserListItem): string {
 // the real role value (TENANT_ADMIN).
 const ROLE_LABEL_OVERRIDES: Record<string, string> = {
   'admin@rts.com': 'RTS_SuperAdmin',
-  'alt@airline.com': 'Demo_Admin',
+  'skyair@airline.com': 'Demo_Admin',
 };
 
 function displayRole(user: AdminUserListItem): string {
