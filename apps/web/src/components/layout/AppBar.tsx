@@ -26,6 +26,8 @@ import { useAuth } from '../../context/AuthContext';
 import interCaribbeanLogo from '../../assets/logos/jy-logo-banner.png';
 import precisionAirLogo from '../../assets/logos/precisionair-logo.png';
 import fjordlineLogo from '../../assets/logos/fjordline-logo.png';
+import skyLogoLight from '../../assets/logos/sky-airways-logo.png';
+import skyLogoDark from '../../assets/logos/sky-airways-logo-dark.png';
 import { TENANT_CONFIG, TENANT_FALLBACK } from '../../utils/tenantConfig';
 
 interface AppBarProps {
@@ -53,6 +55,7 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
   const isJyTenant = tenantKey === 'jy';
   const isPwTenant = tenantKey === 'pw';
   const isFjlTenant = tenantKey === 'fjl';
+  const isAltTenant = tenantKey === 'alt';
   const tenant = TENANT_CONFIG[tenantKey] ?? TENANT_FALLBACK;
 
   // Strip TENANT_ prefix and title-case so TENANT_ADMIN → "Admin".
@@ -117,6 +120,19 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
               height: 48,
               width: 'auto',
               maxWidth: 200,
+              objectFit: 'contain',
+              mr: 1.5,
+            }}
+          />
+        ) : isAltTenant ? (
+          <Box
+            component="img"
+            src={mode === 'dark' ? skyLogoDark : skyLogoLight}
+            alt="Sky Airways"
+            sx={{
+              height: 48,
+              width: 'auto',
+              maxWidth: 280,
               objectFit: 'contain',
               mr: 1.5,
             }}
