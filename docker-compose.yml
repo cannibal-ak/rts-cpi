@@ -165,6 +165,9 @@ services:
       - superset_home:/app/superset_home
       # ECharts grid.right widened to prevent date/label clipping (see superset-patches/README)
       - ./superset-patches/3871.c687a6d83eaaee71a216.entry.js:/app/superset/static/assets/3871.c687a6d83eaaee71a216.entry.js:ro
+      # Airplane fly-across loading spinner replaces loading.gif (see superset-patches/README)
+      - ./superset-patches/loading_airplane.gif:/app/superset/static/assets/images/loading.gif:ro
+      - ./superset-patches/loading_airplane.gif:/app/superset/static/assets/loading.cff8a5da..gif:ro
     depends_on:
       postgres:
         condition: service_healthy
