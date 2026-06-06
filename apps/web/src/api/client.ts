@@ -215,6 +215,10 @@ export interface CpiApiClient {
         dates: string[];
     }>;
     getDashboardCharts(dashboardId: string): Promise<DashboardChartsResponse>;
+    getChartFormDataKey(
+      sliceId: number,
+      dateFilter?: DashboardDateFilter,
+    ): Promise<{ key: string }>;
   };
   kpi: {
     getSummary(airlineCode: string, capDate: string, currency?: string): Promise<KpiSummaryResponse>;

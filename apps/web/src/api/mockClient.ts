@@ -444,6 +444,8 @@ export const mockClient: CpiApiClient = {
           '2026-05-17','2026-05-14','2026-05-12','2026-05-10','2026-05-07','2026-05-05','2026-05-03',
         ],
     }),
+    getChartFormDataKey: (sliceId: number, _dateFilter?: unknown): Promise<{ key: string }> =>
+      delay({ key: `mock-form-data-key-${sliceId}` }),
     getDashboardCharts: (dashboardId: string): Promise<DashboardChartsResponse> => delay({
       dashboard_id: Number(dashboardId),
       dashboard_app_id: dashboardId,
