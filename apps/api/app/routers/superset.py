@@ -219,19 +219,58 @@ class SupersetClient:
                 raise Exception(f"Superset JWT login failed ({resp.status_code})")
             self._jwt_token = resp.json()["access_token"]
 
+    @staticmethod
+    def _raw_session_cookie(resp) -> Optional[str]:
+        """Read the ``session`` cookie value straight from the raw Set-Cookie
+        header, bypassing httpx's cookie jar.
+
+        Prod Superset sets the session cookie with ``Secure`` + a Domain pinned
+        to the public host (needed for the cross-site embed). We reach Superset
+        over the internal ``http://superset:8088``, where httpx's jar DROPS that
+        cookie (Secure over http, domain mismatch) — leaving us with no session,
+        so the form_data mint 502'd with "CSRF session token is missing". Replaying
+        the raw value as an explicit cookie keeps the admin session alive. Harmless
+        on dev (the cookie is present in the header there too).
+        """
+        for raw in resp.headers.get_list("set-cookie"):
+            m = re.match(r"\s*session=([^;]+)", raw)
+            if m:
+                return m.group(1)
+        return None
+
     async def _login_session(self):
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as c:
             page = await c.get(f"{self.base_url}/login/")
-            cookies = dict(page.cookies)
+            # Read the session cookie raw — the jar drops the Secure/domain-pinned
+            # prod cookie (see _raw_session_cookie).
+            sess = self._raw_session_cookie(page)
+            cookies = {"session": sess} if sess else dict(page.cookies)
+            # Prod has WTF_CSRF_ENABLED=True, so the login form requires its hidden
+            # csrf_token field. Dev (CSRF off) renders no such field — include it
+            # only when present so both configs keep working.
+            data = {"username": self.username, "password": self.password}
+            m = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', page.text)
+            if m:
+                data["csrf_token"] = m.group(1)
             resp = await c.post(
                 f"{self.base_url}/login/",
-                data={"username": self.username, "password": self.password},
+                data=data,
                 cookies=cookies,
+                headers={"Referer": f"{self.base_url}/login/"},
                 follow_redirects=False,
             )
             if resp.status_code not in (200, 302):
                 raise Exception(f"Superset session login failed ({resp.status_code})")
-            self._session_cookies = {**cookies, **dict(resp.cookies)}
+            # Carry the post-login (rotated, authenticated) session forward, read
+            # raw for the same jar reason; fall back to the pre-login session, then
+            # the jar, so the CSRF-off dev path is unaffected.
+            post = self._raw_session_cookie(resp)
+            if post:
+                self._session_cookies = {"session": post}
+            elif sess:
+                self._session_cookies = {"session": sess}
+            else:
+                self._session_cookies = {**cookies, **dict(resp.cookies)}
 
     async def _jwt_headers(self) -> dict:
         if not self._jwt_token:
@@ -365,8 +404,11 @@ class SupersetClient:
                 )
             csrf_resp.raise_for_status()
             csrf = csrf_resp.json()["result"]
-            # The csrf fetch may rotate the session cookie — carry it forward.
-            cookies = {**cookies, **dict(csrf_resp.cookies)}
+            # The csrf fetch may rotate the session cookie — carry it forward,
+            # reading raw (the jar drops the Secure/domain-pinned prod cookie).
+            rotated = self._raw_session_cookie(csrf_resp)
+            if rotated:
+                cookies = {"session": rotated}
 
             resp = await c.post(
                 f"{self.base_url}/api/v1/explore/form_data",
