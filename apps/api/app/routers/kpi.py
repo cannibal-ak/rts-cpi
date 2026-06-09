@@ -83,7 +83,9 @@ _FJL_DEFAULT_CURRENCY = "NOK"
 
 
 def _resolve_currency(code: str, currency: str | None) -> str | None:
-    """For FJL: default to NOK and validate. For others: ignore (return None)."""
+    """For FJL: default to NOK and validate. For ALT (Sky): always EUR. For others: ignore (return None)."""
+    if code == "ALT":
+        return "EUR"
     if code != "FJL":
         return None
     resolved = (currency or _FJL_DEFAULT_CURRENCY).upper()
