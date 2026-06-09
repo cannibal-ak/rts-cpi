@@ -41,7 +41,7 @@ const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline:
 // chart on that dashboard has 0 active saved adhoc_filters (the form_data adhoc_filters
 // override REPLACES wholesale - see SingleChartViewer). ALT was pre-flighted clean
 // (all slices carry only inert No-filter TEMPORAL_RANGE placeholders).
-const CAP_DATE_CHARTVIEW_DASHBOARDS = [4]; // ALT/Sky only
+const CAP_DATE_CHARTVIEW_DASHBOARDS = [1, 2, 3, 4]; // app-route ids: JY=1, PW=2, FJL=3, ALT=4
 
 // Superset Embedded SDK type (UMD bundle loaded via CDN in index.html)
 declare global {
