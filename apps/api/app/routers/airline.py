@@ -125,12 +125,22 @@ def get_filter_metadata(
         
     result.append({"field": "file_date", "label": "File Date", "values": all_dates})
 
-    # Airline filter — scoped to resolved tenant
-    if effective_tenant:
-        vals = [effective_tenant]
-    else:
-        vals = ["JY", "PW", "ALT"]  # only reachable by platform admin with no tenant param
-        
+    # Airline filter — sourced from the actual ref_al values of the same
+    # tenant view the snapshots query uses. The tenant_code can differ from
+    # the airline code carried in the data (e.g. ALT → ref_al 'SKY'), so we
+    # must read DISTINCT ref_al rather than echo the tenant code.
+    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot"}
+    view_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT"]
+    vals = []
+    for vt in view_tenants:
+        view_name = AIRLINE_VIEW_MAP.get(vt)
+        if not view_name:
+            continue
+        vals.extend(db.execute(text(
+            f"SELECT DISTINCT ref_al FROM {view_name} "
+            "WHERE ref_al IS NOT NULL AND ref_al <> '' ORDER BY ref_al"
+        )).scalars().all())
+
     result.append({"field": "airline", "label": "Airline", "values": vals})
 
     return result
