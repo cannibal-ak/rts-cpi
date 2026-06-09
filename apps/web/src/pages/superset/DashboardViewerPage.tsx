@@ -36,6 +36,13 @@ const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline:
   '4': { title: 'Sky Dashboard', tenant: 'ALT', isAirline: true, freshnessDomain: 'Airline CPI \u2013 SKY' },
 };
 
+// Phased rollout of the Chart-view cap_date filter. ALT/Sky (dashboard id 4) only.
+// Extend to 1 (JY) / 2 (PW) later, each only after its own pre-flight confirms every
+// chart on that dashboard has 0 active saved adhoc_filters (the form_data adhoc_filters
+// override REPLACES wholesale - see SingleChartViewer). ALT was pre-flighted clean
+// (all slices carry only inert No-filter TEMPORAL_RANGE placeholders).
+const CAP_DATE_CHARTVIEW_DASHBOARDS = [1, 2, 3, 4]; // app-route ids: JY=1, PW=2, FJL=3, ALT=4
+
 // Superset Embedded SDK type (UMD bundle loaded via CDN in index.html)
 declare global {
   interface Window {
@@ -569,6 +576,9 @@ export default function DashboardViewerPage() {
                 total={analyticsCharts.length}
                 onPrev={handlePrev}
                 onNext={handleNext}
+                dateFilter={dateFilter}
+                capDateFilterEnabled={CAP_DATE_CHARTVIEW_DASHBOARDS.includes(Number(id))}
+                refreshKey={refreshKey}
               />
             )}
           </Box>
