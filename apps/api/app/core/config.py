@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # Platform tenant slug (the internal RTS tenant, excluded from customer-tenant lists).
     platform_tenant_slug: str = os.environ.get("CPI_PLATFORM_TENANT_SLUG", "rts")
 
+    # Public base URL of the web app — used to build links emailed to users
+    # (e.g. the accept-invite link). Prod overrides via env APP_BASE_URL.
+    APP_BASE_URL: str = os.environ.get("APP_BASE_URL", "http://192.168.101.10:9090")
+
     # Feature flags
     allow_legacy_header_auth: bool = os.environ.get("ALLOW_LEGACY_HEADER_AUTH", "false").lower() == "true"
 

@@ -24,6 +24,7 @@ import DashboardViewerPage from './pages/superset/DashboardViewerPage';
 import NotAuthorizedPage from './pages/NotAuthorizedPage';
 import NotFoundPage from './pages/NotFoundPage';
 import ChangePasswordPage from './pages/auth/ChangePasswordPage';
+import AcceptInvitePage from './pages/auth/AcceptInvitePage';
 import { isSuperAdmin } from './utils/access';
 import { getPrimaryDashboardId } from './pages/superset/dashboardAccess';
 
@@ -54,6 +55,9 @@ export default function App() {
             <Routes>
               {/* Public route — login page */}
               <Route path="/login" element={<LoginPage />} />
+
+              {/* Public route — accept invite (unauthenticated; invited user sets their own password) */}
+              <Route path="/accept-invite" element={<AcceptInvitePage />} />
 
               {/* Change password — accessible when authenticated, bypasses AuthGuard's password check */}
               <Route path="/change-password" element={

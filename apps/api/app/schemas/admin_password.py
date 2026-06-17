@@ -75,3 +75,48 @@ class AdminForceResetRequest(BaseModel):
 class AdminForceResetResponse(BaseModel):
     success: bool
     message: str
+
+
+# ── Invite user (admin creates user -> user sets own password) ──
+
+class AdminInviteUserRequest(BaseModel):
+    email: EmailStr
+    display_name: str
+    tenant_id: UUID
+    role: str = "TENANT_ADMIN"
+
+
+class AdminInviteUserResponse(BaseModel):
+    user_id: UUID
+    email: EmailStr
+    invite_sent: bool
+
+
+class AdminResendInviteRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    user_id: Optional[UUID] = None
+
+
+class AdminResendInviteResponse(BaseModel):
+    success: bool
+    invite_sent: bool
+    message: str
+
+
+# ── Admin-initiated reset email (replaces generate-code) ──
+
+class AdminSendResetEmailRequest(BaseModel):
+    email: EmailStr
+
+
+class AdminSendResetEmailResponse(BaseModel):
+    sent: bool
+    message: str
+
+
+# ── Tenant options (invite dialog dropdown) ──
+
+class AdminTenantOption(BaseModel):
+    tenant_id: UUID
+    slug: str
+    name: str

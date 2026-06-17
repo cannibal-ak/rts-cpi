@@ -8,10 +8,12 @@ import {
   Chip, IconButton, Button, Stack, CircularProgress, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
   TextField, InputAdornment, Checkbox, FormControlLabel,
+  Select, MenuItem, FormControl, InputLabel,
   Snackbar, Alert,
 } from '@mui/material';
 import {
   ContentCopy, Visibility, VisibilityOff, VpnKey, LockReset, Refresh, CheckCircle,
+  PersonAdd, Email as EmailIcon,
 } from '@mui/icons-material';
 import PageHeader from '../components/common/PageHeader';
 import { api } from '../api';
@@ -19,7 +21,7 @@ import type { ApiErrorShape } from '../api/httpClient';
 import { useSession } from '../context/SessionContext';
 import { getTenantDisplayName } from '../utils/tenantConfig';
 import type {
-  AdminUserListItem, AdminResetTokenItem,
+  AdminUserListItem, AdminResetTokenItem, AdminTenantOption,
 } from '../types';
 
 // Slug for the RTS platform tenant — its row shows orgName only (no " - SLUG"
@@ -62,6 +64,16 @@ interface GenerateDialogState {
   error: string;
 }
 
+interface InviteDialogState {
+  open: boolean;
+  email: string;
+  displayName: string;
+  tenantId: string;
+  role: string;
+  submitting: boolean;
+  error: string;
+}
+
 interface ForceResetDialogState {
   open: boolean;
   user: AdminUserListItem | null;
@@ -78,7 +90,7 @@ interface ForceResetDialogState {
 // keep the existing flow (button click → main dialog).
 interface SelfConfirmState {
   open: boolean;
-  action: 'generate' | 'reset' | null;
+  action: 'reset' | null;
   user: AdminUserListItem | null;
 }
 
@@ -167,15 +179,15 @@ export default function PasswordManagementPage() {
   const adminEmail = session.user.email.toLowerCase();
 
   const [users, setUsers] = useState<AdminUserListItem[]>([]);
-  const [tokens, setTokens] = useState<AdminResetTokenItem[]>([]);
   const [usersLoading, setUsersLoading] = useState(true);
-  const [tokensLoading, setTokensLoading] = useState(true);
   const [usersError, setUsersError] = useState('');
-  const [tokensError, setTokensError] = useState('');
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
-  const [genDialog, setGenDialog] = useState<GenerateDialogState>({
-    open: false, user: null, generating: false, generatedCode: null, error: '',
+  const [tenants, setTenants] = useState<AdminTenantOption[]>([]);
+  const [sendingResetEmail, setSendingResetEmail] = useState<string | null>(null);
+
+  const [inviteDialog, setInviteDialog] = useState<InviteDialogState>({
+    open: false, email: '', displayName: '', tenantId: '', role: 'TENANT_ADMIN',
+    submitting: false, error: '',
   });
   const [resetDialog, setResetDialog] = useState<ForceResetDialogState>({
     open: false, user: null, newPassword: '', confirmPassword: '',
@@ -206,38 +218,35 @@ export default function PasswordManagementPage() {
     }
   }, []);
 
-  const fetchTokens = useCallback(async () => {
-    setTokensError('');
+  const fetchTenants = useCallback(async () => {
     try {
-      const r = await api.admin.passwordManagement.listResetCodes(50);
-      setTokens(r.tokens);
-      setLastUpdated(new Date());
-    } catch (err: unknown) {
-      const e = err as Error & ApiErrorShape;
-      setTokensError(e.message || 'Failed to load reset codes.');
-    } finally {
-      setTokensLoading(false);
+      const t = await api.admin.passwordManagement.listTenants();
+      setTenants(t);
+    } catch {
+      // Non-fatal: the Invite dialog will show an empty tenant list.
     }
   }, []);
 
   useEffect(() => {
     fetchUsers();
-    fetchTokens();
-  }, [fetchUsers, fetchTokens]);
-
-  // 30s auto-refresh on the reset code queue.
-  useEffect(() => {
-    const id = window.setInterval(fetchTokens, REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(id);
-  }, [fetchTokens]);
+    fetchTenants();
+  }, [fetchUsers, fetchTenants]);
 
   // ── Self-action confirmation ────────────────────
 
-  const requestGenerateCode = (user: AdminUserListItem) => {
-    if (user.email.toLowerCase() === adminEmail) {
-      setSelfConfirm({ open: true, action: 'generate', user });
-    } else {
-      openGenerateDialog(user);
+  const handleSendResetEmail = async (user: AdminUserListItem) => {
+    setSendingResetEmail(user.email);
+    try {
+      const r = await api.admin.passwordManagement.sendResetEmail({ email: user.email });
+      showToast(
+        r.sent ? `Reset email sent to ${user.email}` : (r.message || 'Could not send reset email.'),
+        r.sent ? 'success' : 'warning',
+      );
+    } catch (err: unknown) {
+      const e = err as Error & ApiErrorShape;
+      showToast(e.message || 'Failed to send reset email.', 'error');
+    } finally {
+      setSendingResetEmail(null);
     }
   };
 
@@ -257,35 +266,55 @@ export default function PasswordManagementPage() {
     const { action, user } = selfConfirm;
     setSelfConfirm({ open: false, action: null, user: null });
     if (!user || !action) return;
-    if (action === 'generate') openGenerateDialog(user);
-    else openResetDialog(user);
+    openResetDialog(user);
   };
 
-  // ── Generate code flow ──────────────────────────
+  // ── Invite user flow ────────────────────────────
 
-  const openGenerateDialog = (user: AdminUserListItem) => {
-    setGenDialog({ open: true, user, generating: false, generatedCode: null, error: '' });
+  const openInviteDialog = () => {
+    setInviteDialog({
+      open: true, email: '', displayName: '', tenantId: '', role: 'TENANT_ADMIN',
+      submitting: false, error: '',
+    });
   };
-  const closeGenerateDialog = () => {
-    setGenDialog({ open: false, user: null, generating: false, generatedCode: null, error: '' });
+  const closeInviteDialog = () => {
+    setInviteDialog(s => ({ ...s, open: false, error: '' }));
   };
 
-  const handleGenerate = async () => {
-    if (!genDialog.user) return;
-    setGenDialog(s => ({ ...s, generating: true, error: '' }));
+  const handleInvite = async () => {
+    const email = inviteDialog.email.trim().toLowerCase();
+    const displayName = inviteDialog.displayName.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setInviteDialog(s => ({ ...s, error: 'Please enter a valid email address.' }));
+      return;
+    }
+    if (!displayName) {
+      setInviteDialog(s => ({ ...s, error: 'Please enter a display name.' }));
+      return;
+    }
+    if (!inviteDialog.tenantId) {
+      setInviteDialog(s => ({ ...s, error: 'Please select a tenant.' }));
+      return;
+    }
+    setInviteDialog(s => ({ ...s, submitting: true, error: '' }));
     try {
-      const r = await api.admin.passwordManagement.generateCode(genDialog.user.email);
-      setGenDialog(s => ({ ...s, generating: false, generatedCode: r.code }));
-      fetchTokens(); // refresh queue immediately
+      const r = await api.admin.passwordManagement.inviteUser({
+        email,
+        display_name: displayName,
+        tenant_id: inviteDialog.tenantId,
+        role: inviteDialog.role,
+      });
+      closeInviteDialog();
+      if (r.invite_sent) {
+        showToast(`Invite sent to ${r.email}`, 'success');
+      } else {
+        showToast(`User created, but the invite email failed to send to ${r.email}. Use \"Send reset email\" to retry.`, 'warning');
+      }
+      fetchUsers();
     } catch (err: unknown) {
       const e = err as Error & ApiErrorShape;
-      setGenDialog(s => ({ ...s, generating: false, error: e.message || 'Failed to generate code.' }));
+      setInviteDialog(s => ({ ...s, submitting: false, error: e.message || 'Failed to invite user.' }));
     }
-  };
-
-  const handleCopyCode = async (code: string) => {
-    const ok = await copyToClipboard(code);
-    showToast(ok ? 'Code copied to clipboard' : 'Could not copy — please copy manually', ok ? 'success' : 'warning');
   };
 
   // ── Force reset flow ────────────────────────────
@@ -326,7 +355,6 @@ export default function PasswordManagementPage() {
       closeResetDialog();
       showToast(`Password reset for ${resetDialog.user.email}`, 'success');
       fetchUsers(); // refresh in case lockout state changed
-      fetchTokens();
     } catch (err: unknown) {
       const e = err as Error & ApiErrorShape;
       setResetDialog(s => ({ ...s, submitting: false, error: e.message || 'Failed to reset password.' }));
@@ -346,13 +374,18 @@ export default function PasswordManagementPage() {
       <Paper sx={{ p: 2.5, mb: 3, border: 1, borderColor: 'divider' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
           <Typography variant="h6">User Accounts</Typography>
-          <Tooltip title="Refresh">
-            <span>
-              <IconButton onClick={fetchUsers} disabled={usersLoading} size="small">
-                <Refresh fontSize="small" />
-              </IconButton>
-            </span>
-          </Tooltip>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Button size="small" variant="contained" startIcon={<PersonAdd fontSize="small" />} onClick={openInviteDialog}>
+              Invite user
+            </Button>
+            <Tooltip title="Refresh">
+              <span>
+                <IconButton onClick={fetchUsers} disabled={usersLoading} size="small">
+                  <Refresh fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
         </Box>
 
         {usersError && (
@@ -395,10 +428,11 @@ export default function PasswordManagementPage() {
                         <Button
                           size="small"
                           variant="outlined"
-                          startIcon={<VpnKey fontSize="small" />}
-                          onClick={() => requestGenerateCode(user)}
+                          startIcon={<EmailIcon fontSize="small" />}
+                          onClick={() => handleSendResetEmail(user)}
+                          disabled={sendingResetEmail === user.email}
                         >
-                          Generate Code
+                          {sendingResetEmail === user.email ? 'Sending…' : 'Send reset email'}
                         </Button>
                         <Button
                           size="small"
@@ -426,171 +460,45 @@ export default function PasswordManagementPage() {
         )}
       </Paper>
 
-      {/* ── Section 2: Recent Reset Codes ── */}
-      <Paper sx={{ p: 2.5, border: 1, borderColor: 'divider' }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-          <Box>
-            <Typography variant="h6">Recent Reset Codes</Typography>
-            {lastUpdated && (
-              <Typography variant="caption" color="text.secondary">
-                Last updated: {relativeTime(lastUpdated.toISOString())} · auto-refreshes every 30s
-              </Typography>
-            )}
-          </Box>
-          <Tooltip title="Refresh now">
-            <span>
-              <IconButton onClick={fetchTokens} disabled={tokensLoading} size="small">
-                <Refresh fontSize="small" />
-              </IconButton>
-            </span>
-          </Tooltip>
-        </Box>
-
-        {tokensError && (
-          <Alert severity="error" sx={{ mb: 1.5 }} onClose={() => setTokensError('')}>
-            {tokensError}
-          </Alert>
-        )}
-
-        {tokensLoading ? (
-          <Box sx={{ py: 4, display: 'flex', justifyContent: 'center' }}>
-            <CircularProgress size={24} />
-          </Box>
-        ) : (
-          <TableContainer>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Email</TableCell>
-                  <TableCell>Code</TableCell>
-                  <TableCell>Status</TableCell>
-                  <TableCell>Requested</TableCell>
-                  <TableCell>Expires</TableCell>
-                  <TableCell align="right">Attempts</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {tokens.map(t => (
-                  <TableRow key={t.id} hover>
-                    <TableCell>{t.email}</TableCell>
-                    <TableCell>
-                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
-                        <Typography
-                          component="span"
-                          sx={{
-                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-                            fontSize: 14,
-                            letterSpacing: '0.1em',
-                            fontWeight: 600,
-                          }}
-                        >
-                          {t.code}
-                        </Typography>
-                        <Tooltip title="Copy code">
-                          <IconButton size="small" onClick={() => handleCopyCode(t.code)}>
-                            <ContentCopy sx={{ fontSize: 14 }} />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    </TableCell>
-                    <TableCell>{tokenStatusChip(t.status)}</TableCell>
-                    <TableCell sx={{ color: 'text.secondary', fontSize: 13 }}>
-                      {formatTimestamp(t.created_at)}
-                    </TableCell>
-                    <TableCell sx={{ color: 'text.secondary', fontSize: 13 }}>
-                      {formatTimestamp(t.expires_at)}
-                    </TableCell>
-                    <TableCell align="right">
-                      {t.attempts > 0 ? (
-                        <Chip size="small" label={t.attempts} color={t.attempts >= 5 ? 'error' : 'warning'} />
-                      ) : (
-                        <Typography variant="caption" color="text.secondary">0</Typography>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {tokens.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} align="center" sx={{ color: 'text.secondary', py: 3 }}>
-                      No password reset requests yet.
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-          </TableContainer>
-        )}
-      </Paper>
-
-      {/* ── Generate Code Dialog ── */}
-      <Dialog open={genDialog.open} onClose={genDialog.generating ? undefined : closeGenerateDialog} maxWidth="xs" fullWidth>
-        <DialogTitle>
-          Generate Reset Code{genDialog.user ? ` for ${genDialog.user.email}` : ''}
-        </DialogTitle>
+      {/* ── Invite User Dialog ── */}
+      <Dialog open={inviteDialog.open} onClose={inviteDialog.submitting ? undefined : closeInviteDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>Invite a new user</DialogTitle>
         <DialogContent>
-          {!genDialog.generatedCode ? (
-            <>
-              <DialogContentText>
-                This will generate a 6-digit code valid for 5 minutes. Give this code to the user so they can reset their password.
-              </DialogContentText>
-              {genDialog.error && (
-                <Alert severity="error" sx={{ mt: 2 }}>{genDialog.error}</Alert>
-              )}
-            </>
-          ) : (
-            <>
-              <DialogContentText sx={{ mb: 2 }}>
-                Share this code with <strong>{genDialog.user?.email}</strong>. It expires in 5 minutes.
-              </DialogContentText>
-              <Box
-                sx={{
-                  p: 2.5,
-                  textAlign: 'center',
-                  bgcolor: (t) => t.palette.mode === 'dark' ? 'rgba(255,255,255,0.04)' : 'rgba(0,0,0,0.03)',
-                  borderRadius: 1,
-                  border: 1,
-                  borderColor: 'divider',
-                  mb: 1.5,
-                }}
-              >
-                <Typography
-                  sx={{
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-                    fontSize: 36,
-                    fontWeight: 700,
-                    letterSpacing: '0.3em',
-                  }}
-                >
-                  {genDialog.generatedCode}
-                </Typography>
-              </Box>
-              <Button
-                fullWidth
-                variant="outlined"
-                startIcon={<ContentCopy />}
-                onClick={() => genDialog.generatedCode && handleCopyCode(genDialog.generatedCode)}
-              >
-                Copy Code
-              </Button>
-            </>
+          <DialogContentText sx={{ mb: 2 }}>
+            The user will receive an email with a secure link to set their own password. No password is sent by email.
+          </DialogContentText>
+          {inviteDialog.error && (
+            <Alert severity="error" sx={{ mb: 2 }} onClose={() => setInviteDialog(s => ({ ...s, error: '' }))}>
+              {inviteDialog.error}
+            </Alert>
           )}
+          <TextField label="Email" type="email" fullWidth autoFocus value={inviteDialog.email}
+            onChange={(e) => setInviteDialog(s => ({ ...s, email: e.target.value }))} autoComplete="off" sx={{ mb: 2 }} />
+          <TextField label="Display name" fullWidth value={inviteDialog.displayName}
+            onChange={(e) => setInviteDialog(s => ({ ...s, displayName: e.target.value }))} autoComplete="off" sx={{ mb: 2 }} />
+          <FormControl fullWidth sx={{ mb: 2 }}>
+            <InputLabel id="invite-tenant-label">Tenant</InputLabel>
+            <Select labelId="invite-tenant-label" label="Tenant" value={inviteDialog.tenantId}
+              onChange={(e) => setInviteDialog(s => ({ ...s, tenantId: e.target.value as string }))}>
+              {tenants.map(t => (
+                <MenuItem key={t.tenant_id} value={t.tenant_id}>{t.name} ({t.slug.toUpperCase()})</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <FormControl fullWidth>
+            <InputLabel id="invite-role-label">Role</InputLabel>
+            <Select labelId="invite-role-label" label="Role" value={inviteDialog.role}
+              onChange={(e) => setInviteDialog(s => ({ ...s, role: e.target.value as string }))}>
+              <MenuItem value="TENANT_ADMIN">TENANT_ADMIN</MenuItem>
+            </Select>
+          </FormControl>
         </DialogContent>
         <DialogActions>
-          {!genDialog.generatedCode ? (
-            <>
-              <Button onClick={closeGenerateDialog} disabled={genDialog.generating}>Cancel</Button>
-              <Button
-                onClick={handleGenerate}
-                variant="contained"
-                disabled={genDialog.generating}
-                startIcon={genDialog.generating ? <CircularProgress size={16} color="inherit" /> : null}
-              >
-                {genDialog.generating ? 'Generating...' : 'Generate'}
-              </Button>
-            </>
-          ) : (
-            <Button onClick={closeGenerateDialog} variant="contained">Done</Button>
-          )}
+          <Button onClick={closeInviteDialog} disabled={inviteDialog.submitting}>Cancel</Button>
+          <Button onClick={handleInvite} variant="contained" disabled={inviteDialog.submitting}
+            startIcon={inviteDialog.submitting ? <CircularProgress size={16} color="inherit" /> : <PersonAdd />}>
+            {inviteDialog.submitting ? 'Sending…' : 'Send invite'}
+          </Button>
         </DialogActions>
       </Dialog>
 

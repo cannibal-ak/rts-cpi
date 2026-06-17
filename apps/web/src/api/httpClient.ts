@@ -21,6 +21,10 @@ import type {
   SmtpConfigRead, SmtpConfigUpdate, SmtpTestRequest, SmtpTestResponse,
 } from '../types/smtpConfig';
 import { authStorage } from '../utils/authStorage';
+import type {
+  AdminTenantOption, AdminInviteUserResponse, AdminResendInviteResponse,
+  AdminSendResetEmailResponse, InviteVerifyResponse, InviteAcceptResponse,
+} from '../types';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -186,6 +190,23 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     });
   } catch (err: any) {
     if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
+    throw new Error(`Network Error: ${err.message}`);
+  }
+}
+
+// Unauthenticated POST — no Authorization header, no 401-refresh/redirect
+// interceptor. For public endpoints (e.g. accept-invite) reachable by
+// logged-out users.
+async function publicPost<T>(path: string, body: unknown): Promise<T> {
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return await handleResponse<T>(res);
+  } catch (err: any) {
+    if (err.message.startsWith('API ')) throw err;
     throw new Error(`Network Error: ${err.message}`);
   }
 }
@@ -395,10 +416,13 @@ export const httpClient: CpiApiClient = {
     },
     passwordManagement: {
       listUsers: () => get<AdminUserListResponse>('/api/v1/admin/password-management/users'),
-      listResetCodes: (limit?: number) =>
-        get<AdminResetTokenListResponse>('/api/v1/admin/password-management/reset-codes', limit ? { limit } : undefined),
-      generateCode: (email: string) =>
-        post<AdminGenerateResetCodeResponse>('/api/v1/admin/password-management/generate-code', { email }),
+      listTenants: () => get<AdminTenantOption[]>('/api/v1/admin/password-management/tenants'),
+      inviteUser: (body: { email: string; display_name: string; tenant_id: string; role?: string }) =>
+        post<AdminInviteUserResponse>('/api/v1/admin/password-management/invite-user', { role: 'TENANT_ADMIN', ...body }),
+      resendInvite: (body: { email?: string; user_id?: string }) =>
+        post<AdminResendInviteResponse>('/api/v1/admin/password-management/resend-invite', body),
+      sendResetEmail: (body: { email: string }) =>
+        post<AdminSendResetEmailResponse>('/api/v1/admin/password-management/send-reset-email', body),
       forceReset: (email: string, newPassword: string, forceChangeOnLogin: boolean) =>
         post<AdminForceResetResponse>('/api/v1/admin/password-management/force-reset', {
           email,
@@ -420,6 +444,12 @@ export const httpClient: CpiApiClient = {
         delete: () => del<void>('/api/v1/admin/settings/smtp'),
       },
     },
+  },
+  auth: {
+    verifyInvite: (token: string) =>
+      publicPost<InviteVerifyResponse>('/api/v1/auth/verify-invite', { token }),
+    acceptInvite: (body: { token: string; new_password: string }) =>
+      publicPost<InviteAcceptResponse>('/api/v1/auth/accept-invite', body),
   },
   stats: {
     getFreshnessMetrics: () => get<DataFreshness[]>('/api/v1/stats/freshness'),

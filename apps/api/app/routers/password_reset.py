@@ -29,12 +29,16 @@ from app.schemas.password_reset import (
     PasswordResetVerify,
     PasswordResetNewPassword,
     PasswordResetResponse,
+    InviteVerifyRequest,
+    InviteVerifyResponse,
+    InviteAcceptRequest,
 )
 from app.services import smtp_service
 from app.services.auth_service import (
     hash_password,
     validate_password_strength,
 )
+from app.core.security import hash_token
 
 # uvicorn.error so these lines are visible in `docker logs cpi-api-1`
 # (per the project's logging convention — app.* loggers are silent in
@@ -46,6 +50,7 @@ router = APIRouter(prefix="/api/v1/auth", tags=["password-reset"])
 CODE_TTL_MINUTES = 5
 MAX_CODE_ATTEMPTS = 5
 RATE_LIMIT_PER_HOUR = 3
+INVITE_TTL_HOURS = 48
 
 GENERIC_REQUEST_MESSAGE = (
     "If an account exists with this email, a verification code has been generated."
@@ -64,17 +69,62 @@ def _client_ip(req: Request) -> str | None:
     return req.client.host if req.client else None
 
 
-def _find_active_token(db: Session, email: str) -> PasswordResetToken | None:
+def _find_active_token(
+    db: Session, email: str, purpose: str = "reset"
+) -> PasswordResetToken | None:
     return (
         db.query(PasswordResetToken)
         .filter(
             PasswordResetToken.email == email,
+            PasswordResetToken.purpose == purpose,
             PasswordResetToken.used == False,  # noqa: E712 — SQLAlchemy idiom
             PasswordResetToken.expires_at > _now(),
         )
         .order_by(PasswordResetToken.created_at.desc())
         .first()
     )
+
+
+def _find_invite_token(db: Session, raw_token: str) -> PasswordResetToken | None:
+    """Look up an active invite token by its sha256 hash (no email needed)."""
+    return (
+        db.query(PasswordResetToken)
+        .filter(
+            PasswordResetToken.token_hash == hash_token(raw_token),
+            PasswordResetToken.purpose == "invite",
+            PasswordResetToken.used == False,  # noqa: E712
+            PasswordResetToken.expires_at > _now(),
+        )
+        .order_by(PasswordResetToken.created_at.desc())
+        .first()
+    )
+
+
+def _create_reset_token(
+    db: Session, *, user_id, email: str, ip_address: str | None = None
+) -> str:
+    """Issue a fresh hashed reset code: invalidate prior unused reset tokens,
+    persist token_hash (code column left NULL), return the plaintext code so
+    the caller can email it. Shared by forgot-password and admin send-reset-email.
+    """
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.email == email,
+        PasswordResetToken.purpose == "reset",
+        PasswordResetToken.used == False,  # noqa: E712
+    ).update({PasswordResetToken.used: True})
+
+    code = _generate_code()
+    token = PasswordResetToken(
+        user_id=user_id,
+        email=email,
+        token_hash=hash_token(code),
+        purpose="reset",
+        expires_at=_now() + timedelta(minutes=CODE_TTL_MINUTES),
+        ip_address=ip_address,
+    )
+    db.add(token)
+    db.commit()
+    return code
 
 
 # ── POST /forgot-password ────────────────────────
@@ -112,22 +162,9 @@ def forgot_password(
         )
         return PasswordResetResponse(success=True, message=GENERIC_REQUEST_MESSAGE)
 
-    # Invalidate any previously unused tokens for this email.
-    db.query(PasswordResetToken).filter(
-        PasswordResetToken.email == email,
-        PasswordResetToken.used == False,  # noqa: E712
-    ).update({PasswordResetToken.used: True})
-
-    code = _generate_code()
-    token = PasswordResetToken(
-        user_id=user.id,
-        email=email,
-        code=code,
-        expires_at=_now() + timedelta(minutes=CODE_TTL_MINUTES),
-        ip_address=_client_ip(request),
+    code = _create_reset_token(
+        db, user_id=user.id, email=email, ip_address=_client_ip(request)
     )
-    db.add(token)
-    db.commit()
 
     logger.info(
         "Password reset code issued for %s (expires in %d min)", email, CODE_TTL_MINUTES
@@ -177,7 +214,7 @@ def verify_reset_code(body: PasswordResetVerify, db: Session = Depends(get_db)):
             message="Too many failed attempts. Request a new code.",
         )
 
-    if token.code != body.code:
+    if token.token_hash != hash_token(body.code):
         token.attempts += 1
         db.commit()
         return PasswordResetResponse(success=False, message="Invalid code.")
@@ -205,7 +242,7 @@ def reset_password(body: PasswordResetNewPassword, db: Session = Depends(get_db)
             success=False,
             message="Too many failed attempts. Request a new code.",
         )
-    if token.code != body.code:
+    if token.token_hash != hash_token(body.code):
         token.attempts += 1
         db.commit()
         return PasswordResetResponse(success=False, message="Invalid code.")
@@ -230,3 +267,46 @@ def reset_password(body: PasswordResetNewPassword, db: Session = Depends(get_db)
 
     logger.info("Password reset completed for %s", email)
     return PasswordResetResponse(success=True, message="Password reset successfully.")
+
+
+# ── POST /verify-invite ──────────────────────────
+
+@router.post("/verify-invite", response_model=InviteVerifyResponse)
+def verify_invite(body: InviteVerifyRequest, db: Session = Depends(get_db)):
+    token = _find_invite_token(db, body.token)
+    if not token:
+        return InviteVerifyResponse(valid=False)
+    return InviteVerifyResponse(valid=True, email=token.email)
+
+
+# ── POST /accept-invite ──────────────────────────
+
+@router.post("/accept-invite", response_model=PasswordResetResponse)
+def accept_invite(body: InviteAcceptRequest, db: Session = Depends(get_db)):
+    is_valid, error_msg = validate_password_strength(body.new_password)
+    if not is_valid:
+        return PasswordResetResponse(success=False, message=error_msg)
+
+    token = _find_invite_token(db, body.token)
+    if not token:
+        return PasswordResetResponse(success=False, message="Invalid or expired invite.")
+
+    user = (
+        db.query(AppUser)
+        .filter(AppUser.id == token.user_id, AppUser.is_active == True)  # noqa: E712
+        .first()
+    )
+    if not user:
+        return PasswordResetResponse(success=False, message="User no longer active.")
+
+    user.password_hash = hash_password(body.new_password)
+    user.must_change_password = False
+    user.password_changed_at = _now()
+    user.failed_login_count = 0
+    user.locked_until = None
+
+    token.used = True
+    db.commit()
+
+    logger.info("Invite accepted for %s", token.email)
+    return PasswordResetResponse(success=True, message="Account activated. You can now sign in.")
