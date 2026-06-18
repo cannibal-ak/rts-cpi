@@ -16,6 +16,13 @@ patterns:
     case_insensitive: true
     example: "JY_010426.xlsx"
 
+  - regex: "^WM_(\\d{6})\\.xlsx$"
+    tenant_code: WM
+    domain: AIRLINE
+    date_format: DDMMYY
+    case_insensitive: true
+    example: "WM_010426.xlsx"
+
   - regex: "^JY_VL_(\\d{6})\\.(?i:csv|xlsx)$"
     tenant_code: JY
     domain: VELOCITY

@@ -648,10 +648,10 @@ class IngestionService:
                 id, tenant_id, cap_date, cap_time, trip_type,
                 ref_al, ref_flt_num, ref_org, ref_dst, ref_dep_date,
                 ref_cab_code, ref_tot_fare, ref_base_fare, ref_tax,
-                ref_yq, ref_seats,
+                ref_yq, ref_seats, ref_curr,
                 comp_al, comp_flt_num, comp_org, comp_dst, comp_dep_date,
                 comp_cab_code, comp_tot_fare, comp_base_fare, comp_tax,
-                comp_yq, comp_seats,
+                comp_yq, comp_seats, comp_curr,
                 ref_pos, comp_pos, data_owner, tenant_code, business_type,
                 report_date, source_file, loaded_at,
                 -- Phase 2C: 47 new dictionary columns (migration 022)
@@ -674,10 +674,10 @@ class IngestionService:
                 :id, :tid, :cd, :ct, :tt,
                 :ra, :rf, :ro, :rd, :rdd,
                 :rcc, :rtf, :rbf, :rtax,
-                :ryq, :rs,
+                :ryq, :rs, :rcur,
                 :ca, :cf, :co, :cdst, :cdd,
                 :ccc, :ctf, :cbf, :ctax,
-                :cyq, :cs,
+                :cyq, :cs, :ccur,
                 :ref_pos, :comp_pos, :owner, :tcode, :btype,
                 :rdate, :sfile, now(),
                 :ref_dep_time, :ref_arr_time, :ref_stops, :ref_via,
@@ -720,6 +720,7 @@ class IngestionService:
                 "rtax": safe_float(row.get("RefTax")),
                 "ryq": safe_float(row.get("RefYQ")),
                 "rs": safe_int(row.get("RefSeats") or 9),
+                "rcur": ((row.get("RefCur") or "").strip()[:4] or "USD") if job.tenant_code == "WM" else "GBP",
                 "ca": (row.get("CompAL") or "")[:3],
                 "cf": (row.get("CompFltNum") or "")[:10],
                 "co": (row.get("CompOrg") or row.get("RefOrg") or "")[:4],
@@ -731,6 +732,7 @@ class IngestionService:
                 "ctax": safe_float(row.get("CompTax")),
                 "cyq": safe_float(row.get("CompYQ")),
                 "cs": safe_int(row.get("CompSeats") or 9),
+                "ccur": ((row.get("CompCur") or "").strip()[:4] or "USD") if job.tenant_code == "WM" else "GBP",
                 # ref_pos: post-023 nullable point-of-sale (the host carrier's
                 # POS). PW source carries POS; JY legacy source does not.
                 # The legacy POA field has no post-023 column; comp_pos is
