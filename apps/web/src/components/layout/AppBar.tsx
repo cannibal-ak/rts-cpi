@@ -48,6 +48,7 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
       ? (session.enabled_modules[0] === 'airline_jy' ? 'jy'
         : session.enabled_modules[0] === 'airline_pw' ? 'pw'
         : session.enabled_modules[0] === 'airline_alt' ? 'alt'
+        : session.enabled_modules[0] === 'airline_wm' ? 'wm'
         : session.enabled_modules[0] === 'cfl_fjl' ? 'fjl'
         : 'rts')
       : 'rts';

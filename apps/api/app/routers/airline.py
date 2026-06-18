@@ -33,7 +33,7 @@ def list_snapshots(
     airline: str | None = None,
 ):
     # Enforce tenant scoping — non-platform users are locked to their own airline
-    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot"}
+    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot"}
     if is_platform_admin(user_identity, user_roles):
         effective_tenant = tenant or "JY"  # platform admin can pick, defaults to JY
     else:
@@ -85,7 +85,7 @@ def get_filter_metadata(
     tenant: str | None = Query(None),
 ):
     # Enforce tenant scoping — non-platform users locked to own airline
-    AIRLINE_TENANTS = {"JY", "PW", "ALT"}
+    AIRLINE_TENANTS = {"JY", "PW", "ALT", "WM"}
     if is_platform_admin(user_identity, user_roles):
         effective_tenant = tenant  # platform admin can pick or see all
     else:
@@ -104,7 +104,7 @@ def get_filter_metadata(
     result = []
     
     # Dates from filenames - filter by resolved tenant
-    search_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT"]
+    search_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM"]
     file_dates = get_available_file_dates(data_path, search_tenants)
     if file_dates == ["No file dates available"]:
         file_dates = []
@@ -114,7 +114,7 @@ def get_filter_metadata(
     if effective_tenant:
         db_dates_query = db_dates_query.where(AirlineCpiSnapshot.tenant_code == effective_tenant)
     else:
-        db_dates_query = db_dates_query.where(AirlineCpiSnapshot.tenant_code.in_(["JY", "PW", "ALT"]))
+        db_dates_query = db_dates_query.where(AirlineCpiSnapshot.tenant_code.in_(["JY", "PW", "ALT", "WM"]))
     
     db_dates = [d.isoformat() for d in db.execute(db_dates_query).scalars().all() if d]
     
@@ -129,8 +129,8 @@ def get_filter_metadata(
     # tenant view the snapshots query uses. The tenant_code can differ from
     # the airline code carried in the data (e.g. ALT → ref_al 'SKY'), so we
     # must read DISTINCT ref_al rather than echo the tenant code.
-    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot"}
-    view_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT"]
+    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot"}
+    view_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM"]
     vals = []
     for vt in view_tenants:
         view_name = AIRLINE_VIEW_MAP.get(vt)
@@ -156,7 +156,7 @@ def export_snapshots(
     airline: str | None = None,
 ):
     # Enforce tenant scoping — non-platform users locked to own airline
-    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot"}
+    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot"}
     if is_platform_admin(user_identity, user_roles):
         effective_tenant = tenant or "JY"
     else:

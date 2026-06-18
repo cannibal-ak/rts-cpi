@@ -39,6 +39,15 @@ export const navigationItems: NavItem[] = [
     hideForSuperAdmin: true,
   },
   {
+    label: 'Airline CPI \u2013 WinAir',
+    path: '/cpi/airline/wm',
+    icon: 'Flight',
+    requiredModules: ['airline_wm'],
+    requiredRoles: ['TENANT_ADMIN'],
+    category: 'Modules',
+    hideForSuperAdmin: true,
+  },
+  {
     label: 'Cruise/Ferry CPI \u2013 FJL',
     path: '/cpi/cruise/fjl',
     icon: 'DirectionsBoat',
