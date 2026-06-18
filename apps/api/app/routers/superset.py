@@ -49,6 +49,39 @@ def _validate_cap_date(value: str, field: str) -> str:
         raise HTTPException(400, detail={"message": f"Invalid {field}: not a real date"})
     return value
 
+
+def _cap_date_adhoc_filters(
+    cap_date_eq: Optional[str],
+    cap_date_from: Optional[str],
+    cap_date_to: Optional[str],
+) -> list[dict]:
+    """Build Superset SIMPLE adhoc_filters on cap_date, mirroring the guest-token
+    RLS semantics exactly: single day -> ``cap_date == eq``; range ->
+    ``cap_date >= from`` AND ``cap_date <= to`` (inclusive). Single day wins if
+    both are supplied. Values are validated YYYY-MM-DD (same guard as the RLS
+    path). Returns [] when no cap_date params were supplied — callers treat that
+    as a 400.
+    """
+    def _f(op: str, val: str) -> dict:
+        return {
+            "clause": "WHERE",
+            "subject": "cap_date",
+            "operator": op,
+            "comparator": val,
+            "expressionType": "SIMPLE",
+        }
+
+    if cap_date_eq:
+        _validate_cap_date(cap_date_eq, "cap_date_eq")
+        return [_f("==", cap_date_eq)]
+    if cap_date_from and cap_date_to:
+        _validate_cap_date(cap_date_from, "cap_date_from")
+        _validate_cap_date(cap_date_to, "cap_date_to")
+        if cap_date_from > cap_date_to:
+            raise HTTPException(400, detail={"message": "cap_date_from must be <= cap_date_to"})
+        return [_f(">=", cap_date_from), _f("<=", cap_date_to)]
+    return []
+
 router = APIRouter(prefix="/api/v1/superset", tags=["superset"])
 
 # ── Dashboard registry ──────────────────────────────────────
@@ -186,19 +219,58 @@ class SupersetClient:
                 raise Exception(f"Superset JWT login failed ({resp.status_code})")
             self._jwt_token = resp.json()["access_token"]
 
+    @staticmethod
+    def _raw_session_cookie(resp) -> Optional[str]:
+        """Read the ``session`` cookie value straight from the raw Set-Cookie
+        header, bypassing httpx's cookie jar.
+
+        Prod Superset sets the session cookie with ``Secure`` + a Domain pinned
+        to the public host (needed for the cross-site embed). We reach Superset
+        over the internal ``http://superset:8088``, where httpx's jar DROPS that
+        cookie (Secure over http, domain mismatch) — leaving us with no session,
+        so the form_data mint 502'd with "CSRF session token is missing". Replaying
+        the raw value as an explicit cookie keeps the admin session alive. Harmless
+        on dev (the cookie is present in the header there too).
+        """
+        for raw in resp.headers.get_list("set-cookie"):
+            m = re.match(r"\s*session=([^;]+)", raw)
+            if m:
+                return m.group(1)
+        return None
+
     async def _login_session(self):
         async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as c:
             page = await c.get(f"{self.base_url}/login/")
-            cookies = dict(page.cookies)
+            # Read the session cookie raw — the jar drops the Secure/domain-pinned
+            # prod cookie (see _raw_session_cookie).
+            sess = self._raw_session_cookie(page)
+            cookies = {"session": sess} if sess else dict(page.cookies)
+            # Prod has WTF_CSRF_ENABLED=True, so the login form requires its hidden
+            # csrf_token field. Dev (CSRF off) renders no such field — include it
+            # only when present so both configs keep working.
+            data = {"username": self.username, "password": self.password}
+            m = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', page.text)
+            if m:
+                data["csrf_token"] = m.group(1)
             resp = await c.post(
                 f"{self.base_url}/login/",
-                data={"username": self.username, "password": self.password},
+                data=data,
                 cookies=cookies,
+                headers={"Referer": f"{self.base_url}/login/"},
                 follow_redirects=False,
             )
             if resp.status_code not in (200, 302):
                 raise Exception(f"Superset session login failed ({resp.status_code})")
-            self._session_cookies = {**cookies, **dict(resp.cookies)}
+            # Carry the post-login (rotated, authenticated) session forward, read
+            # raw for the same jar reason; fall back to the pre-login session, then
+            # the jar, so the CSRF-off dev path is unaffected.
+            post = self._raw_session_cookie(resp)
+            if post:
+                self._session_cookies = {"session": post}
+            elif sess:
+                self._session_cookies = {"session": sess}
+            else:
+                self._session_cookies = {**cookies, **dict(resp.cookies)}
 
     async def _jwt_headers(self) -> dict:
         if not self._jwt_token:
@@ -275,6 +347,84 @@ class SupersetClient:
                 body = resp.text[:300]
                 raise Exception(f"Guest token failed ({resp.status_code}): {body}")
             return resp.json()["token"]
+
+    # ── Explore form_data_key (Chart-view date overlay) ──
+
+    async def get_chart_meta(self, slice_id: int) -> dict:
+        """Resolve a slice's datasource + viz_type from Superset.
+
+        The chart REST payload has no usable top-level datasource_id; it lives in
+        ``params.datasource`` as ``"<id>__<type>"`` (e.g. ``"13__table"``). Uses
+        admin session cookies — same flow as list_dashboard_charts.
+        """
+        cookies = await self._session_cookies_safe()
+        url = f"{self.base_url}/api/v1/chart/{slice_id}"
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            resp = await c.get(url, cookies=cookies)
+            if resp.status_code == 401:
+                await self._login_session()
+                resp = await c.get(url, cookies=self._session_cookies)
+            resp.raise_for_status()
+            result = resp.json()["result"]
+        import json as _json
+        params = _json.loads(result.get("params") or "{}")
+        ds = params.get("datasource") or ""        # "13__table"
+        ds_id, _, ds_type = ds.partition("__")
+        if not ds_id or not ds_type:
+            raise Exception(f"Could not resolve datasource for slice {slice_id}")
+        return {
+            "datasource_id": int(ds_id),
+            "datasource_type": ds_type,
+            "viz_type": params.get("viz_type"),
+        }
+
+    async def mint_form_data_key(
+        self, datasource_id: int, datasource_type: str, chart_id: int, form_data_json: str,
+    ) -> str:
+        """Mint a Superset explore form_data_key (a stored form_data overlay).
+
+        POST /api/v1/explore/form_data is a WRITE: JWT bearer auth 403s
+        (see project_superset_auth.md), so we authenticate with admin session
+        cookies PLUS a CSRF token. The token is cookie-bound, so we carry the
+        cookie the csrf endpoint returns into the POST, with X-CSRFToken +
+        Referer headers (mirrors how Superset's own UI submits writes).
+        """
+        cookies = await self._session_cookies_safe()
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            csrf_resp = await c.get(
+                f"{self.base_url}/api/v1/security/csrf_token/",
+                cookies=cookies, headers={"Referer": self.base_url},
+            )
+            if csrf_resp.status_code == 401:
+                await self._login_session()
+                cookies = self._session_cookies  # type: ignore
+                csrf_resp = await c.get(
+                    f"{self.base_url}/api/v1/security/csrf_token/",
+                    cookies=cookies, headers={"Referer": self.base_url},
+                )
+            csrf_resp.raise_for_status()
+            csrf = csrf_resp.json()["result"]
+            # The csrf fetch may rotate the session cookie — carry it forward,
+            # reading raw (the jar drops the Secure/domain-pinned prod cookie).
+            rotated = self._raw_session_cookie(csrf_resp)
+            if rotated:
+                cookies = {"session": rotated}
+
+            resp = await c.post(
+                f"{self.base_url}/api/v1/explore/form_data",
+                json={
+                    "datasource_id": datasource_id,
+                    "datasource_type": datasource_type,
+                    "chart_id": chart_id,
+                    "form_data": form_data_json,
+                },
+                cookies=cookies,
+                headers={"X-CSRFToken": csrf, "Referer": self.base_url},
+            )
+            if resp.status_code not in (200, 201):
+                body = resp.text[:300]
+                raise Exception(f"form_data mint failed ({resp.status_code}): {body}")
+            return resp.json()["key"]
 
 
 superset_client = SupersetClient()
@@ -617,3 +767,69 @@ def list_available_dates(
     dates = [d for d in dates if d]
 
     return {"dashboard_id": dashboard_id, "dates": dates}
+
+
+# ── Chart-view date overlay (form_data_key) ─────────────────────────────────
+
+@router.get("/charts/{slice_id}/form-data-key")
+async def fetch_chart_form_data_key(
+    slice_id: int,
+    cap_date_eq: Optional[str] = None,
+    cap_date_from: Optional[str] = None,
+    cap_date_to: Optional[str] = None,
+    user_identity: str = Depends(get_user_identity),
+    user_roles: list[str] = Depends(get_user_roles),
+):
+    """Mint a Superset explore form_data_key that overlays a cap_date filter onto
+    a saved chart, for the standalone Chart-view iframe.
+
+    Why: the explore SPA's URL-param registry does NOT include raw ``form_data``
+    — it silently drops it and renders the chart's saved (unfiltered) config. It
+    DOES honor ``form_data_key``. So we mint a key whose form_data carries ONLY
+    the cap_date adhoc_filter(s); loading
+    ``/explore/?slice_id=ID&standalone=1&form_data_key=KEY`` keeps the saved viz
+    and applies the filter. cap_date semantics mirror the guest-token RLS exactly
+    (single -> ==; range -> >= AND <=).
+
+    Additive and independent of the guest-token / RLS / embed path. The form_data
+    is built server-side from the validated cap_date params only — no client-
+    supplied form_data is accepted (no arbitrary-form_data injection).
+    """
+    # Build the cap_date overlay from validated params (reuses the RLS guard).
+    filters = _cap_date_adhoc_filters(cap_date_eq, cap_date_from, cap_date_to)
+    if not filters:
+        raise HTTPException(400, detail={
+            "message": "A cap_date filter is required (cap_date_eq, or cap_date_from + cap_date_to).",
+        })
+
+    # Resolve the slice's datasource (required by the form_data POST) and
+    # viz_type (decides whether series B needs filtering too).
+    try:
+        meta = await superset_client.get_chart_meta(slice_id)
+    except Exception as e:
+        _log.error(f"[form-data-key] chart meta lookup failed for slice {slice_id}: {e}")
+        raise HTTPException(502, detail={
+            "message": f"Could not resolve chart {slice_id} from Superset: {e}",
+        })
+
+    form_data: dict = {"adhoc_filters": filters}
+    # mixed_timeseries renders a second, independent query series whose filters
+    # live in adhoc_filters_b — scope it to the same cap_date so both series match.
+    if meta.get("viz_type") == "mixed_timeseries":
+        form_data["adhoc_filters_b"] = filters
+
+    import json as _json
+    try:
+        key = await superset_client.mint_form_data_key(
+            datasource_id=meta["datasource_id"],
+            datasource_type=meta["datasource_type"],
+            chart_id=slice_id,
+            form_data_json=_json.dumps(form_data),
+        )
+    except Exception as e:
+        _log.error(f"[form-data-key] mint failed for slice {slice_id}: {e}")
+        raise HTTPException(502, detail={
+            "message": f"Could not mint Superset form_data_key: {e}",
+        })
+
+    return {"key": key}

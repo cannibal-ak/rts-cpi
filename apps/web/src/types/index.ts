@@ -525,6 +525,39 @@ export interface AdminForceResetResponse {
   message: string;
 }
 
+export interface AdminTenantOption {
+  tenant_id: string;
+  slug: string;
+  name: string;
+}
+
+export interface AdminInviteUserResponse {
+  user_id: string;
+  email: string;
+  invite_sent: boolean;
+}
+
+export interface AdminResendInviteResponse {
+  success: boolean;
+  invite_sent: boolean;
+  message: string;
+}
+
+export interface AdminSendResetEmailResponse {
+  sent: boolean;
+  message: string;
+}
+
+export interface InviteVerifyResponse {
+  valid: boolean;
+  email?: string | null;
+}
+
+export interface InviteAcceptResponse {
+  success: boolean;
+  message: string;
+}
+
 
 // ──────── Data Ops (restored from 66b5965) ────────
 export type IngestionStatus =

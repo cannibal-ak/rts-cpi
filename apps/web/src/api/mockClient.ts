@@ -384,9 +384,13 @@ export const mockClient: CpiApiClient = {
     // Password management isn't exercised offline; stubs keep the interface satisfied.
     passwordManagement: {
       listUsers: () => delay({ users: [], total: 0 }),
-      listResetCodes: () => delay({ tokens: [], total: 0 }),
-      generateCode: (_email: string) =>
-        delay({ success: false, message: 'Not available in mock mode', code: '000000', expires_at: new Date().toISOString() }),
+      listTenants: () => delay([]),
+      inviteUser: (_body: { email: string; display_name: string; tenant_id: string; role?: string }) =>
+        delay({ user_id: '00000000-0000-0000-0000-000000000000', email: _body.email, invite_sent: false }),
+      resendInvite: (_body: { email?: string; user_id?: string }) =>
+        delay({ success: false, invite_sent: false, message: 'Not available in mock mode' }),
+      sendResetEmail: (_body: { email: string }) =>
+        delay({ sent: false, message: 'Not available in mock mode' }),
       forceReset: (_email: string, _newPassword: string, _forceChangeOnLogin: boolean) =>
         delay({ success: false, message: 'Not available in mock mode' }),
     },
@@ -419,6 +423,11 @@ export const mockClient: CpiApiClient = {
       getTenantSummary: () => delay({ tenants: [] }),
     },
   },
+  auth: {
+    verifyInvite: (_token: string) => delay({ valid: false, email: null }),
+    acceptInvite: (_body: { token: string; new_password: string }) =>
+      delay({ success: false, message: 'Not available in mock mode' }),
+  },
   stats: {
     getFreshnessMetrics: () => delay([
       { domain: 'Airline CPI', last_capture_at: '2026-03-05T08:30:00Z', last_import_at: '2026-03-05T09:15:00Z', record_count: 245890, status: 'fresh' },
@@ -444,6 +453,8 @@ export const mockClient: CpiApiClient = {
           '2026-05-17','2026-05-14','2026-05-12','2026-05-10','2026-05-07','2026-05-05','2026-05-03',
         ],
     }),
+    getChartFormDataKey: (sliceId: number, _dateFilter?: unknown): Promise<{ key: string }> =>
+      delay({ key: `mock-form-data-key-${sliceId}` }),
     getDashboardCharts: (dashboardId: string): Promise<DashboardChartsResponse> => delay({
       dashboard_id: Number(dashboardId),
       dashboard_app_id: dashboardId,

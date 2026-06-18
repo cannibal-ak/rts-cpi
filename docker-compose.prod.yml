@@ -1,0 +1,171 @@
+# ───────────────────────────────────────────────
+# RTS CPI — PRODUCTION compose (self-contained)
+# Run with:  docker compose -f docker-compose.prod.yml --env-file .env.prod ...
+#
+# Self-contained (NOT a thin override) on purpose: Docker Compose CONCATENATES the
+# `ports:` list when merging files, so a thin override cannot UNPUBLISH the dev
+# port mappings. Defining the prod stack standalone is the only way to guarantee
+# the data/app services are internal-only. nginx is the ONLY service that
+# publishes host ports (80/443), and it is profile-gated off until Step 4 (TLS).
+# ───────────────────────────────────────────────
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./scripts:/scripts:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    # internal-only — no published ports
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}"]
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    # internal-only — no published ports
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # internal-only — management UI (15672) NOT published
+
+  api:
+    build:
+      context: ./apps/api
+      target: prod
+    image: cpi-api
+    restart: unless-stopped
+    env_file: [.env.prod]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    # prod image CMD: alembic upgrade head && gunicorn -w 4 -k uvicorn.workers.UvicornWorker (no --reload)
+    # internal-only — no published ports; nginx proxies /api
+
+  web:
+    build:
+      context: ./apps/web
+      target: prod
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL}
+        VITE_TENANT_ID: ${VITE_TENANT_ID}
+        VITE_SUPERSET_URL: ${VITE_SUPERSET_URL}
+    restart: unless-stopped
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    # built SPA served by internal nginx on :80 (no Vite dev, no 5173, no HMR)
+    # internal-only — no published ports; nginx proxies /
+
+  superset:
+    image: apache/superset:3.1.0
+    restart: unless-stopped
+    env_file: [.env.prod]
+    environment:
+      SUPERSET_CONFIG_PATH: /app/superset_config.py
+    volumes:
+      - ./infra/superset_config.py:/app/superset_config.py:ro
+      - superset_home:/app/superset_home
+      - ./superset-patches/3871.c687a6d83eaaee71a216.entry.js:/app/superset/static/assets/3871.c687a6d83eaaee71a216.entry.js:ro
+      - ./superset-patches/loading_airplane.gif:/app/superset/static/assets/images/loading.gif:ro
+      - ./superset-patches/loading_airplane.gif:/app/superset/static/assets/loading.cff8a5da..gif:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        pip install psycopg2-binary 2>/dev/null
+        superset db upgrade
+        superset fab create-admin \
+          --username "$${SUPERSET_ADMIN_USER}" \
+          --firstname Admin --lastname User \
+          --email admin@rts.local \
+          --password "$${SUPERSET_ADMIN_PASS}" 2>/dev/null || true
+        superset init
+        superset run -h 0.0.0.0 -p 8088 --with-threads
+    # internal-only — no published ports; nginx proxies bi.altitude.rts.com
+
+  worker:
+    image: cpi-api
+    restart: unless-stopped
+    command: ["celery", "-A", "app.worker", "worker", "--loglevel=info", "--concurrency=2"]
+    env_file: [.env.prod]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      api: {condition: service_started}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker inspect ping || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  beat:
+    image: cpi-api
+    restart: unless-stopped
+    command: ["celery", "-A", "app.worker", "beat", "--loglevel=info", "--scheduler", "redbeat.RedBeatScheduler"]
+    env_file: [.env.prod]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      api: {condition: service_started}
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.prod/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/letsencrypt:/etc/letsencrypt:ro
+      - ./nginx/acme:/var/www/certbot:ro
+    depends_on:
+      - web
+      - api
+      - superset
+    profiles: ["nginx"]   # gated OFF for Step 3b; started in Step 4 once TLS certs exist
+
+volumes:
+  pgdata:
+  superset_home:

@@ -44,17 +44,23 @@ class Settings(BaseSettings):
     # Platform tenant slug (the internal RTS tenant, excluded from customer-tenant lists).
     platform_tenant_slug: str = os.environ.get("CPI_PLATFORM_TENANT_SLUG", "rts")
 
+    # Public base URL of the web app — used to build links emailed to users
+    # (e.g. the accept-invite link). Prod overrides via env APP_BASE_URL.
+    APP_BASE_URL: str = os.environ.get("APP_BASE_URL", "http://192.168.101.10:9090")
+
     # Feature flags
     allow_legacy_header_auth: bool = os.environ.get("ALLOW_LEGACY_HEADER_AUTH", "false").lower() == "true"
 
-    # CORS
+    # MFA enforcement (Phase 2C). When True, non-exempt, non-platform-admin
+    # users must enroll in TOTP MFA and complete the second step at login.
+    # Default OFF — the two-step /login branch and the forced-enrollment gate
+    # are inert (unreachable) until this is flipped to true.
+    mfa_enforced: bool = os.environ.get("MFA_ENFORCED", "false").lower() == "true"
+
+    # CORS — PRODUCTION (was dev/LAN/public-IP list; hardened to the prod app domain)
     cors_origins: list[str] = [
-        "http://localhost:5173",
-        "http://localhost:8080",
-        "http://localhost:3000",
-        "http://192.168.101.10:8080",
-        "http://192.168.101.10:9090",
-        "http://192.168.101.10:5173",
+        "https://187.127.130.130.sslip.io",
+        "https://altitude-ai.app",
     ]
 
     class Config:

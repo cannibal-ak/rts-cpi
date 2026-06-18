@@ -21,6 +21,10 @@ import type {
   SmtpConfigRead, SmtpConfigUpdate, SmtpTestRequest, SmtpTestResponse,
 } from '../types/smtpConfig';
 import { authStorage } from '../utils/authStorage';
+import type {
+  AdminTenantOption, AdminInviteUserResponse, AdminResendInviteResponse,
+  AdminSendResetEmailResponse, InviteVerifyResponse, InviteAcceptResponse,
+} from '../types';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -102,6 +106,14 @@ async function handleResponse<T>(res: Response): Promise<T> {
       throw new Error('Password change required');
     }
 
+    // Handle forced MFA enrollment (Phase 4 gate — only fires when MFA_ENFORCED is on)
+    if (res.status === 403 && errorCode === 'mfa_setup_required') {
+      if (window.location.pathname !== '/setup-mfa') {
+        window.location.href = '/setup-mfa?required=1';
+      }
+      throw new Error('MFA setup required');
+    }
+
     const err = new Error(`API ${res.status}: ${message}`) as Error & ApiErrorShape;
     err.status = res.status;
     err.errorCode = errorCode;
@@ -172,7 +184,7 @@ async function get<T>(path: string, params?: Record<string, string | number | un
   try {
     return await fetchWithAuth<T>(url, { headers: headers() });
   } catch (err: any) {
-    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required' || err.message === 'MFA setup required') throw err;
     throw new Error(`Network Error: ${err.message}. Is the backend at ${BASE} reachable?`);
   }
 }
@@ -185,7 +197,24 @@ async function post<T>(path: string, body: unknown): Promise<T> {
       body: JSON.stringify(body),
     });
   } catch (err: any) {
-    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required' || err.message === 'MFA setup required') throw err;
+    throw new Error(`Network Error: ${err.message}`);
+  }
+}
+
+// Unauthenticated POST — no Authorization header, no 401-refresh/redirect
+// interceptor. For public endpoints (e.g. accept-invite) reachable by
+// logged-out users.
+async function publicPost<T>(path: string, body: unknown): Promise<T> {
+  try {
+    const res = await fetch(`${BASE}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return await handleResponse<T>(res);
+  } catch (err: any) {
+    if (err.message.startsWith('API ')) throw err;
     throw new Error(`Network Error: ${err.message}`);
   }
 }
@@ -226,7 +255,7 @@ async function postMultipart<T>(path: string, files: File[]): Promise<T> {
   try {
     return await fetchWithAuth<T>(`${BASE}${path}`, init);
   } catch (err: any) {
-    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required' || err.message === 'MFA setup required') throw err;
     throw new Error(`Network Error: ${err.message}`);
   }
 }
@@ -395,10 +424,13 @@ export const httpClient: CpiApiClient = {
     },
     passwordManagement: {
       listUsers: () => get<AdminUserListResponse>('/api/v1/admin/password-management/users'),
-      listResetCodes: (limit?: number) =>
-        get<AdminResetTokenListResponse>('/api/v1/admin/password-management/reset-codes', limit ? { limit } : undefined),
-      generateCode: (email: string) =>
-        post<AdminGenerateResetCodeResponse>('/api/v1/admin/password-management/generate-code', { email }),
+      listTenants: () => get<AdminTenantOption[]>('/api/v1/admin/password-management/tenants'),
+      inviteUser: (body: { email: string; display_name: string; tenant_id: string; role?: string }) =>
+        post<AdminInviteUserResponse>('/api/v1/admin/password-management/invite-user', { role: 'TENANT_ADMIN', ...body }),
+      resendInvite: (body: { email?: string; user_id?: string }) =>
+        post<AdminResendInviteResponse>('/api/v1/admin/password-management/resend-invite', body),
+      sendResetEmail: (body: { email: string }) =>
+        post<AdminSendResetEmailResponse>('/api/v1/admin/password-management/send-reset-email', body),
       forceReset: (email: string, newPassword: string, forceChangeOnLogin: boolean) =>
         post<AdminForceResetResponse>('/api/v1/admin/password-management/force-reset', {
           email,
@@ -420,6 +452,12 @@ export const httpClient: CpiApiClient = {
         delete: () => del<void>('/api/v1/admin/settings/smtp'),
       },
     },
+  },
+  auth: {
+    verifyInvite: (token: string) =>
+      publicPost<InviteVerifyResponse>('/api/v1/auth/verify-invite', { token }),
+    acceptInvite: (body: { token: string; new_password: string }) =>
+      publicPost<InviteAcceptResponse>('/api/v1/auth/accept-invite', body),
   },
   stats: {
     getFreshnessMetrics: () => get<DataFreshness[]>('/api/v1/stats/freshness'),
@@ -457,6 +495,23 @@ export const httpClient: CpiApiClient = {
       get<DashboardChartsResponse>(
         `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/charts`,
       ),
+    // Mint a Superset explore form_data_key carrying the active cap_date filter
+    // for the standalone Chart-view iframe. The backend builds the form_data
+    // server-side from these params (same cap_date semantics as the guest token);
+    // the returned key goes into /explore/?slice_id=ID&form_data_key=KEY.
+    getChartFormDataKey: (sliceId: number, dateFilter?: DashboardDateFilter) => {
+      const params: Record<string, string | number | undefined> = {};
+      if (dateFilter?.mode === 'single' && dateFilter.capDateEq) {
+        params.cap_date_eq = dateFilter.capDateEq;
+      } else if (dateFilter?.mode === 'range' && dateFilter.capDateFrom && dateFilter.capDateTo) {
+        params.cap_date_from = dateFilter.capDateFrom;
+        params.cap_date_to   = dateFilter.capDateTo;
+      }
+      return get<{ key: string }>(
+        `/api/v1/superset/charts/${encodeURIComponent(sliceId)}/form-data-key`,
+        params,
+      );
+    },
   },
   kpi: {
     getSummary: (airlineCode: string, capDate: string, currency?: string) =>

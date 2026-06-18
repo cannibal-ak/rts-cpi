@@ -18,6 +18,10 @@ import type {
 import type {
   SmtpConfigRead, SmtpConfigUpdate, SmtpTestRequest, SmtpTestResponse,
 } from '../types/smtpConfig';
+import type {
+  AdminTenantOption, AdminInviteUserResponse, AdminResendInviteResponse,
+  AdminSendResetEmailResponse, InviteVerifyResponse, InviteAcceptResponse,
+} from '../types';
 
 // ── Superset chart manifest ────────────────
 export interface DashboardChart {
@@ -168,8 +172,10 @@ export interface CpiApiClient {
     // ── Password Management ──
     passwordManagement: {
       listUsers(): Promise<AdminUserListResponse>;
-      listResetCodes(limit?: number): Promise<AdminResetTokenListResponse>;
-      generateCode(email: string): Promise<AdminGenerateResetCodeResponse>;
+      listTenants(): Promise<AdminTenantOption[]>;
+      inviteUser(body: { email: string; display_name: string; tenant_id: string; role?: string }): Promise<AdminInviteUserResponse>;
+      resendInvite(body: { email?: string; user_id?: string }): Promise<AdminResendInviteResponse>;
+      sendResetEmail(body: { email: string }): Promise<AdminSendResetEmailResponse>;
       forceReset(email: string, newPassword: string, forceChangeOnLogin: boolean): Promise<AdminForceResetResponse>;
     };
 
@@ -189,6 +195,11 @@ export interface CpiApiClient {
         delete(): Promise<void>;
       };
     };
+  };
+  // Public auth (invite acceptance — no JWT required)
+  auth: {
+    verifyInvite(token: string): Promise<InviteVerifyResponse>;
+    acceptInvite(body: { token: string; new_password: string }): Promise<InviteAcceptResponse>;
   };
   // Stats
   stats: {
@@ -215,6 +226,10 @@ export interface CpiApiClient {
         dates: string[];
     }>;
     getDashboardCharts(dashboardId: string): Promise<DashboardChartsResponse>;
+    getChartFormDataKey(
+      sliceId: number,
+      dateFilter?: DashboardDateFilter,
+    ): Promise<{ key: string }>;
   };
   kpi: {
     getSummary(airlineCode: string, capDate: string, currency?: string): Promise<KpiSummaryResponse>;

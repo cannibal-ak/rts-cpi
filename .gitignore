@@ -138,3 +138,9 @@ dev-sftp-mount/pw/*
 *.save
 *.tgz
 *.db.bak*
+.env.prod
+.env.host-ref
+cpi_deploy_bundle_*.tar.gz
+superset_backups/
+_restore/
+*.tar.gz

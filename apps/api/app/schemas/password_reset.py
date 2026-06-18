@@ -21,3 +21,17 @@ class PasswordResetNewPassword(BaseModel):
 class PasswordResetResponse(BaseModel):
     success: bool
     message: str
+
+
+class InviteVerifyRequest(BaseModel):
+    token: str
+
+
+class InviteVerifyResponse(BaseModel):
+    valid: bool
+    email: EmailStr | None = None
+
+
+class InviteAcceptRequest(BaseModel):
+    token: str
+    new_password: str

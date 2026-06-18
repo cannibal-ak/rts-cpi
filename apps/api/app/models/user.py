@@ -25,6 +25,10 @@ class AppUser(Base):
     locked_until = Column(DateTime(timezone=True), nullable=True)
     password_changed_at = Column(DateTime(timezone=True), nullable=True)
 
+    # MFA (Phase 1 — RBAC-aware TOTP). Per-user override: when True the user
+    # skips otherwise-mandatory MFA. Role-level policy lives elsewhere.
+    mfa_exempt = Column(Boolean, nullable=False, default=False, server_default="false")
+
     __table_args__ = (
         UniqueConstraint("tenant_id", "email", name="uq_app_user_tenant_email"),
     )

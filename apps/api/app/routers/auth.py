@@ -4,20 +4,25 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.deps import mfa_required_for
 from app.models.user import AppUser, RoleBinding
+from app.models.user_mfa import UserMfa
 from app.models.tenant import Tenant
+from app.services import audit
 from app.services.auth_service import (
     verify_password,
     hash_password,
     validate_password_strength,
     create_access_token,
     create_refresh_token,
+    create_mfa_challenge_token,
     decode_token,
     TokenError,
     TokenExpiredError,
@@ -130,6 +135,34 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
     ).all()
     roles = [rb.role for rb in role_bindings]
 
+    # ── MFA two-step gate (Phase 2C) — inert unless settings.mfa_enforced.
+    # When a non-exempt, non-platform-admin user has MFA enabled, issue a
+    # short-lived challenge INSTEAD of tokens; the client completes login at
+    # /api/v1/auth/mfa/verify. With the flag OFF this branch is unreachable,
+    # so the full-token path below is byte-for-byte unchanged at runtime.
+    user_mfa = db.query(UserMfa).filter(UserMfa.user_id == user.id).first()
+    if mfa_required_for(user, roles, tenant.slug) and user_mfa is not None and user_mfa.enabled:
+        challenge_token = create_mfa_challenge_token(str(user.id), str(user.tenant_id))
+        audit.record(
+            db,
+            tenant_id=user.tenant_id,
+            actor=str(user.id),
+            action="login.mfa_challenge_issued",
+            target_type="user_mfa",
+            target_id=str(user.id),
+        )
+        db.commit()
+        # JSONResponse (a Response) bypasses response_model, so the /login
+        # 200 schema stays exactly TokenResponse.
+        return JSONResponse(
+            status_code=200,
+            content={
+                "mfa_required": True,
+                "mfa_challenge_token": challenge_token,
+                "challenge_expires_in": 300,
+            },
+        )
+
     subject = _build_token_subject(user, tenant.slug, roles)
     access_token = create_access_token(subject)
     refresh_token = create_refresh_token(subject)
@@ -183,9 +216,13 @@ def logout(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
         payload = decode_token(token)
-        logger.info("User %s logged out (jti: %s)", payload.get("email"), payload.get("jti"))
     except TokenError:
-        pass
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # Token-type hardening (Phase 2C): only an access token may log out — an
+    # mfa_challenge / refresh token must not be accepted here.
+    if payload.get("token_type") != "access":
+        raise HTTPException(status_code=401, detail="Not an access token")
+    logger.info("User %s logged out (jti: %s)", payload.get("email"), payload.get("jti"))
     return {"detail": "Logged out"}
 
 
@@ -200,6 +237,10 @@ def change_password(body: ChangePasswordRequest, token: str = Depends(oauth2_sch
         payload = decode_token(token)
     except TokenError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Token-type hardening (Phase 2C): reject mfa_challenge / refresh tokens.
+    if payload.get("token_type") != "access":
+        raise HTTPException(status_code=401, detail="Not an access token")
 
     user = db.query(AppUser).filter(AppUser.id == payload["sub"]).first()
     if not user or not user.is_active:
@@ -237,6 +278,10 @@ def me(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
         payload = decode_token(token)
     except TokenError:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+    # Token-type hardening (Phase 2C): reject mfa_challenge / refresh tokens.
+    if payload.get("token_type") != "access":
+        raise HTTPException(status_code=401, detail="Not an access token")
 
     user = db.query(AppUser).filter(AppUser.id == payload["sub"]).first()
     if not user or not user.is_active:

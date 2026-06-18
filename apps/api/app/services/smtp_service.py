@@ -255,3 +255,47 @@ def send_password_reset_email(
         body_text=plain,
         body_html=html,
     )
+
+
+# ── Invite email ─────────────────────────────────
+
+def _invite_email_bodies(invite_url: str, expiry_hours: int) -> tuple[str, str]:
+    plain = (
+        "Welcome to RTS Altitude AI.\n\n"
+        "An administrator has created an account for you. To finish setting up "
+        "your account, choose your own password using the secure link below:\n\n"
+        f"{invite_url}\n\n"
+        f"This link expires in {expiry_hours} hours. If you were not expecting "
+        "this invitation, you can ignore this email."
+    )
+    html = (
+        "<p>Welcome to <strong>RTS Altitude AI</strong>.</p>"
+        "<p>An administrator has created an account for you. To finish setting "
+        "up your account, choose your own password using the secure link below:</p>"
+        f"<p><a href=\"{invite_url}\" style=\"display:inline-block;padding:10px 18px;"
+        "background:#0070C0;color:#ffffff;text-decoration:none;border-radius:4px;"
+        f"font-weight:600\">Set up your account</a></p>"
+        f"<p>Or paste this link into your browser:<br>"
+        f"<a href=\"{invite_url}\">{invite_url}</a></p>"
+        f"<p>This link expires in <strong>{expiry_hours} hours</strong>. If you "
+        "were not expecting this invitation, you can ignore this email.</p>"
+    )
+    return plain, html
+
+
+def send_invite_email(
+    db: Session,
+    *,
+    to_email: str,
+    invite_url: str,
+    expiry_hours: int,
+) -> bool:
+    """Send the account-setup (invite) email. Mirrors send_password_reset_email."""
+    plain, html = _invite_email_bodies(invite_url, expiry_hours)
+    return send_email(
+        db,
+        to_email=to_email,
+        subject="Set up your Altitude AI account",
+        body_text=plain,
+        body_html=html,
+    )

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef, ReactNode } from 'react';
 import { setHttpClientAccessToken } from '../api/httpClient';
 import { authStorage } from '../utils/authStorage';
+import { mfaVerify, MfaApiError } from '../api/mfa';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -15,13 +16,25 @@ interface AuthUser {
     mustChangePassword: boolean;
 }
 
+interface LoginResult {
+    success: boolean;
+    error?: string;
+    // True when the backend returned a two-step MFA challenge instead of
+    // tokens — the UI should render the challenge screen (state is set here).
+    mfaRequired?: boolean;
+}
+
 interface AuthContextType {
     user: AuthUser | null;
     accessToken: string | null;
     isAuthenticated: boolean;
     isLoading: boolean;
     mustChangePassword: boolean;
-    login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+    // MFA two-step login (challenge token held in memory only, never persisted)
+    mfaChallengeActive: boolean;
+    login: (email: string, password: string) => Promise<LoginResult>;
+    verifyMfa: (code: string, isRecovery?: boolean) => Promise<{ success: boolean; error?: string }>;
+    cancelMfaChallenge: () => void;
     logout: () => void;
     changePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
 }
@@ -33,6 +46,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const [user, setUser] = useState<AuthUser | null>(null);
     const [accessToken, setAccessToken] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    // In-memory only — deliberately NOT in sessionStorage/localStorage.
+    const [mfaChallengeToken, setMfaChallengeToken] = useState<string | null>(null);
     const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     // Parse JWT payload without verification (for expiry tracking)
@@ -81,6 +96,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
         }, refreshIn);
     }, []);
+
+    // Shared completion for the normal-login and post-MFA-verify token paths.
+    const completeAuth = useCallback((data: any) => {
+        // Store refresh token in sessionStorage (per-tab isolation).
+        // Phase 2 compromise — Phase 7 will move to httpOnly cookies.
+        authStorage.setRefreshToken(data.refresh_token);
+        setAccessToken(data.access_token);
+        setUser({
+            id: data.user.id,
+            email: data.user.email,
+            display_name: data.user.display_name,
+            tenantId: data.user.tenant_id,
+            tenantSlug: data.user.tenant_slug,
+            roles: data.user.roles,
+            mustChangePassword: data.must_change_password,
+        });
+        scheduleRefresh(data.access_token);
+    }, [scheduleRefresh]);
 
     // On mount: try to restore session from refresh token
     useEffect(() => {
@@ -148,7 +181,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
     }, [scheduleRefresh]);
 
-    const login = useCallback(async (email: string, password: string) => {
+    const login = useCallback(async (email: string, password: string): Promise<LoginResult> => {
         try {
             const res = await fetch(`${BASE}/api/v1/auth/login`, {
                 method: 'POST',
@@ -164,27 +197,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
             const data = await res.json();
 
-            // Store refresh token in sessionStorage (per-tab isolation).
-            // Phase 2 compromise — Phase 7 will move to httpOnly cookies.
-            authStorage.setRefreshToken(data.refresh_token);
+            // Two-step MFA: backend issued a challenge instead of tokens.
+            if (data.mfa_required) {
+                setMfaChallengeToken(data.mfa_challenge_token);  // in-memory only
+                return { success: false, mfaRequired: true };
+            }
 
-            setAccessToken(data.access_token);
-            setUser({
-                id: data.user.id,
-                email: data.user.email,
-                display_name: data.user.display_name,
-                tenantId: data.user.tenant_id,
-                tenantSlug: data.user.tenant_slug,
-                roles: data.user.roles,
-                mustChangePassword: data.must_change_password,
-            });
-            scheduleRefresh(data.access_token);
-
+            completeAuth(data);
             return { success: true };
         } catch (err: any) {
             return { success: false, error: `Network error: ${err.message}` };
         }
-    }, [scheduleRefresh]);
+    }, [completeAuth]);
+
+    const verifyMfa = useCallback(async (code: string, isRecovery = false) => {
+        if (!mfaChallengeToken) return { success: false, error: 'No MFA challenge in progress' };
+        try {
+            const data = await mfaVerify(mfaChallengeToken, code, isRecovery);
+            completeAuth(data);
+            setMfaChallengeToken(null);
+            return { success: true };
+        } catch (err: any) {
+            if (err instanceof MfaApiError && err.status === 423) {
+                return { success: false, error: 'Account locked due to too many attempts. Try again later.' };
+            }
+            const msg = err instanceof MfaApiError ? err.message : `Network error: ${err.message}`;
+            return { success: false, error: msg || 'Invalid code' };
+        }
+    }, [mfaChallengeToken, completeAuth]);
+
+    const cancelMfaChallenge = useCallback(() => {
+        setMfaChallengeToken(null);
+    }, []);
 
     const logout = useCallback(async () => {
         if (accessToken) {
@@ -201,6 +245,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         authStorage.removeRefreshToken();
         setUser(null);
         setAccessToken(null);
+        setMfaChallengeToken(null);
     }, [accessToken]);
 
     const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
@@ -240,10 +285,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         isAuthenticated: !!user,
         isLoading,
         mustChangePassword: user?.mustChangePassword ?? false,
+        mfaChallengeActive: !!mfaChallengeToken,
         login,
+        verifyMfa,
+        cancelMfaChallenge,
         logout,
         changePassword,
-    }), [user, accessToken, isLoading, login, logout, changePassword]);
+    }), [user, accessToken, isLoading, mfaChallengeToken, login, verifyMfa, cancelMfaChallenge, logout, changePassword]);
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

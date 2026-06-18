@@ -18,12 +18,13 @@ import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useSession } from '../../context/SessionContext';
 import { useThemeMode } from '../../context/ThemeContext';
-import ForgotPasswordFlow from './ForgotPasswordFlow';
+import ForgotPasswordMfaFlow from './ForgotPasswordMfaFlow';
+import MfaChallengeCard from './MfaChallengeCard';
 
 
 
 export default function LoginPage() {
-    const { login, isAuthenticated, mustChangePassword } = useAuth();
+    const { login, isAuthenticated, mustChangePassword, mfaChallengeActive, verifyMfa, cancelMfaChallenge } = useAuth();
     const { session, isSyncing } = useSession();
     const navigate = useNavigate();
     const theme = useTheme();
@@ -64,6 +65,11 @@ export default function LoginPage() {
         return <Navigate to="/dashboards" replace />;
     }
 
+    // Two-step MFA: AuthContext holds an in-memory challenge -> show the card.
+    if (mfaChallengeActive) {
+        return <MfaChallengeCard verifyMfa={verifyMfa} onCancel={cancelMfaChallenge} />;
+    }
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
@@ -81,7 +87,7 @@ export default function LoginPage() {
         const result = await login(email, password);
         setLoading(false);
 
-        if (!result.success) {
+        if (!result.success && !result.mfaRequired) {
             setError(result.error || 'Login failed');
         }
         // On success, AuthContext updates state → re-render → Navigate triggers above
@@ -405,7 +411,7 @@ export default function LoginPage() {
                     pointerEvents: flipped ? 'auto' : 'none',
                 }}
             >
-                <ForgotPasswordFlow
+                <ForgotPasswordMfaFlow
                     key={resetFlowKey}
                     isDark={isDark}
                     onBackToSignIn={flipToLogin}
