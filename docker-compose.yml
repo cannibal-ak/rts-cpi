@@ -95,6 +95,7 @@ services:
       SUPERSET_URL: ${SUPERSET_URL:-http://superset:8088}
       SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:-admin}
       SUPERSET_ADMIN_PASS: ${SUPERSET_ADMIN_PASS:-admin}
+      MFA_ENFORCED: ${MFA_ENFORCED:-false}  # Phase 5A DEV cutover (default false; prod compose unaffected)
     depends_on:
       postgres:
         condition: service_healthy

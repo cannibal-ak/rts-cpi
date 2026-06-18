@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     # Feature flags
     allow_legacy_header_auth: bool = os.environ.get("ALLOW_LEGACY_HEADER_AUTH", "false").lower() == "true"
 
+    # MFA enforcement (Phase 2C). When True, non-exempt, non-platform-admin
+    # users must enroll in TOTP MFA and complete the second step at login.
+    # Default OFF — the two-step /login branch and the forced-enrollment gate
+    # are inert (unreachable) until this is flipped to true.
+    mfa_enforced: bool = os.environ.get("MFA_ENFORCED", "false").lower() == "true"
+
     # CORS
     cors_origins: list[str] = [
         "http://localhost:5173",

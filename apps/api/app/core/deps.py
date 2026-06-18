@@ -8,12 +8,26 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db, get_db_rls, set_tenant_context
 from app.models.user import AppUser, RoleBinding
+from app.models.user_mfa import UserMfa
 from app.services.auth_service import decode_token, TokenError, TokenExpiredError
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login", auto_error=False)
 
 # Paths that bypass the forced-password-change gate
 PASSWORD_CHANGE_EXEMPT_PATHS = {
+    "/api/v1/auth/change-password",
+    "/api/v1/auth/me",
+    "/api/v1/auth/logout",
+    "/api/v1/auth/refresh",
+}
+
+# Paths that must stay reachable while a required user has not finished MFA
+# enrollment (the forced-enrollment gate below must not block these).
+MFA_SETUP_EXEMPT_PATHS = {
+    "/api/v1/auth/mfa/enroll/start",
+    "/api/v1/auth/mfa/enroll/confirm",
+    "/api/v1/auth/mfa/status",
+    "/api/v1/auth/mfa/disable",
     "/api/v1/auth/change-password",
     "/api/v1/auth/me",
     "/api/v1/auth/logout",
@@ -59,6 +73,39 @@ def enforce_password_change(request: Request, current_user: dict = Depends(get_c
         raise HTTPException(
             status_code=403,
             detail={"message": "Password change required", "code": "PASSWORD_CHANGE_REQUIRED"},
+        )
+    return current_user
+
+
+# ── Forced MFA-enrollment gate (Phase 2C) ────────
+
+def require_mfa_satisfied(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """When MFA is enforced, block protected routes for a required user who
+    has not yet enabled MFA. Wired into the protected chain AFTER
+    enforce_password_change. Inert (early return, no DB query) when the flag
+    is off, so flag-OFF runtime behaviour is unchanged.
+    """
+    if not settings.mfa_enforced:
+        return current_user
+    if request.url.path in MFA_SETUP_EXEMPT_PATHS:
+        return current_user
+
+    user = db.query(AppUser).filter(AppUser.id == current_user["sub"]).first()
+    if user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    if not mfa_required_for(user, current_user.get("roles", []), current_user.get("tenant_slug", "")):
+        return current_user
+
+    mfa = db.query(UserMfa).filter(UserMfa.user_id == user.id).first()
+    if mfa is None or not mfa.enabled:
+        raise HTTPException(
+            status_code=403,
+            detail={"message": "MFA setup required", "code": "mfa_setup_required"},
         )
     return current_user
 
@@ -115,6 +162,19 @@ PLATFORM_TENANT_SLUG = "RTS"
 def is_platform_admin(user_identity: str, user_roles: list[str]) -> bool:
     """True if user belongs to RTS platform tenant AND has TENANT_ADMIN role."""
     return user_identity == PLATFORM_TENANT_SLUG and "TENANT_ADMIN" in user_roles
+
+
+def mfa_required_for(user, roles: list[str], tenant_slug: str) -> bool:
+    """True when this user must use MFA: enforcement on, the user is not
+    exempt, and the user is not a platform (super) admin. Shared by /login's
+    two-step branch and require_mfa_satisfied."""
+    if not settings.mfa_enforced:
+        return False
+    if getattr(user, "mfa_exempt", False):
+        return False
+    if is_platform_admin((tenant_slug or "").upper(), roles):
+        return False
+    return True
 
 
 class RequireRoles:

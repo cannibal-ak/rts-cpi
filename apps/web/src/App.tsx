@@ -25,6 +25,8 @@ import NotAuthorizedPage from './pages/NotAuthorizedPage';
 import NotFoundPage from './pages/NotFoundPage';
 import ChangePasswordPage from './pages/auth/ChangePasswordPage';
 import AcceptInvitePage from './pages/auth/AcceptInvitePage';
+import SetupMfaPage from './pages/auth/SetupMfaPage';
+import SecurityPage from './pages/auth/SecurityPage';
 import { isSuperAdmin } from './utils/access';
 import { getPrimaryDashboardId } from './pages/superset/dashboardAccess';
 
@@ -66,6 +68,14 @@ export default function App() {
                 </AuthGuard>
               } />
 
+              {/* MFA enrollment — reachable when authenticated; the forced
+                  gate redirects here (?required=1). Standalone like change-password. */}
+              <Route path="/setup-mfa" element={
+                <AuthGuard>
+                  <SetupMfaPage />
+                </AuthGuard>
+              } />
+
               {/* Protected routes — all wrapped in AuthGuard + MainLayout */}
               <Route
                 element={
@@ -76,6 +86,9 @@ export default function App() {
               >
                 {/* Index page handles landing based on role */}
                 <Route path="/" element={<RootRoute />} />
+
+                {/* Security settings (any authenticated user) */}
+                <Route path="/security" element={<SecurityPage />} />
 
                 {/* Modules */}
                 <Route path="/cpi/airline/jy" element={

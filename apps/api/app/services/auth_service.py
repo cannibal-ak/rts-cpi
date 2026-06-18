@@ -65,6 +65,30 @@ def create_refresh_token(subject: dict) -> str:
     return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
 
 
+# ── MFA challenge token ──────────────────────────
+# Short-lived, single-purpose token minted by a (future, Phase 2C) two-step
+# login once the password is verified but TOTP is still pending. It carries
+# ONLY enough identity to look up the user_mfa row at /verify; it is NOT an
+# access token and decode_mfa_challenge_token() rejects any other token_type.
+# get_current_user already requires token_type == "access", so a challenge
+# token can never be used as an access token.
+
+MFA_CHALLENGE_EXPIRE_MINUTES = 5
+
+
+def create_mfa_challenge_token(user_id: str, tenant_id: str) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "tenant_id": str(tenant_id),
+        "token_type": "mfa_challenge",
+        "iat": now,
+        "exp": now + timedelta(minutes=MFA_CHALLENGE_EXPIRE_MINUTES),
+        "jti": str(uuid.uuid4()),
+    }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
 # ── JWT token decoding ───────────────────────────
 
 class TokenError(Exception):
@@ -87,3 +111,51 @@ def decode_token(token: str) -> dict:
         raise TokenExpiredError("Token has expired")
     except JWTError as e:
         raise TokenError(f"Invalid token: {e}")
+
+
+def decode_mfa_challenge_token(token: str) -> dict:
+    """Decode a token and REQUIRE token_type == 'mfa_challenge'.
+
+    Raises TokenExpiredError / TokenError (incl. when the token_type is
+    anything else) so an access/refresh token can never satisfy /verify.
+    """
+    payload = decode_token(token)
+    if payload.get("token_type") != "mfa_challenge":
+        raise TokenError("Not an mfa_challenge token")
+    return payload
+
+
+# ── Password-reset (MFA-based, Phase 3) token ────
+# Issued unauthenticated by /api/v1/auth/password-reset/mfa/init once an
+# email is submitted. The `eligible` flag keeps the init response identical
+# whether or not the account exists / has MFA: ineligible callers receive a
+# token with a random, non-resolvable sub and eligible=false.
+
+PWD_RESET_EXPIRE_MINUTES = 10
+
+
+def create_password_reset_token(user_id: str, tenant_id: str, eligible: bool) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(user_id),
+        "tenant_id": str(tenant_id),
+        "eligible": bool(eligible),
+        "token_type": "pwd_reset",
+        "iat": now,
+        "exp": now + timedelta(minutes=PWD_RESET_EXPIRE_MINUTES),
+        "jti": str(uuid.uuid4()),
+    }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_password_reset_token(token: str) -> dict:
+    """Decode and REQUIRE token_type == 'pwd_reset'.
+
+    Raises TokenExpiredError / TokenError (incl. when token_type is anything
+    else) so an access / refresh / mfa_challenge token cannot satisfy the
+    MFA-based password reset.
+    """
+    payload = decode_token(token)
+    if payload.get("token_type") != "pwd_reset":
+        raise TokenError("Not a pwd_reset token")
+    return payload

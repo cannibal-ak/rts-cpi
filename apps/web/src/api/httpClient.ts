@@ -106,6 +106,14 @@ async function handleResponse<T>(res: Response): Promise<T> {
       throw new Error('Password change required');
     }
 
+    // Handle forced MFA enrollment (Phase 4 gate — only fires when MFA_ENFORCED is on)
+    if (res.status === 403 && errorCode === 'mfa_setup_required') {
+      if (window.location.pathname !== '/setup-mfa') {
+        window.location.href = '/setup-mfa?required=1';
+      }
+      throw new Error('MFA setup required');
+    }
+
     const err = new Error(`API ${res.status}: ${message}`) as Error & ApiErrorShape;
     err.status = res.status;
     err.errorCode = errorCode;
@@ -176,7 +184,7 @@ async function get<T>(path: string, params?: Record<string, string | number | un
   try {
     return await fetchWithAuth<T>(url, { headers: headers() });
   } catch (err: any) {
-    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required' || err.message === 'MFA setup required') throw err;
     throw new Error(`Network Error: ${err.message}. Is the backend at ${BASE} reachable?`);
   }
 }
@@ -189,7 +197,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
       body: JSON.stringify(body),
     });
   } catch (err: any) {
-    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required' || err.message === 'MFA setup required') throw err;
     throw new Error(`Network Error: ${err.message}`);
   }
 }
@@ -247,7 +255,7 @@ async function postMultipart<T>(path: string, files: File[]): Promise<T> {
   try {
     return await fetchWithAuth<T>(`${BASE}${path}`, init);
   } catch (err: any) {
-    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required' || err.message === 'MFA setup required') throw err;
     throw new Error(`Network Error: ${err.message}`);
   }
 }

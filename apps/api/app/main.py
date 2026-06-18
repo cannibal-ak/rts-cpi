@@ -11,8 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
 from app.core.database import SessionLocal
-from app.core.deps import enforce_password_change
-from app.routers import health, auth, password_reset, airline, cfl, alerts, audit, admin, tenant, stats, superset, kpi
+from app.core.deps import enforce_password_change, require_mfa_satisfied
+from app.routers import health, auth, mfa, password_reset, password_reset_mfa, airline, cfl, alerts, audit, admin, tenant, stats, superset, kpi
 from app.routers import (
     admin_ingestion_runs,
     admin_ingestion_schedules,
@@ -69,13 +69,15 @@ app.include_router(health.router)
 
 # Auth router (handles its own auth)
 app.include_router(auth.router)
+app.include_router(mfa.router)  # MFA enroll/confirm/status/verify/disable; handles its own auth (no _protected gate)
 
 # Password reset endpoints — unauthenticated by design (user is locked out).
 # Protected by per-email rate limits and per-token attempt limits.
 app.include_router(password_reset.router)
+app.include_router(password_reset_mfa.router)  # MFA-based password reset (unauthenticated; no _protected gate)
 
 # Protected routers — JWT + forced password change enforced
-_protected = [Depends(enforce_password_change)]
+_protected = [Depends(enforce_password_change), Depends(require_mfa_satisfied)]
 app.include_router(airline.router, dependencies=_protected)
 app.include_router(cfl.router, dependencies=_protected)
 app.include_router(alerts.router, dependencies=_protected)
