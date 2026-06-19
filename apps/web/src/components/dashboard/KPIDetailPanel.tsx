@@ -188,6 +188,20 @@ const ALT_COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
   ],
 };
 
+// WinAir (WM) reuses JY's KPI keys/builders; only the own-fare label differs.
+const WM_TITLES: Partial<Record<KpiKey, string>> = {
+  ...TITLES,
+  jy_avg_fare: 'WM Avg Fare — fare by route',
+};
+const WM_COLUMN_CONFIG: Partial<Record<KpiKey, ColumnDef[]>> = {
+  ...COLUMN_CONFIG,
+  jy_avg_fare: [
+    { header: '#', field: 'rank', align: 'right' },
+    { header: 'Route', field: 'route', align: 'center' },
+    { header: 'WM Avg Fare', field: 'avg_fare', align: 'right' },
+  ],
+};
+
 export interface KPIDetailPanelProps {
   kpiKey: KpiKey | null;        // null ⇒ panel collapsed/hidden
   airlineCode: string;
@@ -222,10 +236,11 @@ export default function KPIDetailPanel({ kpiKey, airlineCode, capDate, currency,
 
   const isFjl = airlineCode.toUpperCase() === 'FJL';
   const isAlt = airlineCode.toUpperCase() === 'ALT';
-  const titles = isFjl ? FJL_TITLES : (isAlt ? ALT_TITLES : TITLES);
-  const columnCfg = isFjl ? FJL_COLUMN_CONFIG : (isAlt ? ALT_COLUMN_CONFIG : COLUMN_CONFIG);
+  const isWm = airlineCode.toUpperCase() === 'WM';
+  const titles = isFjl ? FJL_TITLES : (isAlt ? ALT_TITLES : isWm ? WM_TITLES : TITLES);
+  const columnCfg = isFjl ? FJL_COLUMN_CONFIG : (isAlt ? ALT_COLUMN_CONFIG : isWm ? WM_COLUMN_CONFIG : COLUMN_CONFIG);
   // ALT reuses JY's per-route competitors_avg_fare layout (same backend builder).
-  const isJy = airlineCode.toUpperCase() === 'JY' || isAlt;
+  const isJy = airlineCode.toUpperCase() === 'JY' || isAlt || isWm;
   const cols = kpiKey
     ? (isJy && kpiKey === 'competitors_avg_fare'
         ? JY_COMPETITORS_AVG_FARE_COLS
