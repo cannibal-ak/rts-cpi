@@ -34,6 +34,7 @@ const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline:
   '2': { title: 'PW Dashboard', tenant: 'PW', isAirline: true, freshnessDomain: 'Airline CPI \u2013 PW' },
   '3': { title: 'FJL Dashboard', tenant: 'FJL', isAirline: false, freshnessDomain: 'Cruise/Ferry CPI \u2013 FJL' },
   '4': { title: 'Sky Dashboard', tenant: 'ALT', isAirline: true, freshnessDomain: 'Airline CPI \u2013 SKY' },
+  '5': { title: 'WinAir Dashboard', tenant: 'WM', isAirline: true, freshnessDomain: 'Airline CPI \u2013 WM' },
 };
 
 // Superset Embedded SDK type (UMD bundle loaded via CDN in index.html)
@@ -452,7 +453,7 @@ export default function DashboardViewerPage() {
             cap_date: single-day uses the picked day; range uses the window's
             end (most recent) day, since the KPI queries are single-day.
             currency: only meaningful for FJL; JY/PW ignore it server-side. */}
-        {(meta?.tenant === 'JY' || meta?.tenant === 'PW' || meta?.tenant === 'ALT' || meta?.tenant === 'FJL') && (
+        {(meta?.tenant === 'JY' || meta?.tenant === 'PW' || meta?.tenant === 'ALT' || meta?.tenant === 'WM' || meta?.tenant === 'FJL') && (
           <KPIRow
             airlineCode={meta.tenant}
             capDate={(dateFilter.mode === 'single' ? dateFilter.capDateEq : dateFilter.capDateTo) ?? ''}
