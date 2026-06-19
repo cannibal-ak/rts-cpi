@@ -24,6 +24,7 @@ import { useSession } from '../../context/SessionContext';
 import { useThemeMode } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import interCaribbeanLogo from '../../assets/logos/jy-logo-banner.png';
+import winairLogo from '../../assets/logos/winair-logo.png';
 import precisionAirLogo from '../../assets/logos/precisionair-logo.png';
 import fjordlineLogo from '../../assets/logos/fjordline-logo.png';
 import skyLogoLight from '../../assets/logos/sky-airways-logo.png';
@@ -54,6 +55,7 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
       : 'rts';
 
   const isJyTenant = tenantKey === 'jy';
+  const isWmTenant = tenantKey === 'wm';
   const isPwTenant = tenantKey === 'pw';
   const isFjlTenant = tenantKey === 'fjl';
   const isAltTenant = tenantKey === 'alt';
@@ -137,6 +139,13 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
               objectFit: 'contain',
               mr: 1.5,
             }}
+          />
+        ) : isWmTenant ? (
+          <Box
+            component="img"
+            src={winairLogo}
+            alt="WinAir"
+            sx={{ height: 48, mr: 1.5 }}
           />
         ) : (
           /* RTS Logo — tries PNG first, falls back to SVG. Dark-mode
