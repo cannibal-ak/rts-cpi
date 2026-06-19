@@ -177,6 +177,8 @@ export interface CpiApiClient {
       resendInvite(body: { email?: string; user_id?: string }): Promise<AdminResendInviteResponse>;
       sendResetEmail(body: { email: string }): Promise<AdminSendResetEmailResponse>;
       forceReset(email: string, newPassword: string, forceChangeOnLogin: boolean): Promise<AdminForceResetResponse>;
+      deactivateUser(userId: string): Promise<void>;
+      reactivateUser(userId: string): Promise<void>;
     };
 
     // ── Admin Dashboard (Home page) ──

@@ -92,9 +92,11 @@ def _user_dict(user: AppUser, tenant_slug: str, roles: list[str]) -> dict:
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)):
     # Find user by email
+    # Look up by email only; the active-account gate is enforced below,
+    # AFTER password verification, so a disabled account returns a clear
+    # 403 instead of being indistinguishable from a non-existent user.
     user = db.query(AppUser).filter(
         AppUser.email == body.email.lower(),
-        AppUser.is_active == True,
     ).first()
 
     if not user:
@@ -121,6 +123,14 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
             logger.warning("Account locked: %s (tenant: %s)", user.email, tenant.slug)
         db.commit()
         raise HTTPException(status_code=401, detail="Invalid email or password")
+
+    # Account-active gate: a deactivated user authenticates correctly but is
+    # blocked HERE — before the MFA branch and before any token/challenge is
+    # issued. Placed AFTER password verification so a wrong password still
+    # yields the generic 401 (no account-existence leak); only a correct
+    # password against a disabled account reveals the clear "account disabled".
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="Account disabled")
 
     # Success — reset counters
     user.failed_login_count = 0

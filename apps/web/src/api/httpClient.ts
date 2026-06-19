@@ -437,6 +437,11 @@ export const httpClient: CpiApiClient = {
           new_password: newPassword,
           force_change_on_login: forceChangeOnLogin,
         }),
+      // No request body; 204 No Content (handleResponse short-circuits it).
+      deactivateUser: (userId: string) =>
+        post<void>(`/api/v1/admin/password-management/users/${userId}/deactivate`, {}),
+      reactivateUser: (userId: string) =>
+        post<void>(`/api/v1/admin/password-management/users/${userId}/reactivate`, {}),
     },
     dashboard: {
       getHealth: () => get<PlatformHealthResponse>('/api/v1/admin/dashboard/health'),

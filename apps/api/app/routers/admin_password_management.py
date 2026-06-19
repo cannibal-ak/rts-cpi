@@ -10,15 +10,16 @@ source of truth; same goes for password hashing and strength validation.
 
 import logging
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy.orm import Session
 
 import secrets
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import RequirePlatformAdmin
+from app.core.deps import RequirePlatformAdmin, get_current_user
 from app.core.security import hash_token
 from app.models.user import AppUser, RoleBinding
 from app.models.tenant import Tenant
@@ -41,7 +42,7 @@ from app.schemas.admin_password import (
     AdminSendResetEmailResponse,
     AdminTenantOption,
 )
-from app.services import smtp_service
+from app.services import smtp_service, audit
 from app.services.smtp_service import send_invite_email
 from app.services.auth_service import hash_password, validate_password_strength
 
@@ -318,3 +319,76 @@ def force_reset(body: AdminForceResetRequest, db: Session = Depends(get_db)):
             else "Password reset successfully."
         ),
     )
+
+
+# ── User deactivate / reactivate ──────────────────
+#
+# Reversible account disable. A deactivated user is blocked at /login (403
+# "account disabled", enforced in app.routers.auth) and at token refresh, and
+# fails get_current_user on any existing access token. No hard delete — the
+# row and all its FK anchors are preserved and the action is fully reversible.
+
+# The RTS platform super-admin must never be lockable out of the platform.
+PROTECTED_SUPERADMIN_EMAIL = "admin@rts.com"
+
+
+def _load_target_for_status_change(db: Session, user_id: UUID, current_user: dict) -> AppUser:
+    """Fetch the target user and run the shared deactivate/reactivate guards.
+
+    Returns 4xx (never 500) on: missing user, self-action, or the protected
+    super-admin account.
+    """
+    user = db.query(AppUser).filter(AppUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if str(user.id) == current_user["sub"]:
+        raise HTTPException(status_code=400, detail="You cannot change your own account status.")
+    if user.email.lower() == PROTECTED_SUPERADMIN_EMAIL:
+        raise HTTPException(status_code=400, detail="The RTS super-admin account is protected.")
+    return user
+
+
+@router.post("/users/{user_id}/deactivate", status_code=204)
+def deactivate_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Disable a user account (reversible). Blocks login + refresh immediately."""
+    user = _load_target_for_status_change(db, user_id, current_user)
+
+    user.is_active = False
+    audit.record(
+        db,
+        tenant_id=UUID(current_user["tenant_id"]),
+        actor=current_user["sub"],
+        action="user.deactivated",
+        target_type="app_user",
+        target_id=str(user.id),
+    )
+    db.commit()
+    logger.info("Admin %s deactivated user %s", current_user["sub"], user.email)
+    return Response(status_code=204)
+
+
+@router.post("/users/{user_id}/reactivate", status_code=204)
+def reactivate_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Re-enable a previously deactivated user account."""
+    user = _load_target_for_status_change(db, user_id, current_user)
+
+    user.is_active = True
+    audit.record(
+        db,
+        tenant_id=UUID(current_user["tenant_id"]),
+        actor=current_user["sub"],
+        action="user.reactivated",
+        target_type="app_user",
+        target_id=str(user.id),
+    )
+    db.commit()
+    logger.info("Admin %s reactivated user %s", current_user["sub"], user.email)
+    return Response(status_code=204)

@@ -21,6 +21,7 @@ import type {
   IngestedFile,
   IngestionRunListQuery,
   IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionAuditLog, IngestionPreview,
+  AdminUserListItem,
 } from '../types';
 import {
   mockAirlineSnapshots, mockCflSnapshots,
@@ -49,6 +50,16 @@ function paginate<T>(items: T[], page = 1, size = 20): Paginated<T> {
 function delay<T>(val: T, ms = 120): Promise<T> {
   return new Promise(r => setTimeout(() => r(val), ms));
 }
+
+// Offline demo seed so deactivate/reactivate have state to flip in place.
+const mockPwUsers: AdminUserListItem[] = [
+  { id: 'mock-user-rts', email: 'admin@rts.com', tenant_name: 'RTS', tenant_slug: 'rts',
+    role: 'TENANT_ADMIN', is_active: true, is_locked: false, force_password_change: false,
+    last_login: null, created_at: '2026-01-01T00:00:00Z' },
+  { id: 'mock-user-jy', email: 'jy@airline.com', tenant_name: 'JY Airways', tenant_slug: 'jy',
+    role: 'TENANT_ADMIN', is_active: true, is_locked: false, force_password_change: false,
+    last_login: null, created_at: '2026-01-01T00:00:00Z' },
+];
 
 export const mockClient: CpiApiClient = {
   airline: {
@@ -383,7 +394,7 @@ export const mockClient: CpiApiClient = {
     },
     // Password management isn't exercised offline; stubs keep the interface satisfied.
     passwordManagement: {
-      listUsers: () => delay({ users: [], total: 0 }),
+      listUsers: () => delay({ users: mockPwUsers.map(u => ({ ...u })), total: mockPwUsers.length }),
       listTenants: () => delay([]),
       inviteUser: (_body: { email: string; display_name: string; tenant_id: string; role?: string }) =>
         delay({ user_id: '00000000-0000-0000-0000-000000000000', email: _body.email, invite_sent: false }),
@@ -393,6 +404,16 @@ export const mockClient: CpiApiClient = {
         delay({ sent: false, message: 'Not available in mock mode' }),
       forceReset: (_email: string, _newPassword: string, _forceChangeOnLogin: boolean) =>
         delay({ success: false, message: 'Not available in mock mode' }),
+      deactivateUser: (userId: string) => {
+        const u = mockPwUsers.find(x => x.id === userId);
+        if (u) u.is_active = false;
+        return delay(undefined as unknown as void);
+      },
+      reactivateUser: (userId: string) => {
+        const u = mockPwUsers.find(x => x.id === userId);
+        if (u) u.is_active = true;
+        return delay(undefined as unknown as void);
+      },
     },
     // SMTP settings aren't exercised offline; stubs keep the interface satisfied.
     settings: {
