@@ -180,6 +180,7 @@ export interface CpiApiClient {
       deactivateUser(userId: string): Promise<void>;
       reactivateUser(userId: string): Promise<void>;
       deleteUser(userId: string): Promise<void>;
+      resetMfa(userId: string): Promise<{ user_id: string; email: string; mfa_reset: boolean }>;
     };
 
     // ── Admin Dashboard (Home page) ──

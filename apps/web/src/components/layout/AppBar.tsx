@@ -76,6 +76,7 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
 
   const handleMyAccount = () => {
     setAnchorEl(null);
+    navigate('/security');
   };
 
   return (
@@ -338,7 +339,7 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
               }}
             >
               <PersonOutlined sx={{ fontSize: 16 }} />
-              <Typography sx={{ fontSize: 13 }}>My account</Typography>
+              <Typography sx={{ fontSize: 13 }}>Security</Typography>
             </Box>
 
             <Box

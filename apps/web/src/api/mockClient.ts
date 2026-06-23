@@ -444,6 +444,11 @@ export const mockClient: CpiApiClient = {
         if (i >= 0) mockPwUsers.splice(i, 1);
         return delay(undefined as unknown as void);
       },
+      // Offline sim: echo the looked-up email; the real endpoint is idempotent.
+      resetMfa: (userId: string) => {
+        const u = mockPwUsers.find(x => x.id === userId);
+        return delay({ user_id: userId, email: u ? u.email : '', mfa_reset: true });
+      },
     },
     // SMTP settings aren't exercised offline; stubs keep the interface satisfied.
     settings: {

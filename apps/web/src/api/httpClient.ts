@@ -445,6 +445,11 @@ export const httpClient: CpiApiClient = {
       // DELETE -> 204 No Content; handleResponse resolves void.
       deleteUser: (userId: string) =>
         del<void>(`/api/v1/admin/password-management/users/${userId}`),
+      // Clears the user's enrolled authenticator + recovery codes (idempotent);
+      // they re-enroll at next sign-in. Returns a small JSON body.
+      resetMfa: (userId: string) =>
+        post<{ user_id: string; email: string; mfa_reset: boolean }>(
+          `/api/v1/admin/password-management/users/${userId}/reset-mfa`, {}),
     },
     dashboard: {
       getHealth: () => get<PlatformHealthResponse>('/api/v1/admin/dashboard/health'),

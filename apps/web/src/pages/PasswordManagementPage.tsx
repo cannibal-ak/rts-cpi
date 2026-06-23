@@ -13,7 +13,7 @@ import {
 } from '@mui/material';
 import {
   ContentCopy, Visibility, VisibilityOff, VpnKey, LockReset, Refresh, CheckCircle,
-  PersonAdd, Email as EmailIcon, Block, HowToReg, DeleteOutline,
+  PersonAdd, Email as EmailIcon, Block, HowToReg, DeleteOutline, KeyOff,
 } from '@mui/icons-material';
 import PageHeader from '../components/common/PageHeader';
 import { api } from '../api';
@@ -213,6 +213,10 @@ export default function PasswordManagementPage() {
   const [deleteConfirm, setDeleteConfirm] =
     useState<{ open: boolean; user: AdminUserListItem | null }>({ open: false, user: null });
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Reset MFA: destructive confirm, mirrors the deactivate/delete pattern.
+  const [mfaResetConfirm, setMfaResetConfirm] =
+    useState<{ open: boolean; user: AdminUserListItem | null }>({ open: false, user: null });
+  const [resettingMfaId, setResettingMfaId] = useState<string | null>(null);
   // Blocked dialog driven by a 409 reason from delete OR deactivate.
   const [blockedDialog, setBlockedDialog] = useState<{
     open: boolean;
@@ -446,6 +450,26 @@ export default function PasswordManagementPage() {
       setDeletingId(null);
     }
   };
+  // ── Reset MFA flow ──────────────────
+  const requestResetMfa = (user: AdminUserListItem) => setMfaResetConfirm({ open: true, user });
+  const cancelResetMfaConfirm = () => setMfaResetConfirm({ open: false, user: null });
+  const confirmResetMfa = async () => {
+    const user = mfaResetConfirm.user;
+    setMfaResetConfirm({ open: false, user: null });
+    if (!user) return;
+    setResettingMfaId(user.id);
+    try {
+      await api.admin.passwordManagement.resetMfa(user.id);
+      showToast(`MFA reset for ${user.email}. They'll set up a new authenticator at next sign-in.`, 'success');
+      await fetchUsers(); // refresh rows + header tally from the server
+    } catch (err: unknown) {
+      const e = err as Error & ApiErrorShape;
+      showToast(e.message || 'Failed to reset MFA.', 'error');
+    } finally {
+      setResettingMfaId(null);
+    }
+  };
+
   const handleReactivate = async (user: AdminUserListItem) => {
     setTogglingStatusId(user.id);
     try {
@@ -553,6 +577,29 @@ export default function PasswordManagementPage() {
                         >
                           Reset Password
                         </Button>
+                        {(() => {
+                          const isOwn = user.email.toLowerCase() === adminEmail;
+                          const isAdmin = isPlatformAdmin(user);
+                          const blocked = isOwn || isAdmin;
+                          const reason = isOwn
+                            ? 'You cannot reset MFA on your own account.'
+                            : isAdmin
+                              ? 'Protected RTS platform admin accounts cannot be modified.'
+                              : 'Clear the authenticator so this user re-enrolls at next sign-in';
+                          const btn = (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="error"
+                              startIcon={<KeyOff fontSize="small" />}
+                              onClick={() => requestResetMfa(user)}
+                              disabled={blocked || resettingMfaId === user.id}
+                            >
+                              {resettingMfaId === user.id ? 'Working…' : 'Reset MFA'}
+                            </Button>
+                          );
+                          return <Tooltip title={reason}><span>{btn}</span></Tooltip>;
+                        })()}
                         {user.is_active ? (() => {
                           const isOwn = user.email.toLowerCase() === adminEmail;
                           const isAdmin = isPlatformAdmin(user);
@@ -835,6 +882,21 @@ export default function PasswordManagementPage() {
           <Button onClick={cancelDeactivateConfirm}>Cancel</Button>
           <Button onClick={confirmDeactivate} variant="contained" color="error" startIcon={<Block />}>
             Deactivate
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={mfaResetConfirm.open} onClose={cancelResetMfaConfirm} maxWidth="xs" fullWidth>
+        <DialogTitle>Reset MFA for {mfaResetConfirm.user?.email}?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This deletes their current authenticator and all recovery codes. They'll be required to set up a new authenticator the next time they sign in. Their password is not changed.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cancelResetMfaConfirm}>Cancel</Button>
+          <Button onClick={confirmResetMfa} variant="contained" color="error" startIcon={<KeyOff />}>
+            Reset MFA
           </Button>
         </DialogActions>
       </Dialog>

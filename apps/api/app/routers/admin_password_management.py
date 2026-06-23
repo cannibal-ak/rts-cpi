@@ -555,3 +555,53 @@ def delete_user(
 
     logger.info("Admin %s deleted user %s", current_user["sub"], deleted_email)
     return Response(status_code=204)
+
+
+# ── POST /users/{user_id}/reset-mfa ───────────────
+#
+# Admin-driven MFA reset (lost-device recovery). Clears the target's enrolled
+# authenticator + recovery codes so the require_mfa_satisfied gate forces a
+# fresh enrollment on the user's next login. Reuses the same privilege guards
+# as deactivate/delete (self / protected-platform-admin) via
+# _load_target_guarded, and is idempotent: returns 200 even when the user had
+# no MFA rows. Mirrors the user_mfa / mfa_recovery_code delete pattern in
+# delete_user and that endpoint's audit.record style (audit_event has no
+# free-text column, so email + tenant slug are encoded into target_id).
+
+
+@router.post("/users/{user_id}/reset-mfa")
+def reset_mfa(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Clear a user's enrolled MFA so they re-enroll on next login.
+
+    Guard order (reused, never 500): 404 missing -> 400 self -> 400 protected
+    platform admin. Then delete the recovery codes and the user_mfa row in one
+    transaction; the require_mfa_satisfied gate re-prompts enrollment.
+    """
+    user = _load_target_guarded(db, user_id, current_user)
+
+    tenant_slug = (
+        db.query(Tenant.slug).filter(Tenant.id == user.tenant_id).scalar() or ""
+    )
+    audit.record(
+        db,
+        tenant_id=UUID(current_user["tenant_id"]),
+        actor=current_user["sub"],
+        action="mfa.admin_reset",
+        target_type="user_mfa",
+        target_id=f"{user.id} {user.email} [{tenant_slug}]"[:128],
+    )
+
+    db.query(MfaRecoveryCode).filter(MfaRecoveryCode.user_id == user.id).delete(
+        synchronize_session=False
+    )
+    db.query(UserMfa).filter(UserMfa.user_id == user.id).delete(
+        synchronize_session=False
+    )
+    db.commit()
+
+    logger.info("Admin %s reset MFA for user %s", current_user["sub"], user.email)
+    return {"user_id": str(user.id), "email": user.email, "mfa_reset": True}
