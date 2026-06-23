@@ -59,6 +59,12 @@ const mockPwUsers: AdminUserListItem[] = [
   { id: 'mock-user-jy', email: 'jy@airline.com', tenant_name: 'JY Airways', tenant_slug: 'jy',
     role: 'TENANT_ADMIN', is_active: true, is_locked: false, force_password_change: false,
     last_login: null, created_at: '2026-01-01T00:00:00Z' },
+  { id: 'mock-user-hist', email: 'analyst@airline.com', tenant_name: 'Skybound - PW', tenant_slug: 'pw',
+    role: 'TENANT_ADMIN', is_active: true, is_locked: false, force_password_change: false,
+    last_login: null, created_at: '2026-01-01T00:00:00Z' },
+  { id: 'mock-user-del', email: 'temp@airline.com', tenant_name: 'Skybound - PW', tenant_slug: 'pw',
+    role: 'TENANT_ADMIN', is_active: true, is_locked: false, force_password_change: false,
+    last_login: null, created_at: '2026-01-01T00:00:00Z' },
 ];
 
 export const mockClient: CpiApiClient = {
@@ -405,6 +411,12 @@ export const mockClient: CpiApiClient = {
       forceReset: (_email: string, _newPassword: string, _forceChangeOnLogin: boolean) =>
         delay({ success: false, message: 'Not available in mock mode' }),
       deactivateUser: (userId: string) => {
+        if (userId === 'mock-user-jy') {
+          return Promise.reject(Object.assign(
+            new Error('jy@airline.com is the only active admin for Skywave - JY; add or reactivate another admin first.'),
+            { status: 409, errorCode: 'last_active_admin', details: { tenant: 'Skywave - JY' } },
+          ));
+        }
         const u = mockPwUsers.find(x => x.id === userId);
         if (u) u.is_active = false;
         return delay(undefined as unknown as void);
@@ -412,6 +424,24 @@ export const mockClient: CpiApiClient = {
       reactivateUser: (userId: string) => {
         const u = mockPwUsers.find(x => x.id === userId);
         if (u) u.is_active = true;
+        return delay(undefined as unknown as void);
+      },
+      // Offline sims of the backend 409 refusals for a couple of seed users.
+      deleteUser: (userId: string) => {
+        if (userId === 'mock-user-hist') {
+          return Promise.reject(Object.assign(
+            new Error('analyst@airline.com has activity history (audit / ingestion records) and cannot be deleted. Deactivate the account instead.'),
+            { status: 409, errorCode: 'has_history', details: {} },
+          ));
+        }
+        if (userId === 'mock-user-jy') {
+          return Promise.reject(Object.assign(
+            new Error('jy@airline.com is the only active admin for Skywave - JY; add or reactivate another admin first.'),
+            { status: 409, errorCode: 'last_active_admin', details: { tenant: 'Skywave - JY' } },
+          ));
+        }
+        const i = mockPwUsers.findIndex(x => x.id === userId);
+        if (i >= 0) mockPwUsers.splice(i, 1);
         return delay(undefined as unknown as void);
       },
     },

@@ -442,6 +442,9 @@ export const httpClient: CpiApiClient = {
         post<void>(`/api/v1/admin/password-management/users/${userId}/deactivate`, {}),
       reactivateUser: (userId: string) =>
         post<void>(`/api/v1/admin/password-management/users/${userId}/reactivate`, {}),
+      // DELETE -> 204 No Content; handleResponse resolves void.
+      deleteUser: (userId: string) =>
+        del<void>(`/api/v1/admin/password-management/users/${userId}`),
     },
     dashboard: {
       getHealth: () => get<PlatformHealthResponse>('/api/v1/admin/dashboard/health'),

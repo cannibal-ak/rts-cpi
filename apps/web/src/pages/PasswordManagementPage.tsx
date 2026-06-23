@@ -13,7 +13,7 @@ import {
 } from '@mui/material';
 import {
   ContentCopy, Visibility, VisibilityOff, VpnKey, LockReset, Refresh, CheckCircle,
-  PersonAdd, Email as EmailIcon, Block, HowToReg,
+  PersonAdd, Email as EmailIcon, Block, HowToReg, DeleteOutline,
 } from '@mui/icons-material';
 import PageHeader from '../components/common/PageHeader';
 import { api } from '../api';
@@ -48,8 +48,15 @@ function displayRole(user: AdminUserListItem): string {
   return ROLE_LABEL_OVERRIDES[user.email.toLowerCase()] ?? (user.role || '—');
 }
 
-// Mirrors the backend guard: this account can never be deactivated.
-const PROTECTED_SUPERADMIN_EMAIL = 'admin@rts.com';
+// Mirrors the backend privilege guard: an account that is itself an RTS
+// platform admin (RTS tenant + TENANT_ADMIN) can never be deactivated or
+// deleted, so the platform can't be locked out of itself.
+function isPlatformAdmin(user: AdminUserListItem): boolean {
+  return (
+    user.tenant_slug.toLowerCase() === PLATFORM_TENANT_SLUG &&
+    user.role === 'TENANT_ADMIN'
+  );
+}
 
 const REFRESH_INTERVAL_MS = 30_000;
 
@@ -203,6 +210,16 @@ export default function PasswordManagementPage() {
   // reactivate does not. togglingStatusId disables a row's toggle in flight.
   const [deactivateConfirm, setDeactivateConfirm] =
     useState<{ open: boolean; user: AdminUserListItem | null }>({ open: false, user: null });
+  const [deleteConfirm, setDeleteConfirm] =
+    useState<{ open: boolean; user: AdminUserListItem | null }>({ open: false, user: null });
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Blocked dialog driven by a 409 reason from delete OR deactivate.
+  const [blockedDialog, setBlockedDialog] = useState<{
+    open: boolean;
+    user: AdminUserListItem | null;
+    reason: 'has_history' | 'last_active_admin' | null;
+    message: string;
+  }>({ open: false, user: null, reason: null, message: '' });
   const [togglingStatusId, setTogglingStatusId] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<SnackbarState>({ open: false, message: '', severity: 'info' });
 
@@ -388,9 +405,45 @@ export default function PasswordManagementPage() {
       await fetchUsers(); // refresh row status + header tally from the server
     } catch (err: unknown) {
       const e = err as Error & ApiErrorShape;
-      showToast(e.message || 'Failed to deactivate user.', 'error');
+      if (e.status === 409 && e.errorCode === 'last_active_admin') {
+        setBlockedDialog({ open: true, user, reason: 'last_active_admin', message: e.message || '' });
+      } else {
+        showToast(e.message || 'Failed to deactivate user.', 'error');
+      }
     } finally {
       setTogglingStatusId(null);
+    }
+  };
+
+  // ── Delete flow ─────────────────────────────
+
+  const requestDelete = (user: AdminUserListItem) => setDeleteConfirm({ open: true, user });
+  const cancelDeleteConfirm = () => setDeleteConfirm({ open: false, user: null });
+  const closeBlockedDialog = () =>
+    setBlockedDialog({ open: false, user: null, reason: null, message: '' });
+  const confirmDelete = async () => {
+    const user = deleteConfirm.user;
+    setDeleteConfirm({ open: false, user: null });
+    if (!user) return;
+    setDeletingId(user.id);
+    try {
+      await api.admin.passwordManagement.deleteUser(user.id);
+      showToast(`${user.email} has been deleted`, 'success');
+      await fetchUsers(); // refresh rows + header tally from the server
+    } catch (err: unknown) {
+      const e = err as Error & ApiErrorShape;
+      if (e.status === 409 && (e.errorCode === 'has_history' || e.errorCode === 'last_active_admin')) {
+        setBlockedDialog({
+          open: true,
+          user,
+          reason: e.errorCode as 'has_history' | 'last_active_admin',
+          message: e.message || '',
+        });
+      } else {
+        showToast(e.message || 'Failed to delete user.', 'error');
+      }
+    } finally {
+      setDeletingId(null);
     }
   };
   const handleReactivate = async (user: AdminUserListItem) => {
@@ -502,11 +555,11 @@ export default function PasswordManagementPage() {
                         </Button>
                         {user.is_active ? (() => {
                           const isOwn = user.email.toLowerCase() === adminEmail;
-                          const isSuper = user.email.toLowerCase() === PROTECTED_SUPERADMIN_EMAIL;
-                          const blocked = isOwn || isSuper;
+                          const isAdmin = isPlatformAdmin(user);
+                          const blocked = isOwn || isAdmin;
                           const reason = isOwn
                             ? 'You cannot deactivate your own account.'
-                            : 'The RTS super-admin account is protected and cannot be deactivated.';
+                            : 'Protected RTS platform admin accounts cannot be deactivated.';
                           const btn = (
                             <Button
                               size="small"
@@ -534,6 +587,31 @@ export default function PasswordManagementPage() {
                             {togglingStatusId === user.id ? 'Working…' : 'Reactivate'}
                           </Button>
                         )}
+                        {(() => {
+                          const isOwn = user.email.toLowerCase() === adminEmail;
+                          const isAdmin = isPlatformAdmin(user);
+                          const blocked = isOwn || isAdmin;
+                          const reason = isOwn
+                            ? 'You cannot delete your own account.'
+                            : isAdmin
+                              ? 'Protected RTS platform admin accounts cannot be deleted.'
+                              : 'Permanently delete this user';
+                          return (
+                            <Tooltip title={reason}>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="error"
+                                  aria-label="Delete user"
+                                  onClick={() => requestDelete(user)}
+                                  disabled={blocked || deletingId === user.id}
+                                >
+                                  <DeleteOutline fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          );
+                        })()}
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -758,6 +836,56 @@ export default function PasswordManagementPage() {
           <Button onClick={confirmDeactivate} variant="contained" color="error" startIcon={<Block />}>
             Deactivate
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Delete confirmation dialog (irreversible) ── */}
+      <Dialog open={deleteConfirm.open} onClose={cancelDeleteConfirm} maxWidth="xs" fullWidth>
+        <DialogTitle>Permanently delete user?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Permanently delete <strong>{deleteConfirm.user?.email}</strong>? This
+            removes their login, MFA and reset data and{' '}
+            <strong>cannot be undone</strong>.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cancelDeleteConfirm}>Cancel</Button>
+          <Button onClick={confirmDelete} variant="contained" color="error" startIcon={<DeleteOutline />}>
+            Delete permanently
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Blocked dialog: 409 has_history / last_active_admin ── */}
+      <Dialog open={blockedDialog.open} onClose={closeBlockedDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          {blockedDialog.reason === 'has_history' ? 'This user has history' : 'Last active admin'}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {blockedDialog.message ||
+              (blockedDialog.reason === 'has_history'
+                ? 'This user has activity history and cannot be deleted. Deactivate the account instead.'
+                : 'This is the only active admin for the tenant; add or reactivate another admin first.')}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeBlockedDialog}>Close</Button>
+          {blockedDialog.reason === 'has_history' && (
+            <Button
+              variant="contained"
+              color="error"
+              startIcon={<Block />}
+              onClick={() => {
+                const u = blockedDialog.user;
+                closeBlockedDialog();
+                if (u) requestDeactivate(u);
+              }}
+            >
+              Deactivate instead
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
