@@ -83,7 +83,7 @@ class AdminInviteUserRequest(BaseModel):
     email: EmailStr
     display_name: str
     tenant_id: UUID
-    role: str = "TENANT_ADMIN"
+    role: str = "TENANT_USER"
 
 
 class AdminInviteUserResponse(BaseModel):

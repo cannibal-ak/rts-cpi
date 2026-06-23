@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, delete
 
 from app.core.config import settings
-from app.core.deps import get_tenant_db, get_tenant_id
+from app.core.deps import get_tenant_db, get_tenant_id, RequirePlatformAdmin
 from app.models.user import AppUser, RoleBinding
 from pydantic import BaseModel
 from typing import List
@@ -24,7 +24,7 @@ class RolesUpdate(BaseModel):
 class UserRolesResponse(BaseModel):
     roles: List[str]
 
-@router.get("/user-roles", response_model=UserRolesResponse)
+@router.get("/user-roles", response_model=UserRolesResponse, dependencies=[Depends(RequirePlatformAdmin())])
 def get_user_roles(db: Session = Depends(get_tenant_db), tenant_id: str = Depends(get_tenant_id)):
     """Return distinct roles for the tenant.
     In this demo/headless mode, we return all distinct roles assigned to any user
@@ -58,7 +58,7 @@ def get_user_roles(db: Session = Depends(get_tenant_db), tenant_id: str = Depend
 
     return {"roles": list(roles)}
 
-@router.post("/update-roles", response_model=UserRolesResponse)
+@router.post("/update-roles", response_model=UserRolesResponse, dependencies=[Depends(RequirePlatformAdmin())])
 def update_user_roles(
     body: RolesUpdate,
     db: Session = Depends(get_tenant_db),

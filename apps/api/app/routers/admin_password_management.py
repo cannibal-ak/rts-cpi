@@ -20,7 +20,7 @@ import secrets
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import RequirePlatformAdmin, get_current_user, is_platform_admin
+from app.core.deps import RequirePlatformAdmin, VALID_ROLES, get_current_user, is_platform_admin
 from app.core.security import hash_token
 from app.models.user import AppUser, RoleBinding
 from app.models.user_mfa import UserMfa
@@ -181,7 +181,7 @@ def invite_user(body: AdminInviteUserRequest, db: Session = Depends(get_db)):
     email = body.email.lower()
 
     role = body.role.upper().strip()
-    if role not in {"TENANT_ADMIN"}:
+    if role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Unsupported role '{body.role}'.")
 
     # Global uniqueness (migration 017) + per-tenant uniqueness.

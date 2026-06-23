@@ -61,8 +61,11 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
   const isAltTenant = tenantKey === 'alt';
   const tenant = TENANT_CONFIG[tenantKey] ?? TENANT_FALLBACK;
 
-  // Strip TENANT_ prefix and title-case so TENANT_ADMIN → "Admin".
-  const roleLabel = (session.user.roles[0] ?? 'user')
+  // Explicit chip-label overrides win; otherwise strip the TENANT_ prefix
+  // and title-case (TENANT_ADMIN → "Admin", TENANT_USER → "Subtenant").
+  const ROLE_CHIP_LABEL_OVERRIDES: Record<string, string> = { TENANT_USER: 'Subtenant' };
+  const rawRole = session.user.roles[0] ?? 'user';
+  const roleLabel = ROLE_CHIP_LABEL_OVERRIDES[rawRole] ?? rawRole
     .toLowerCase()
     .replace(/^tenant_/, '')
     .replace(/_/g, ' ')

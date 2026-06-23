@@ -8,7 +8,7 @@ import {
   Chip, IconButton, Button, Stack, CircularProgress, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
   TextField, InputAdornment, Checkbox, FormControlLabel,
-  Select, MenuItem, FormControl, InputLabel,
+  Select, MenuItem, FormControl, InputLabel, FormHelperText,
   Snackbar, Alert,
 } from '@mui/material';
 import {
@@ -45,7 +45,17 @@ const ROLE_LABEL_OVERRIDES: Record<string, string> = {
 };
 
 function displayRole(user: AdminUserListItem): string {
-  return ROLE_LABEL_OVERRIDES[user.email.toLowerCase()] ?? (user.role || '—');
+  const override = ROLE_LABEL_OVERRIDES[user.email.toLowerCase()];
+  if (override) return override;
+  if (user.role === 'TENANT_USER') return 'Subtenant';
+  return user.role || '—';
+}
+
+// Subtenant chips use the info color to read as a distinct, lower-privilege
+// role; email-overridden chips and TENANT_ADMIN keep the neutral chip.
+function roleChipColor(user: AdminUserListItem): 'info' | 'default' {
+  if (ROLE_LABEL_OVERRIDES[user.email.toLowerCase()]) return 'default';
+  return user.role === 'TENANT_USER' ? 'info' : 'default';
 }
 
 // Mirrors the backend privilege guard: an account that is itself an RTS
@@ -196,7 +206,7 @@ export default function PasswordManagementPage() {
   const [sendingResetEmail, setSendingResetEmail] = useState<string | null>(null);
 
   const [inviteDialog, setInviteDialog] = useState<InviteDialogState>({
-    open: false, email: '', displayName: '', tenantId: '', role: 'TENANT_ADMIN',
+    open: false, email: '', displayName: '', tenantId: '', role: 'TENANT_USER',
     submitting: false, error: '',
   });
   const [resetDialog, setResetDialog] = useState<ForceResetDialogState>({
@@ -302,7 +312,7 @@ export default function PasswordManagementPage() {
 
   const openInviteDialog = () => {
     setInviteDialog({
-      open: true, email: '', displayName: '', tenantId: '', role: 'TENANT_ADMIN',
+      open: true, email: '', displayName: '', tenantId: '', role: 'TENANT_USER',
       submitting: false, error: '',
     });
   };
@@ -551,7 +561,7 @@ export default function PasswordManagementPage() {
                     <TableCell sx={{ fontFamily: 'inherit' }}>{user.email}</TableCell>
                     <TableCell>{formatTenantCell(user)}</TableCell>
                     <TableCell>
-                      <Chip size="small" label={displayRole(user)} variant="outlined" />
+                      <Chip size="small" label={displayRole(user)} variant="outlined" color={roleChipColor(user)} />
                     </TableCell>
                     <TableCell>{userStatusChip(user)}</TableCell>
                     <TableCell sx={{ color: 'text.secondary', fontSize: 13 }}>
@@ -705,8 +715,12 @@ export default function PasswordManagementPage() {
             <InputLabel id="invite-role-label">Role</InputLabel>
             <Select labelId="invite-role-label" label="Role" value={inviteDialog.role}
               onChange={(e) => setInviteDialog(s => ({ ...s, role: e.target.value as string }))}>
+              <MenuItem value="TENANT_USER">Subtenant</MenuItem>
               <MenuItem value="TENANT_ADMIN">TENANT_ADMIN</MenuItem>
             </Select>
+            <FormHelperText>
+              Subtenant: read-only access to this tenant's dashboards. TENANT_ADMIN: full tenant administration (invite/lifecycle).
+            </FormHelperText>
           </FormControl>
         </DialogContent>
         <DialogActions>

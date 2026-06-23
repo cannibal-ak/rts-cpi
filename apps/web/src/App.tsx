@@ -92,31 +92,31 @@ export default function App() {
 
                 {/* Modules */}
                 <Route path="/cpi/airline/jy" element={
-                  <ProtectedRoute requiredModules={['airline_jy']} requiredRoles={['TENANT_ADMIN']}>
+                  <ProtectedRoute requiredModules={['airline_jy']} requiredRoles={['TENANT_ADMIN', 'TENANT_USER']}>
                     <AirlineCpiPage tenantCode="JY" />
                   </ProtectedRoute>
                 } />
 
                 <Route path="/cpi/airline/pw" element={
-                  <ProtectedRoute requiredModules={['airline_pw']} requiredRoles={['TENANT_ADMIN']}>
+                  <ProtectedRoute requiredModules={['airline_pw']} requiredRoles={['TENANT_ADMIN', 'TENANT_USER']}>
                     <AirlineCpiPage tenantCode="PW" />
                   </ProtectedRoute>
                 } />
 
                 <Route path="/cpi/airline/alt" element={
-                  <ProtectedRoute requiredModules={['airline_alt']} requiredRoles={['TENANT_ADMIN']}>
+                  <ProtectedRoute requiredModules={['airline_alt']} requiredRoles={['TENANT_ADMIN', 'TENANT_USER']}>
                     <AirlineCpiPage tenantCode="ALT" />
                   </ProtectedRoute>
                 } />
 
                 <Route path="/cpi/airline/wm" element={
-                  <ProtectedRoute requiredModules={['airline_wm']} requiredRoles={['TENANT_ADMIN']}>
+                  <ProtectedRoute requiredModules={['airline_wm']} requiredRoles={['TENANT_ADMIN', 'TENANT_USER']}>
                     <AirlineCpiPage tenantCode="WM" />
                   </ProtectedRoute>
                 } />
 
                 <Route path="/cpi/cruise/fjl" element={
-                  <ProtectedRoute requiredModules={['cfl_fjl']} requiredRoles={['TENANT_ADMIN']}>
+                  <ProtectedRoute requiredModules={['cfl_fjl']} requiredRoles={['TENANT_ADMIN', 'TENANT_USER']}>
                     <CflCpiPage tenantCode="FJL" />
                   </ProtectedRoute>
                 } />

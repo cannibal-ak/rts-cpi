@@ -137,13 +137,13 @@ def get_tenant_db(
 
 # ── RBAC enforcement ───────────────────────────
 
-VALID_ROLES = {"TENANT_ADMIN"}
+VALID_ROLES = {"TENANT_ADMIN", "TENANT_USER"}
 
 
 def get_user_roles(current_user: dict = Depends(get_current_user)) -> list[str]:
     """Extract user roles from JWT payload."""
     roles = current_user.get("roles", [])
-    return [r for r in roles if r in VALID_ROLES] or ["TENANT_ADMIN"]
+    return [r for r in roles if r in VALID_ROLES]
 
 
 def get_user_identity(current_user: dict = Depends(get_current_user)) -> str:
