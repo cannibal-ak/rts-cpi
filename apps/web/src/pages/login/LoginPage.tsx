@@ -286,6 +286,7 @@ export default function LoginPage() {
                     <TextField
                         id="login-email"
                         label="Email Address"
+                        InputLabelProps={{ shrink: true }}
                         type="email"
                         fullWidth
                         value={email}
@@ -308,6 +309,7 @@ export default function LoginPage() {
                     <TextField
                         id="login-password"
                         label="Password"
+                        InputLabelProps={{ shrink: true }}
                         type={showPassword ? 'text' : 'password'}
                         fullWidth
                         value={password}
