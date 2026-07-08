@@ -148,6 +148,7 @@ TENANT_CAPDATE_ONLY_TABLES = {
     "WM":  [
         "wm_all_airlines_fares",
         "wm_pricing_recommendations",
+        "wm_velocity_normalized",
     ],
     "FJL": [
         "vds_cfl_cheapest_competitor",
