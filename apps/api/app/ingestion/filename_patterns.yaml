@@ -50,3 +50,10 @@ patterns:
     date_format: DDMMYY
     case_insensitive: true
     example: "FJL_010426.csv"
+
+  - regex: "^WM_VL_(\\d{6})\\.(?i:csv|xlsx)$"
+    tenant_code: WM
+    domain: VELOCITY
+    date_format: DDMMYY
+    case_insensitive: false
+    example: "WM_VL_010426.CSV"

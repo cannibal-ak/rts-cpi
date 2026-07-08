@@ -225,6 +225,7 @@ VELOCITY_VIEW_MAP = {
     "JY": "vw_velocity_jy_snapshot",
     "PW": "vw_velocity_pw_snapshot",
     "ALT": "vw_velocity_alt_snapshot",
+    "WM": "vw_velocity_wm_snapshot",
 }
 VELOCITY_TENANTS = set(VELOCITY_VIEW_MAP.keys())
 

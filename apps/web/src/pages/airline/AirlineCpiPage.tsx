@@ -34,7 +34,7 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   const velocityExportRef = useRef<() => void>(() => {});
 
   const pageTitle = TENANT_LABELS[tenantCode] || `Airline CPI – ${tenantCode}`;
-  const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT'];
+  const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT', 'WM'];
   const showTabs = TENANTS_WITH_VELOCITY.includes(tenantCode);
 
   useEffect(() => {
