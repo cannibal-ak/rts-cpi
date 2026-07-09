@@ -81,35 +81,22 @@ def get_filter_metadata(
         if user_identity != "FJL":
             raise HTTPException(status_code=403, detail="Not Authorized")
 
-    from app.core.file_dates import get_available_file_dates
-    import os
-    
-    # Path inside container
-    data_path = os.environ.get("CPI_DATA_PATH", "/app/data")
-    if not os.path.exists(data_path):
-        data_path = os.path.join(os.getcwd(), "data")
-
     result = []
-    # Dates from filenames - filter by tenant if provided
-    search_tenants = [tenant] if tenant else ["FJL"]
-    file_dates = get_available_file_dates(data_path, search_tenants)
-    if file_dates == ["No file dates available"]:
-        file_dates = []
 
-    # Dates from database
-    db_dates_query = select(distinct(CflCpiSnapshot.report_date)).where(CflCpiSnapshot.report_date != None)
-    if tenant:
-        db_dates_query = db_dates_query.where(CflCpiSnapshot.tenant_code == tenant)
-    else:
-        db_dates_query = db_dates_query.where(CflCpiSnapshot.tenant_code == "FJL")
-    
-    db_dates = [d.isoformat() for d in db.execute(db_dates_query).scalars().all() if d]
-    
-    # Merge and sort
-    all_dates = sorted(list(set(file_dates + db_dates)), reverse=True)
+    # Date list — sourced from the SAME tenant view the grid queries, keyed on
+    # cap_date (the column the snapshots filter matches). Previously this merged
+    # filename-parsed dates + DISTINCT report_date; a date could be offered
+    # whose rows carry a different cap_date, giving an empty grid on select.
+    # Enumerating cap_date guarantees every option returns rows.
+    view_name = "vw_cfl_cpi_fjl_snapshot"
+    file_dates = db.execute(text(
+        f"SELECT DISTINCT cap_date FROM {view_name} WHERE cap_date IS NOT NULL "
+        "ORDER BY cap_date DESC"
+    )).scalars().all()
+    all_dates = [d.isoformat() for d in file_dates]
     if not all_dates:
         all_dates = ["No file dates available"]
-        
+
     result.append({"field": "file_date", "label": "File Date", "values": all_dates})
 
     return result

@@ -639,7 +639,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
               title={`No ${tenantCode} Data`}
               description={`Pick a file date to load ${tenantCode} airline CPI snapshots.`}
               actionLabel="Load All"
-              onAction={() => fetchData({})}
+              onAction={() => fetchData(filters.file_date ? { file_date: filters.file_date } : {})}
             />
           </Box>
         ) : (

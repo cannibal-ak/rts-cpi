@@ -93,36 +93,27 @@ def get_filter_metadata(
             raise HTTPException(status_code=403, detail="Not Authorized")
         effective_tenant = user_identity  # locked to own tenant
 
-    from app.core.file_dates import get_available_file_dates
-
-    import os
-    # Paths and defaults
-    data_path = os.environ.get("CPI_DATA_PATH", "/app/data")
-    if not os.path.exists(data_path):
-        data_path = os.path.join(os.getcwd(), "data")
-
     result = []
-    
-    # Dates from filenames - filter by resolved tenant
-    search_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM"]
-    file_dates = get_available_file_dates(data_path, search_tenants)
-    if file_dates == ["No file dates available"]:
-        file_dates = []
 
-    # Dates from database
-    db_dates_query = select(distinct(AirlineCpiSnapshot.report_date)).where(AirlineCpiSnapshot.report_date != None)
-    if effective_tenant:
-        db_dates_query = db_dates_query.where(AirlineCpiSnapshot.tenant_code == effective_tenant)
-    else:
-        db_dates_query = db_dates_query.where(AirlineCpiSnapshot.tenant_code.in_(["JY", "PW", "ALT", "WM"]))
-    
-    db_dates = [d.isoformat() for d in db.execute(db_dates_query).scalars().all() if d]
-    
-    # Merge and sort
-    all_dates = sorted(list(set(file_dates + db_dates)), reverse=True)
+    # Date list — sourced from the SAME tenant view(s) the grid queries, keyed
+    # on cap_date (the column the snapshots filter matches). Previously this
+    # merged filename-parsed dates + DISTINCT report_date; a date could be
+    # offered whose rows carry a different cap_date, giving an empty grid on
+    # select. Enumerating cap_date guarantees every option returns rows.
+    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot"}
+    date_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM"]
+    date_set = set()
+    for dt in date_tenants:
+        dv = AIRLINE_VIEW_MAP.get(dt)
+        if not dv:
+            continue
+        date_set.update(db.execute(text(
+            f"SELECT DISTINCT cap_date FROM {dv} WHERE cap_date IS NOT NULL"
+        )).scalars().all())
+    all_dates = sorted((d.isoformat() for d in date_set), reverse=True)
     if not all_dates:
         all_dates = ["No file dates available"]
-        
+
     result.append({"field": "file_date", "label": "File Date", "values": all_dates})
 
     # Airline filter — sourced from the actual ref_al values of the same
