@@ -55,6 +55,16 @@ export interface SnapshotQuery {
 }
 
 /**
+ * Per-request controls for the snapshot list calls. `signal` lets a caller
+ * cancel in-flight requests (e.g. the grid unmounting or the user switching
+ * tabs mid-load); `timeoutMs` overrides the client default.
+ */
+export interface RequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+/**
  * Date filter sent to /api/v1/superset/guest-token. The backend turns these
  * into an extra RLS clause on cap_date (single-day or BETWEEN).
  */
@@ -117,18 +127,18 @@ export interface KpiDetailResponse {
 export interface CpiApiClient {
   // Airline (tenant-aware: pass tenant='JY' or 'PW')
   airline: {
-    listSnapshots(q?: SnapshotQuery): Promise<Paginated<AirlineSnapshot>>;
+    listSnapshots(q?: SnapshotQuery, opts?: RequestOptions): Promise<Paginated<AirlineSnapshot>>;
     getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
     exportSnapshots(q?: Record<string, string>): Promise<void>;
     velocity: {
-      listSnapshots(q?: SnapshotQuery): Promise<Paginated<VelocitySnapshot>>;
+      listSnapshots(q?: SnapshotQuery, opts?: RequestOptions): Promise<Paginated<VelocitySnapshot>>;
       getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
       exportSnapshots(q?: Record<string, string>): Promise<void>;
     };
   };
   // CFL (tenant-aware: pass tenant='FJL')
   cfl: {
-    listSnapshots(q?: SnapshotQuery): Promise<Paginated<CflSnapshot>>;
+    listSnapshots(q?: SnapshotQuery, opts?: RequestOptions): Promise<Paginated<CflSnapshot>>;
     getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
     exportSnapshots(q?: Record<string, string>): Promise<void>;
   };
@@ -177,6 +187,10 @@ export interface CpiApiClient {
       resendInvite(body: { email?: string; user_id?: string }): Promise<AdminResendInviteResponse>;
       sendResetEmail(body: { email: string }): Promise<AdminSendResetEmailResponse>;
       forceReset(email: string, newPassword: string, forceChangeOnLogin: boolean): Promise<AdminForceResetResponse>;
+      deactivateUser(userId: string): Promise<void>;
+      resetMfa(userId: string): Promise<{ user_id: string; email: string; mfa_reset: boolean }>;
+      reactivateUser(userId: string): Promise<void>;
+      deleteUser(userId: string): Promise<void>;
     };
 
     // ── Admin Dashboard (Home page) ──

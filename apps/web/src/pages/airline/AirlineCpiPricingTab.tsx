@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, type ReactNode, type MutableRefObject } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode, type MutableRefObject } from 'react';
 import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   CircularProgress, Button, Collapse, Chip, IconButton, Autocomplete, TextField,
@@ -10,10 +10,12 @@ import {
 } from '@mui/icons-material';
 import EmptyState from '../../components/common/EmptyState';
 import { api } from '../../api';
+import { fetchAllPages } from '../../api/fetchAllPages';
+import { isAbortError } from '../../api/httpClient';
 import type { AirlineSnapshot, FilterMetadata } from '../../types';
 
 interface AirlineCpiPricingTabProps {
-  tenantCode: 'JY' | 'PW' | 'ALT';
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM';
   filters: Record<string, string>;
   onFiltersChange: (f: Record<string, string>) => void;
   /** Parent populates this ref so the page toolbar's Export button can fire CSV. */
@@ -340,43 +342,21 @@ const EXPORT_COLUMNS: Array<{ header: string; key: keyof AirlineSnapshot }> = [
 ];
 
 // ── Page walker (load all rows for selected file_date) ──────────────────
-const PAGE_FETCH_SIZE = 100;
-const FETCH_CONCURRENCY = 10;
-
-async function fetchAllRows(
+// Shared with the velocity and cruise grids — see api/fetchAllPages.ts.
+function fetchAllRows(
   baseQuery: Record<string, string>,
-  tenantCode: 'JY' | 'PW' | 'ALT',
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM',
   onProgress?: (loaded: number, total: number) => void,
+  signal?: AbortSignal,
 ): Promise<AirlineSnapshot[]> {
-  const first = await api.airline.listSnapshots({
-    ...baseQuery,
-    tenant: tenantCode,
-    page: 1,
-    page_size: PAGE_FETCH_SIZE,
+  return fetchAllPages<AirlineSnapshot>({
+    fetchPage: (page, pageSize, sig) => api.airline.listSnapshots(
+      { ...baseQuery, tenant: tenantCode, page, page_size: pageSize },
+      { signal: sig },
+    ),
+    onProgress,
+    signal,
   });
-  const total = first.page_info.total;
-  const numPages = Math.max(1, Math.ceil(total / PAGE_FETCH_SIZE));
-  onProgress?.(first.items.length, total);
-  if (numPages <= 1) return first.items;
-
-  const rest: number[] = [];
-  for (let p = 2; p <= numPages; p++) rest.push(p);
-
-  const collected: AirlineSnapshot[] = [...first.items];
-  for (let i = 0; i < rest.length; i += FETCH_CONCURRENCY) {
-    const batch = rest.slice(i, i + FETCH_CONCURRENCY);
-    const results = await Promise.all(batch.map(p =>
-      api.airline.listSnapshots({
-        ...baseQuery,
-        tenant: tenantCode,
-        page: p,
-        page_size: PAGE_FETCH_SIZE,
-      }).then(r => r.items)
-    ));
-    for (const items of results) collected.push(...items);
-    onProgress?.(collected.length, total);
-  }
-  return collected;
 }
 
 // ── CSV helpers ─────────────────────────────────────────────────────────
@@ -424,23 +404,49 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
   }, [tenantCode]);
 
   // ── Data fetcher (walks all pages for the chosen file_date) ─────────
+  // Holds the controller for the load currently in flight, so a new load — or
+  // unmounting — cancels the old one instead of letting it run to completion
+  // and overwrite fresher results.
+  const abortRef = useRef<AbortController | null>(null);
+
   const fetchData = useCallback(async (q: Record<string, string>) => {
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
     setLoading(true);
     setProgress(null);
     setExpandedId(null);
     try {
       const rows = await fetchAllRows(q, tenantCode, (loaded, total) => {
-        setProgress({ loaded, total });
-      });
+        if (!ctrl.signal.aborted) setProgress({ loaded, total });
+      }, ctrl.signal);
+      if (ctrl.signal.aborted) return;
       setAllData(rows);
     } catch (err) {
+      // A superseded or cancelled load is not a failure — leave the existing
+      // rows alone and let the newer load own the state.
+      if (ctrl.signal.aborted || isAbortError(err)) return;
       console.error('Failed to load airline pricing snapshots:', err);
       setAllData([]);
     } finally {
-      setLoading(false);
-      setProgress(null);
+      if (!ctrl.signal.aborted) {
+        setLoading(false);
+        setProgress(null);
+      }
     }
   }, [tenantCode]);
+
+  // Cancel any in-flight load when the tab unmounts (switching Pricing/Velocity
+  // unmounts this component, so without this an abandoned load keeps fetching).
+  //
+  // Safe under React StrictMode, which in dev mounts, cleans up, then mounts
+  // again: at that synthetic cleanup `abortRef.current` is still null, because
+  // a load can only start from the `[meta]` effect below and `meta` is filled
+  // by an async request that cannot resolve inside the mount commit. If a
+  // future change ever starts a load synchronously on mount, revisit this —
+  // it would cancel that first load and never restart it.
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // ── Default filter wiring (file_date = latest, airline if locked) ───
   useEffect(() => {
@@ -639,7 +645,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
               title={`No ${tenantCode} Data`}
               description={`Pick a file date to load ${tenantCode} airline CPI snapshots.`}
               actionLabel="Load All"
-              onAction={() => fetchData({})}
+              onAction={() => fetchData(filters.file_date ? { file_date: filters.file_date } : {})}
             />
           </Box>
         ) : (
