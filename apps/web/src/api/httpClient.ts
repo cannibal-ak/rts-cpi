@@ -47,7 +47,7 @@ function headers(): Record<string, string> {
   return h;
 }
 
-async function attemptRefresh(): Promise<boolean> {
+async function doRefresh(): Promise<boolean> {
   const refreshToken = authStorage.getRefreshToken();
   if (!refreshToken) return false;
 
@@ -66,6 +66,74 @@ async function attemptRefresh(): Promise<boolean> {
     // Refresh failed
   }
   return false;
+}
+
+// The grids fire several requests concurrently. When a token expires mid-flight
+// they all see 401 at once, and each one used to launch its own
+// POST /auth/refresh — a burst of identical refreshes racing each other.
+// Collapse them onto a single in-flight promise; the rest await that result.
+let _refreshInFlight: Promise<boolean> | null = null;
+
+async function attemptRefresh(): Promise<boolean> {
+  if (!_refreshInFlight) {
+    _refreshInFlight = doRefresh().finally(() => { _refreshInFlight = null; });
+  }
+  return _refreshInFlight;
+}
+
+// Same problem on the failure path: a burst of failed refreshes each assigned
+// window.location. Guard so only the first one navigates.
+let _loggingOut = false;
+
+function forceLogout(): never {
+  if (!_loggingOut) {
+    _loggingOut = true;
+    authStorage.removeRefreshToken();
+    _accessToken = null;
+    window.location.href = '/login';
+  }
+  throw new Error('Session expired');
+}
+
+/** Per-request options: caller-supplied abort signal and/or a timeout. */
+export interface RequestOptions {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}
+
+// Grid pages can legitimately take a while on a cold cache; 60s is a backstop
+// against a request that hangs forever, not a latency target.
+const DEFAULT_TIMEOUT_MS = 60_000;
+
+/**
+ * Compose a caller's abort signal with a timeout into one signal.
+ * Written by hand rather than with AbortSignal.any(), which is too recent to
+ * rely on across the browsers this app has to support.
+ */
+function withTimeout(opts?: RequestOptions): { signal: AbortSignal; dispose: () => void } {
+  const ctrl = new AbortController();
+  const timer = setTimeout(
+    () => ctrl.abort(new DOMException('Request timed out', 'TimeoutError')),
+    opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+  );
+  const outer = opts?.signal;
+  const onOuterAbort = () => ctrl.abort(outer?.reason);
+  if (outer) {
+    if (outer.aborted) ctrl.abort(outer.reason);
+    else outer.addEventListener('abort', onOuterAbort, { once: true });
+  }
+  return {
+    signal: ctrl.signal,
+    dispose: () => {
+      clearTimeout(timer);
+      outer?.removeEventListener('abort', onOuterAbort);
+    },
+  };
+}
+
+/** True for a cancelled or timed-out request, so callers can ignore it. */
+export function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError');
 }
 
 /**
@@ -129,26 +197,23 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-async function fetchWithAuth<T>(url: string, init: RequestInit): Promise<T> {
-  let res = await fetch(url, init);
+async function fetchWithAuth<T>(url: string, init: RequestInit, opts?: RequestOptions): Promise<T> {
+  const { signal, dispose } = withTimeout(opts);
+  try {
+    let res = await fetch(url, { ...init, signal });
 
-  // On 401, attempt a single refresh then retry
-  if (res.status === 401) {
-    const refreshed = await attemptRefresh();
-    if (refreshed) {
-      // Update headers with new token
-      const newInit = { ...init, headers: { ...headers() } };
-      res = await fetch(url, newInit);
-    } else {
-      // Refresh failed — force logout by clearing state and redirecting
-      authStorage.removeRefreshToken();
-      _accessToken = null;
-      window.location.href = '/login';
-      throw new Error('Session expired');
+    // On 401, attempt a single refresh then retry
+    if (res.status === 401) {
+      const refreshed = await attemptRefresh();
+      if (!refreshed) forceLogout();
+      // Retry with the newly refreshed token
+      res = await fetch(url, { ...init, headers: { ...headers() }, signal });
     }
-  }
 
-  return handleResponse<T>(res);
+    return await handleResponse<T>(res);
+  } finally {
+    dispose();
+  }
 }
 
 // Build a request URL that works for both absolute BASE
@@ -179,13 +244,19 @@ function buildQuery(params?: Record<string, string | number | undefined>): strin
   return s ? `?${s}` : '';
 }
 
-async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
+async function get<T>(path: string, params?: Record<string, string | number | undefined>, opts?: RequestOptions): Promise<T> {
   const url = buildUrl(path, BASE) + buildQuery(params);
   try {
-    return await fetchWithAuth<T>(url, { headers: headers() });
+    return await fetchWithAuth<T>(url, { headers: headers() }, opts);
   } catch (err: any) {
-    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required' || err.message === 'MFA setup required') throw err;
-    throw new Error(`Network Error: ${err.message}. Is the backend at ${BASE} reachable?`);
+    // Cancellations and timeouts must reach the caller unwrapped, so it can
+    // tell "this request was superseded" from "the backend is unreachable".
+    if (isAbortError(err)) throw err;
+    // err.message was read unguarded here; a non-Error rejection made
+    // `.startsWith` throw a TypeError that masked the real failure.
+    const msg = typeof err?.message === 'string' ? err.message : String(err);
+    if (msg.startsWith('API ') || msg === 'Session expired' || msg === 'Password change required' || msg === 'MFA setup required') throw err;
+    throw new Error(`Network Error: ${msg}. Is the backend at ${BASE} reachable?`);
   }
 }
 
@@ -303,15 +374,15 @@ async function processDownload(res: Response): Promise<void> {
 
 export const httpClient: CpiApiClient = {
   airline: {
-    listSnapshots: (q?: SnapshotQuery) =>
-      get<Paginated<AirlineSnapshot>>('/api/v1/airline/snapshots', q as Record<string, string | number | undefined>),
+    listSnapshots: (q?: SnapshotQuery, opts?: RequestOptions) =>
+      get<Paginated<AirlineSnapshot>>('/api/v1/airline/snapshots', q as Record<string, string | number | undefined>, opts),
     getFilterMetadata: (tenant?: string) =>
       get<FilterMetadata[]>('/api/v1/airline/filter-metadata', tenant ? { tenant } : undefined),
     exportSnapshots: (q?: Record<string, string>) =>
       download('/api/v1/airline/export', q),
     velocity: {
-      listSnapshots: (q?: SnapshotQuery) =>
-        get<Paginated<VelocitySnapshot>>('/api/v1/airline/velocity/snapshots', q as Record<string, string | number | undefined>),
+      listSnapshots: (q?: SnapshotQuery, opts?: RequestOptions) =>
+        get<Paginated<VelocitySnapshot>>('/api/v1/airline/velocity/snapshots', q as Record<string, string | number | undefined>, opts),
       getFilterMetadata: (tenant?: string) =>
         get<FilterMetadata[]>('/api/v1/airline/velocity/filter-metadata', tenant ? { tenant } : undefined),
       exportSnapshots: (q?: Record<string, string>) =>
@@ -319,8 +390,8 @@ export const httpClient: CpiApiClient = {
     },
   },
   cfl: {
-    listSnapshots: (q?: SnapshotQuery) =>
-      get<Paginated<CflSnapshot>>('/api/v1/cfl/snapshots', q as Record<string, string | number | undefined>),
+    listSnapshots: (q?: SnapshotQuery, opts?: RequestOptions) =>
+      get<Paginated<CflSnapshot>>('/api/v1/cfl/snapshots', q as Record<string, string | number | undefined>, opts),
     getFilterMetadata: (tenant?: string) =>
       get<FilterMetadata[]>('/api/v1/cfl/filter-metadata', tenant ? { tenant } : undefined),
     exportSnapshots: (q?: Record<string, string>) =>
