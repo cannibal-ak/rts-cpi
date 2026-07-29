@@ -25,15 +25,11 @@ router = APIRouter(
 # The default stays at 20 — callers that don't ask are unaffected.
 MAX_PAGE_SIZE = 1000
 
-# Deliberately long. Snapshot data is ingested once a day, so the newest
-# available date is stable for hours — a 10-minute staleness window is
-# harmless. It matters because on airline_cpi_snapshot there is currently no
-# index covering (tenant_code, cap_date), so `max(cap_date)` is a ~25s
-# sequential scan of ~9.4M rows. Caching it for 10 minutes rather than 60
-# seconds cuts that cost by an order of magnitude while the index is pending.
-# Once ix_air_snap_<tenant>_grid exists this becomes an index-only scan and
-# the TTL can safely drop back to 60s.
-_LATEST_DATE_TTL = 600.0
+# 60s is enough: with ix_air_snap_<tenant>_grid in place, `max(cap_date)` is an
+# index-only scan reading ~4 pages (0.17ms on production), so there is nothing
+# to amortise. Keeping the window short means a freshly ingested date shows up
+# in the grid within a minute.
+_LATEST_DATE_TTL = 60.0
 _COUNT_TTL = 60.0
 _METADATA_TTL = 300.0
 

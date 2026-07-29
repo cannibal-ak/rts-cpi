@@ -23,9 +23,9 @@ router = APIRouter(
 # Mirrors airline.py — see the rationale there.
 MAX_PAGE_SIZE = 1000
 
-# Long TTL — see the rationale in airline.py. Ingest is daily, and max(cap_date)
-# is unindexed on the base table until the grid index lands.
-_LATEST_DATE_TTL = 600.0
+# See the rationale in airline.py — ix_cfl_snap_fjl_grid makes max(cap_date) an
+# index scan, so a short window costs nothing and keeps new dates visible.
+_LATEST_DATE_TTL = 60.0
 _COUNT_TTL = 60.0
 
 
