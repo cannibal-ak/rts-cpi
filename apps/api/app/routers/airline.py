@@ -8,6 +8,7 @@ import io
 from openpyxl import Workbook
 from fastapi.responses import StreamingResponse
 
+from app.core.cache import cached
 from app.core.deps import get_tenant_db, sanitize_filter, sanitize_date, get_user_roles, get_user_identity, is_platform_admin
 from app.models.airline import AirlineCpiSnapshot
 from app.schemas.common import PaginatedResponse, PageInfo
@@ -20,6 +21,51 @@ router = APIRouter(
     tags=["airline"],
 )
 
+# Raised from 100 so a client can pull a page in one request instead of ten.
+# The default stays at 20 — callers that don't ask are unaffected.
+MAX_PAGE_SIZE = 1000
+
+# Deliberately long. Snapshot data is ingested once a day, so the newest
+# available date is stable for hours — a 10-minute staleness window is
+# harmless. It matters because on airline_cpi_snapshot there is currently no
+# index covering (tenant_code, cap_date), so `max(cap_date)` is a ~25s
+# sequential scan of ~9.4M rows. Caching it for 10 minutes rather than 60
+# seconds cuts that cost by an order of magnitude while the index is pending.
+# Once ix_air_snap_<tenant>_grid exists this becomes an index-only scan and
+# the TTL can safely drop back to 60s.
+_LATEST_DATE_TTL = 600.0
+_COUNT_TTL = 60.0
+_METADATA_TTL = 300.0
+
+
+def _latest_date(db: Session, view_name: str, column: str) -> str | None:
+    """Newest value of `column` in a tenant view, memoised briefly.
+
+    Used to pin a date when the caller supplies none. `column` is never
+    user-supplied — every call site passes a literal.
+    """
+    def _produce() -> str | None:
+        val = db.execute(text(f"SELECT max({column}) FROM {view_name}")).scalar()
+        return val.isoformat() if val else None
+
+    return cached(("latest_date", view_name, column), _LATEST_DATE_TTL, _produce)
+
+
+def _cached_count(db: Session, view_name: str, where_str: str, filter_params: dict) -> int:
+    """count(*) memoised on the exact filter set.
+
+    A grid that pages through a result set re-sends an identical count with
+    every page; a short TTL collapses those into one. `filter_params` must
+    exclude limit/offset or the key never repeats and the cache is dead weight.
+    """
+    key = ("count", view_name, where_str, tuple(sorted(filter_params.items())))
+
+    def _produce() -> int:
+        return db.execute(text(f"SELECT count(*) FROM {view_name} {where_str}"),
+                          filter_params).scalar() or 0
+
+    return cached(key, _COUNT_TTL, _produce)
+
 
 @router.get("/snapshots", response_model=PaginatedResponse[AirlineSnapshotOut])
 def list_snapshots(
@@ -28,9 +74,10 @@ def list_snapshots(
     user_identity: str = Depends(get_user_identity),
     tenant: str | None = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE),
     file_date: str | None = None,
     airline: str | None = None,
+    with_total: bool = Query(True, description="Set false to skip count(*) on repeat pages."),
 ):
     # Enforce tenant scoping — non-platform users are locked to their own airline
     AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot"}
@@ -49,31 +96,57 @@ def list_snapshots(
     file_date = sanitize_date(file_date, "file_date")
     airline = sanitize_filter(airline, "airline")
 
-    # Build Raw SQL query for performance and to use specifically crafted views
-    where_clauses = []
-    params = {"limit": page_size, "offset": (page - 1) * page_size}
+    # ── Never emit a query without a cap_date equality. ───────────────────
+    # Without this, an absent file_date produced an empty WHERE and a full
+    # unfiltered scan of the whole snapshot table (~9.4M rows, ~30s per
+    # request). We PIN the newest cap_date rather than returning 400: the grid
+    # legitimately calls this with no filters on first paint, and a 400 there
+    # is a blank screen for every user. Pinning degrades gracefully.
+    if not file_date:
+        file_date = _latest_date(db, view_name, "cap_date")
+        if file_date is None:
+            # Genuinely empty tenant — say so without scanning to find out.
+            return PaginatedResponse(
+                items=[],
+                page_info=PageInfo(total=0, page=page, page_size=page_size,
+                                   has_next=False, applied_file_date=None),
+            )
 
-    if file_date:
-        where_clauses.append("cap_date = :file_date")
-        params["file_date"] = file_date
+    # Build Raw SQL query for performance and to use specifically crafted views
+    where_clauses = ["cap_date = :file_date"]
+    filter_params: dict = {"file_date": file_date}
+
     if airline:
         where_clauses.append("ref_al = :airline")
-        params["airline"] = airline
+        filter_params["airline"] = airline
 
-    where_str = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-    
-    # Count query
-    count_sql = text(f"SELECT count(*) FROM {view_name} {where_str}")
-    total = db.execute(count_sql, params).scalar()
+    where_str = f"WHERE {' AND '.join(where_clauses)}"
+    params = {**filter_params, "limit": page_size, "offset": (page - 1) * page_size}
 
-    # Data query
-    data_sql = text(f"SELECT * FROM {view_name} {where_str} ORDER BY cap_date DESC, cap_time DESC LIMIT :limit OFFSET :offset")
+    # ── Ordering needs a unique tiebreaker. ───────────────────────────────
+    # An entire capture batch shares one (cap_date, cap_time), so sorting on
+    # those alone is not a total order: under LIMIT/OFFSET, Postgres may return
+    # tied rows in a different sequence per page, silently duplicating some
+    # rows across pages and dropping others. Appending `id` makes the order
+    # deterministic. This is a correctness fix, not just a performance one.
+    order_by = "ORDER BY cap_date DESC, cap_time DESC, id DESC"
+
+    data_sql = text(f"SELECT * FROM {view_name} {where_str} {order_by} LIMIT :limit OFFSET :offset")
     rows = db.execute(data_sql, params).mappings().all()
+
+    # count(*) is memoised on the filter set — a client paging through a result
+    # set no longer pays for a fresh full count on every page.
+    if with_total:
+        total = _cached_count(db, view_name, where_str, filter_params)
+    else:
+        total = 0
 
     return PaginatedResponse(
         items=rows,
         page_info=PageInfo(total=total, page=page, page_size=page_size,
-                           has_next=((page - 1) * page_size + page_size) < total),
+                           has_next=((page - 1) * page_size + page_size) < total,
+                           applied_file_date=file_date,
+                           total_is_cached=not with_total),
     )
 
 
@@ -163,6 +236,11 @@ def export_snapshots(
     file_date = sanitize_date(file_date, "file_date")
     airline = sanitize_filter(airline, "airline")
 
+    # Same rule as the grid: never scan the whole table. Pin the newest
+    # cap_date when the caller omits one.
+    if not file_date:
+        file_date = _latest_date(db, view_name, "cap_date")
+
     where_clauses = []
     params = {}
 
@@ -174,8 +252,8 @@ def export_snapshots(
         params["airline"] = airline
 
     where_str = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-    
-    data_sql = text(f"SELECT * FROM {view_name} {where_str} ORDER BY cap_date DESC, cap_time DESC LIMIT 5000")
+
+    data_sql = text(f"SELECT * FROM {view_name} {where_str} ORDER BY cap_date DESC, cap_time DESC, id DESC LIMIT 5000")
     rows = db.execute(data_sql, params).mappings().all()
 
     wb = Workbook()
@@ -274,12 +352,13 @@ def list_velocity_snapshots(
     user_identity: str = Depends(get_user_identity),
     tenant: str | None = Query(None),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
+    page_size: int = Query(20, ge=1, le=MAX_PAGE_SIZE),
     file_date: str | None = None,
     origin: str | None = None,
     destination: str | None = None,
     city_pair: str | None = None,
     days_left: str | None = None,
+    with_total: bool = Query(True, description="Set false to skip count(*) on repeat pages."),
 ):
     effective_tenant = _resolve_velocity_tenant(user_identity, user_roles, tenant)
     view_name = VELOCITY_VIEW_MAP[effective_tenant]
@@ -290,23 +369,36 @@ def list_velocity_snapshots(
     city_pair = sanitize_filter(city_pair, "city_pair")
     days_left_int = _parse_days_left(days_left)
 
-    where_str, params = _build_velocity_where(file_date, origin, destination, city_pair, days_left_int)
-    params["limit"] = page_size
-    params["offset"] = (page - 1) * page_size
+    # Pin the newest report_date when the caller supplies none — see the same
+    # guard in list_snapshots. Velocity filters on report_date (not cap_date).
+    if not file_date:
+        file_date = _latest_date(db, view_name, "report_date")
+        if file_date is None:
+            return PaginatedResponse(
+                items=[],
+                page_info=PageInfo(total=0, page=page, page_size=page_size,
+                                   has_next=False, applied_file_date=None),
+            )
 
-    count_sql = text(f"SELECT count(*) FROM {view_name} {where_str}")
-    total = db.execute(count_sql, params).scalar() or 0
+    where_str, filter_params = _build_velocity_where(file_date, origin, destination, city_pair, days_left_int)
+    params = {**filter_params, "limit": page_size, "offset": (page - 1) * page_size}
 
+    # `id` tiebreaker — (dep_date, dep_time) is not unique, so without it
+    # LIMIT/OFFSET paging can duplicate and drop rows. See list_snapshots.
     data_sql = text(
         f"SELECT * FROM {view_name} {where_str} "
-        "ORDER BY dep_date DESC, dep_time DESC LIMIT :limit OFFSET :offset"
+        "ORDER BY dep_date DESC, dep_time DESC, id DESC LIMIT :limit OFFSET :offset"
     )
     rows = db.execute(data_sql, params).mappings().all()
+
+    total = _cached_count(db, view_name, where_str, filter_params) if with_total else 0
 
     return PaginatedResponse(
         items=rows,
         page_info=PageInfo(total=total, page=page, page_size=page_size,
-                           has_next=((page - 1) * page_size + page_size) < total),
+                           has_next=((page - 1) * page_size + page_size) < total,
+                           applied_file_date=file_date,
+                           total_is_cached=not with_total),
     )
 
 
@@ -320,40 +412,46 @@ def get_velocity_filter_metadata(
     effective_tenant = _resolve_velocity_tenant(user_identity, user_roles, tenant)
     view_name = VELOCITY_VIEW_MAP[effective_tenant]
 
-    result = []
+    # Five DISTINCT scans over the full velocity table. These change only when
+    # a new file is ingested, so they are cached for 5 minutes rather than
+    # recomputed on every page mount.
+    def _produce() -> list[dict]:
+        result = []
 
-    file_dates = db.execute(text(
-        f"SELECT DISTINCT report_date FROM {view_name} "
-        "WHERE report_date IS NOT NULL ORDER BY report_date DESC"
-    )).scalars().all()
-    result.append({"field": "file_date", "label": "File Date",
-                   "values": [d.isoformat() for d in file_dates] or ["No file dates available"]})
+        file_dates = db.execute(text(
+            f"SELECT DISTINCT report_date FROM {view_name} "
+            "WHERE report_date IS NOT NULL ORDER BY report_date DESC"
+        )).scalars().all()
+        result.append({"field": "file_date", "label": "File Date",
+                       "values": [d.isoformat() for d in file_dates] or ["No file dates available"]})
 
-    origins = db.execute(text(
-        f"SELECT DISTINCT origin FROM {view_name} "
-        "WHERE origin IS NOT NULL AND origin <> '' ORDER BY origin"
-    )).scalars().all()
-    result.append({"field": "origin", "label": "Origin", "values": list(origins)})
+        origins = db.execute(text(
+            f"SELECT DISTINCT origin FROM {view_name} "
+            "WHERE origin IS NOT NULL AND origin <> '' ORDER BY origin"
+        )).scalars().all()
+        result.append({"field": "origin", "label": "Origin", "values": list(origins)})
 
-    destinations = db.execute(text(
-        f"SELECT DISTINCT destination FROM {view_name} "
-        "WHERE destination IS NOT NULL AND destination <> '' ORDER BY destination"
-    )).scalars().all()
-    result.append({"field": "destination", "label": "Destination", "values": list(destinations)})
+        destinations = db.execute(text(
+            f"SELECT DISTINCT destination FROM {view_name} "
+            "WHERE destination IS NOT NULL AND destination <> '' ORDER BY destination"
+        )).scalars().all()
+        result.append({"field": "destination", "label": "Destination", "values": list(destinations)})
 
-    city_pairs = db.execute(text(
-        f"SELECT DISTINCT city_pair FROM {view_name} "
-        "WHERE city_pair IS NOT NULL AND city_pair <> '' ORDER BY city_pair"
-    )).scalars().all()
-    result.append({"field": "city_pair", "label": "City Pair", "values": list(city_pairs)})
+        city_pairs = db.execute(text(
+            f"SELECT DISTINCT city_pair FROM {view_name} "
+            "WHERE city_pair IS NOT NULL AND city_pair <> '' ORDER BY city_pair"
+        )).scalars().all()
+        result.append({"field": "city_pair", "label": "City Pair", "values": list(city_pairs)})
 
-    days = db.execute(text(
-        f"SELECT DISTINCT days_left FROM {view_name} ORDER BY days_left"
-    )).scalars().all()
-    result.append({"field": "days_left", "label": "Days Left",
-                   "values": [str(d) for d in days]})
+        days = db.execute(text(
+            f"SELECT DISTINCT days_left FROM {view_name} ORDER BY days_left"
+        )).scalars().all()
+        result.append({"field": "days_left", "label": "Days Left",
+                       "values": [str(d) for d in days]})
 
-    return result
+        return result
+
+    return cached(("velocity_filter_meta", view_name), _METADATA_TTL, _produce)
 
 
 @router.get("/velocity/export")
@@ -377,11 +475,15 @@ def export_velocity_snapshots(
     city_pair = sanitize_filter(city_pair, "city_pair")
     days_left_int = _parse_days_left(days_left)
 
+    # Same rule as the grid: never scan the whole table.
+    if not file_date:
+        file_date = _latest_date(db, view_name, "report_date")
+
     where_str, params = _build_velocity_where(file_date, origin, destination, city_pair, days_left_int)
 
     data_sql = text(
         f"SELECT * FROM {view_name} {where_str} "
-        "ORDER BY dep_date DESC, dep_time DESC LIMIT 5000"
+        "ORDER BY dep_date DESC, dep_time DESC, id DESC LIMIT 5000"
     )
     rows = db.execute(data_sql, params).mappings().all()
 

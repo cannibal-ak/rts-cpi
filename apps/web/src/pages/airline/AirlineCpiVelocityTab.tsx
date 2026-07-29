@@ -408,7 +408,7 @@ export default function AirlineCpiVelocityTab({ tenantCode, filters, onFiltersCh
               title={`No ${tenantCode} Velocity Data`}
               description={`Pick a file date to load ${tenantCode} velocity snapshots.`}
               actionLabel="Load All"
-              onAction={() => fetchData({})}
+              onAction={() => fetchData(filters.file_date ? { file_date: filters.file_date } : {})}
             />
           </Box>
         ) : (
