@@ -397,6 +397,10 @@ export const mockClient: CpiApiClient = {
         }, 2000);
         return delay({ ...row });
       },
+      deleteFileData: (_ingestedFileId: string): Promise<{ rows_deleted: number }> =>
+        Promise.reject(new Error('Mock client does not implement ingestionRuns.deleteFileData')),
+      reingestFile: (_ingestedFileId: string): Promise<RunNowResult> =>
+        Promise.reject(new Error('Mock client does not implement ingestionRuns.reingestFile')),
     },
     // Password management isn't exercised offline; stubs keep the interface satisfied.
     passwordManagement: {

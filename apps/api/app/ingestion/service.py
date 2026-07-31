@@ -568,31 +568,11 @@ class IngestionService:
     ) -> None:
         # Delete prior fact rows so the new commit can re-load cleanly.
         # ``DELETE`` keeps the audit trail (the prior IngestionJob row
-        # itself stays, just flipped to status=REPLACED).
-        if prior.domain == "AIRLINE":
-            self.db.execute(
-                text(
-                    "DELETE FROM airline_cpi_snapshot "
-                    "WHERE tenant_code = :tc AND report_date = :rd"
-                ),
-                {"tc": prior.tenant_code, "rd": prior.file_date},
-            )
-        elif prior.domain == "VELOCITY":
-            self.db.execute(
-                text(
-                    "DELETE FROM velocity_snapshot "
-                    "WHERE tenant_code = :tc AND report_date = :rd"
-                ),
-                {"tc": prior.tenant_code, "rd": prior.file_date},
-            )
-        elif prior.domain == "CFL":
-            self.db.execute(
-                text(
-                    "DELETE FROM cfl_cpi_snapshot "
-                    "WHERE tenant_code = :tc AND report_date = :rd"
-                ),
-                {"tc": prior.tenant_code, "rd": prior.file_date},
-            )
+        # itself stays, just flipped to status=REPLACED). No source_file
+        # scope here: replace-on-commit replaces the whole day.
+        self._delete_facts_for_day(
+            prior.domain, prior.tenant_code, prior.file_date,
+        )
 
         prior.status = "REPLACED"
         prior.replaced_by_job_id = new_job.id
@@ -607,6 +587,163 @@ class IngestionService:
                 "new_filename": new_job.filename,
             },
         )
+
+    # Map domain → the fact table its rows land in. Fixed allow-map so
+    # the table name can be interpolated into DELETE SQL safely (never
+    # from user input).
+    _FACT_TABLE_BY_DOMAIN = {
+        "AIRLINE": "airline_cpi_snapshot",
+        "VELOCITY": "velocity_snapshot",
+        "CFL": "cfl_cpi_snapshot",
+    }
+
+    def _delete_facts_for_day(
+        self,
+        domain: str,
+        tenant_code: str,
+        report_date: date,
+        source_file: Optional[str] = None,
+    ) -> int:
+        """DELETE fact rows for one ingested day. Returns rows deleted.
+
+        Scopes to ``(tenant_code, report_date)`` — the same key the
+        replace-on-commit path (``_archive_prior_job``) uses. When
+        ``source_file`` is given the delete is narrowed to that single
+        file's rows, so a co-day file in the same domain is untouched
+        (the explicit per-file delete passes it; the archive path passes
+        None to replace the whole day, preserving prior behaviour).
+        """
+        table = self._FACT_TABLE_BY_DOMAIN.get(domain)
+        if table is None:
+            raise IngestionConfigError(f"Unknown domain: {domain}")
+        sql = (
+            f"DELETE FROM {table} "  # table from fixed allow-map above
+            "WHERE tenant_code = :tc AND report_date = :rd"
+        )
+        params: dict[str, Any] = {"tc": tenant_code, "rd": report_date}
+        if source_file is not None:
+            sql += " AND source_file = :sf"
+            params["sf"] = source_file
+        result = self.db.execute(text(sql), params)
+        return result.rowcount or 0
+
+    def delete_committed_file(
+        self,
+        job_id: uuid.UUID | str,
+        user_payload: dict,
+        actor_ip: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Delete one committed file's fact rows and free it for re-pull.
+
+        Removes exactly the rows this file loaded (``tenant_code`` +
+        ``report_date`` + ``source_file``), clears the SFTP dedup
+        marker(s) tied to the job so the same or an updated file can be
+        pulled again later, flips the job to ``DELETED``, and writes an
+        audit entry — all in a single transaction.
+
+        Only ``COMMITTED`` jobs are deletable; any other status raises
+        ``IngestionStateError``.
+        """
+        actor_id = self._require_admin(user_payload)
+        job = self._get_job(job_id)
+
+        if job.status != "COMMITTED":
+            raise IngestionStateError(
+                f"job {job.id} status is {job.status}; only COMMITTED "
+                "files can have their data deleted"
+            )
+
+        try:
+            rows_deleted = self._delete_facts_for_day(
+                job.domain,
+                job.tenant_code,
+                job.file_date,
+                source_file=job.filename,
+            )
+
+            # Keep the ingested_file marker(s) as a history record but
+            # neutralise them:
+            #   * flip outcome to 'DELETED' so the run's Files list shows
+            #     the file was purged (and the delete button self-disables);
+            #   * tombstone sha256 so a later re-pull of the SAME file is
+            #     not blocked by the (sha256, remote_filename) dedup gate —
+            #     a tombstone can never equal a real 64-hex digest, so the
+            #     re-pull proceeds and inserts a fresh marker. The Re-ingest
+            #     button stays usable because the row (schedule_id +
+            #     remote_filename) survives.
+            marker_rows = self.db.execute(
+                text(
+                    "SELECT id, run_id FROM ingested_file "
+                    "WHERE ingestion_job_id = :jid"
+                ),
+                {"jid": job.id},
+            ).mappings().all()
+            affected_runs: set[uuid.UUID] = set()
+            for m in marker_rows:
+                self.db.execute(
+                    text(
+                        "UPDATE ingested_file "
+                        "SET outcome = 'DELETED', sha256 = :sha "
+                        "WHERE id = :id"
+                    ),
+                    {"sha": f"deleted-{m['id']}"[:64], "id": m["id"]},
+                )
+                if m["run_id"] is not None:
+                    affected_runs.add(m["run_id"])
+
+            # Refresh each affected run: recompute its committed-file count;
+            # once none remain COMMITTED, mark the whole run DELETED so the
+            # Ingestion Runs list reflects that its data is gone.
+            for rid in affected_runs:
+                committed = self.db.execute(
+                    text(
+                        "SELECT count(*) FROM ingested_file "
+                        "WHERE run_id = :rid AND outcome = 'COMMITTED'"
+                    ),
+                    {"rid": rid},
+                ).scalar() or 0
+                if committed == 0:
+                    self.db.execute(
+                        text(
+                            "UPDATE ingestion_run "
+                            "SET status = 'DELETED', jobs_committed = 0 "
+                            "WHERE id = :rid"
+                        ),
+                        {"rid": rid},
+                    )
+                else:
+                    self.db.execute(
+                        text(
+                            "UPDATE ingestion_run SET jobs_committed = :c "
+                            "WHERE id = :rid"
+                        ),
+                        {"c": committed, "rid": rid},
+                    )
+
+            job.status = "DELETED"
+            job.error_message = None
+
+            details: dict[str, Any] = {
+                "rows_deleted": rows_deleted,
+                "tenant_code": job.tenant_code,
+                "domain": job.domain,
+                "file_date": job.file_date.isoformat(),
+                "source_file": job.filename,
+            }
+            self._audit(
+                job_id=job.id,
+                actor_user_id=actor_id,
+                action="DELETED",
+                actor_ip=actor_ip,
+                details=details,
+            )
+
+            self.db.commit()
+            self.db.refresh(job)
+            return {"job_id": str(job.id), **details}
+        except Exception:
+            self.db.rollback()
+            raise
 
     def _insert_facts(self, job: IngestionJob) -> int:
         staged_file = self._staging_path(job)

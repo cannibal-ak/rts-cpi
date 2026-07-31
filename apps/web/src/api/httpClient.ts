@@ -492,6 +492,10 @@ export const httpClient: CpiApiClient = {
         get<IngestionRunDetail>(`/api/v1/admin/ingestion-runs/${id}`),
       cancel: (id: string) =>
         post<IngestionRun>(`/api/v1/admin/ingestion-runs/${id}/cancel`, {}),
+      deleteFileData: (ingestedFileId: string) =>
+        del<{ rows_deleted: number }>(`/api/v1/admin/ingestion-runs/files/${ingestedFileId}/data`),
+      reingestFile: (ingestedFileId: string) =>
+        post<RunNowResult>(`/api/v1/admin/ingestion-runs/files/${ingestedFileId}/reingest`, {}),
     },
     passwordManagement: {
       listUsers: () => get<AdminUserListResponse>('/api/v1/admin/password-management/users'),
