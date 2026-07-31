@@ -8,7 +8,7 @@ import {
 } from '@mui/material';
 import {
   CloudUpload, Visibility, Close, Refresh,
-  PlayArrow, CheckCircle, DeleteOutline,
+  PlayArrow, CheckCircle, DeleteOutline, DeleteForever,
 } from '@mui/icons-material';
 import { Link as RouterLink } from 'react-router-dom';
 import PageHeader from '../../components/common/PageHeader';
@@ -28,7 +28,7 @@ const TENANT_COLORS: Record<string, 'primary' | 'secondary' | 'info' | 'default'
 
 const STATUS_OPTIONS: IngestionStatus[] = [
   'STAGED', 'VALIDATING', 'VALIDATED', 'COMMITTING', 'COMMITTED',
-  'REJECTED', 'REPLACED', 'FAILED',
+  'REJECTED', 'REPLACED', 'FAILED', 'DELETED',
 ];
 
 function formatBytes(n: number): string {
@@ -47,6 +47,12 @@ interface ConflictPrompt {
 interface CancelPrompt {
   jobId: string;
   jobLabel: string;
+}
+
+interface DeletePrompt {
+  jobId: string;
+  jobLabel: string;
+  rowCount: number | null;
 }
 
 interface SnackbarState {
@@ -70,6 +76,7 @@ export default function IngestionJobsPage() {
   const [pendingActions, setPendingActions] = useState<Set<string>>(new Set());
   const [conflict, setConflict] = useState<ConflictPrompt | null>(null);
   const [cancelPrompt, setCancelPrompt] = useState<CancelPrompt | null>(null);
+  const [deletePrompt, setDeletePrompt] = useState<DeletePrompt | null>(null);
   const [snackbar, setSnackbar] = useState<SnackbarState>({ open: false, message: '', severity: 'info' });
 
   const showToast = (message: string, severity: SnackbarState['severity'] = 'info') => {
@@ -189,6 +196,25 @@ export default function IngestionJobsPage() {
     }
   };
 
+  const handleDeleteData = async (jobId: string) => {
+    markPending(jobId, true);
+    try {
+      const r = await api.ingestion.deleteData(jobId);
+      showToast(
+        `Deleted ${r.rows_deleted.toLocaleString()} rows from the database`,
+        'success'
+      );
+      await fetchJobs();
+      if (selectedJob?.id === jobId) await refreshSelected(jobId);
+    } catch (err) {
+      const e = err as Error & ApiErrorShape;
+      showToast(e.message || 'Delete failed', 'error');
+    } finally {
+      markPending(jobId, false);
+      setDeletePrompt(null);
+    }
+  };
+
   const allJobs = jobs?.items || [];
   const staged = allJobs.filter(j => j.status === 'STAGED').length;
   const validated = allJobs.filter(j => j.status === 'VALIDATED').length;
@@ -252,6 +278,29 @@ export default function IngestionJobsPage() {
             }}
           >
             Cancel
+          </Button>
+        </Tooltip>
+      );
+    }
+    if (job.status === 'COMMITTED' && job.deletable) {
+      buttons.push(
+        <Tooltip key="delete" title="Delete this file's committed rows from the database">
+          <Button
+            size="small"
+            variant="outlined"
+            color="error"
+            startIcon={<DeleteForever />}
+            onClick={(e) => {
+              e.stopPropagation();
+              setDeletePrompt({
+                jobId: job.id,
+                jobLabel: jobLabel(job),
+                rowCount: job.row_count_valid ?? job.row_count_total,
+              });
+              if (onCloseDrawer) onCloseDrawer();
+            }}
+          >
+            Delete
           </Button>
         </Tooltip>
       );
@@ -578,6 +627,41 @@ export default function IngestionJobsPage() {
             disabled={!cancelPrompt || pendingActions.has(cancelPrompt.jobId)}
           >
             Cancel job
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Delete-committed-data confirmation dialog */}
+      <Dialog open={deletePrompt !== null} onClose={() => setDeletePrompt(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Delete committed data?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This permanently deletes
+            {deletePrompt?.rowCount != null
+              ? ` the ${deletePrompt.rowCount.toLocaleString()} rows`
+              : ' the rows'}{' '}
+            this file loaded into the database. The job will be marked <strong>DELETED</strong>
+            {' '}and kept as a history record.
+          </DialogContentText>
+          {deletePrompt && (
+            <DialogContentText variant="body2" sx={{ mt: 1, fontFamily: 'monospace', fontSize: '0.85rem' }}>
+              {deletePrompt.jobLabel}
+            </DialogContentText>
+          )}
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            This cannot be undone. To restore the data you would need to re-upload and re-commit the file.
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeletePrompt(null)}>Keep</Button>
+          <Button
+            onClick={() => deletePrompt && handleDeleteData(deletePrompt.jobId)}
+            color="error"
+            variant="contained"
+            startIcon={deletePrompt && pendingActions.has(deletePrompt.jobId) ? <CircularProgress size={14} color="inherit" /> : <DeleteForever />}
+            disabled={!deletePrompt || pendingActions.has(deletePrompt.jobId)}
+          >
+            Delete data
           </Button>
         </DialogActions>
       </Dialog>

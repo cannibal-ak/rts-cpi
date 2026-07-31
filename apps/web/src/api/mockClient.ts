@@ -20,7 +20,7 @@ import type {
   IngestionRunDetail,
   IngestedFile,
   IngestionRunListQuery,
-  IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionAuditLog, IngestionPreview,
+  IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionDeleteDataResult, IngestionAuditLog, IngestionPreview,
   AdminUserListItem,
 } from '../types';
 import {
@@ -98,6 +98,7 @@ export const mockClient: CpiApiClient = {
     validate: (_id: string) => Promise.reject(new Error('Mock client does not implement ingestion.validate')) as Promise<IngestionValidationResult>,
     commit: (_id: string, _replace: boolean) => Promise.reject(new Error('Mock client does not implement ingestion.commit')) as Promise<IngestionCommitResult>,
     cancel: (_id: string) => Promise.reject(new Error('Mock client does not implement ingestion.cancel')) as Promise<IngestionJob>,
+    deleteData: (_id: string) => Promise.reject(new Error('Mock client does not implement ingestion.deleteData')) as Promise<IngestionDeleteDataResult>,
     getAudit: (id: string) => delay({ job_id: id, entries: [] } as IngestionAuditLog),
     getPreview: (id: string) => delay({ job_id: id, sample_valid: [], sample_rejected: [] } as IngestionPreview),
   },

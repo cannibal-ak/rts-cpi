@@ -439,3 +439,77 @@ def test_commit_velocity_dep_date_is_not_overridden_by_filename(
     dep_date, report_date = rows[0]
     assert dep_date == dt.date(2026, 4, 15)
     assert report_date == dt.date(2026, 4, 1)
+
+
+# ── delete_committed_file ──────────────────────────────────────
+
+
+def test_delete_committed_file_removes_facts_and_marks_deleted(
+    db_session, admin_jwt_payload, staging_dir
+):
+    """A manually-uploaded COMMITTED job's fact rows are hard-deleted, the
+    job flips to DELETED, and a DELETED audit entry is written."""
+    svc = _make_service(db_session, staging_dir)
+    r = svc.upload_file(
+        _pricing_pw_bytes(rows=3), "PW_150120.xlsx", admin_jwt_payload
+    )
+    svc.validate_job(r.job.id, admin_jwt_payload)
+    cr = svc.commit_job(r.job.id, admin_jwt_payload)
+
+    before = db_session.execute(
+        text(
+            "SELECT COUNT(*) FROM airline_cpi_snapshot "
+            "WHERE source_file = :sf AND report_date = :rd"
+        ),
+        {"sf": "PW_150120.xlsx", "rd": cr.job.file_date},
+    ).scalar()
+    assert before == 3
+
+    result = svc.delete_committed_file(r.job.id, admin_jwt_payload)
+    assert result["rows_deleted"] == 3
+
+    after = db_session.execute(
+        text(
+            "SELECT COUNT(*) FROM airline_cpi_snapshot "
+            "WHERE source_file = :sf AND report_date = :rd"
+        ),
+        {"sf": "PW_150120.xlsx", "rd": cr.job.file_date},
+    ).scalar()
+    assert after == 0
+
+    db_session.refresh(r.job)
+    assert r.job.status == "DELETED"
+    deleted_audits = (
+        db_session.query(IngestionAuditLog)
+        .filter(
+            IngestionAuditLog.job_id == r.job.id,
+            IngestionAuditLog.action == "DELETED",
+        )
+        .count()
+    )
+    assert deleted_audits == 1
+
+
+def test_delete_committed_file_rejects_non_committed_job(
+    db_session, admin_jwt_payload, staging_dir
+):
+    """Only COMMITTED jobs are deletable; a STAGED job raises."""
+    svc = _make_service(db_session, staging_dir)
+    r = svc.upload_file(
+        _pricing_pw_bytes(), "PW_150120.xlsx", admin_jwt_payload
+    )
+    with pytest.raises(IngestionStateError):
+        svc.delete_committed_file(r.job.id, admin_jwt_payload)
+
+
+def test_delete_committed_file_rejects_non_admin(
+    db_session, admin_jwt_payload, jy_jwt_payload, staging_dir
+):
+    svc = _make_service(db_session, staging_dir)
+    r = svc.upload_file(
+        _pricing_pw_bytes(), "PW_150120.xlsx", admin_jwt_payload
+    )
+    svc.validate_job(r.job.id, admin_jwt_payload)
+    svc.commit_job(r.job.id, admin_jwt_payload)
+    with pytest.raises(IngestionAuthError):
+        svc.delete_committed_file(r.job.id, jy_jwt_payload)

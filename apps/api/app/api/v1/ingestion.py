@@ -8,6 +8,7 @@ Endpoints:
 * GET    /api/v1/ingestion/jobs/{id}/preview       sample rows
 * POST   /api/v1/ingestion/jobs/{id}/commit        commit (replace_existing)
 * DELETE /api/v1/ingestion/jobs/{id}               cancel staged
+* DELETE /api/v1/ingestion/jobs/{id}/data          delete committed data
 * GET    /api/v1/ingestion/jobs/{id}/audit         audit log
 
 All endpoints require a valid JWT (handled by ``enforce_password_change``
@@ -51,6 +52,7 @@ from app.ingestion.service import (
     IngestionService,
 )
 from app.models.ingestion import IngestionAuditLog, IngestionJob
+from app.models.sftp import IngestedFile
 
 
 # ── Configuration (env-overridable) ───────────────────────────────
@@ -95,6 +97,12 @@ class IngestionJobOut(BaseModel):
     committed_at: Optional[datetime] = None
     replaced_by_job_id: Optional[uuid.UUID] = None
     error_message: Optional[str] = None
+    # True only for a COMMITTED job that was uploaded manually (no SFTP
+    # ``ingested_file`` bridge row). Such a job's inserted fact rows can be
+    # deleted from this page via ``DELETE /jobs/{id}/data``. SFTP-pulled jobs
+    # are managed from the Admin → Ingestion Runs page instead. Computed by
+    # the route (not an ORM column), so it defaults to False.
+    deletable: bool = False
 
 
 class UploadFileResult(BaseModel):
@@ -136,6 +144,11 @@ class CommitResponse(BaseModel):
     job: IngestionJobOut
     rows_inserted: int
     replaced_job_id: Optional[uuid.UUID] = None
+
+
+class DeleteDataResponse(BaseModel):
+    job: IngestionJobOut
+    rows_deleted: int
 
 
 class ValidationResponse(BaseModel):
@@ -205,6 +218,46 @@ def _http_error_for(exc: IngestionError) -> HTTPException:
             "details": details or None,
         },
     )
+
+
+def _sftp_bridged_ids(
+    db: Session, job_ids: list[uuid.UUID]
+) -> set[uuid.UUID]:
+    """Return the subset of ``job_ids`` that have an SFTP ``ingested_file``
+    bridge row (i.e. were pulled via SFTP, not uploaded manually)."""
+    if not job_ids:
+        return set()
+    rows = (
+        db.query(IngestedFile.ingestion_job_id)
+        .filter(IngestedFile.ingestion_job_id.in_(job_ids))
+        .distinct()
+        .all()
+    )
+    return {r[0] for r in rows if r[0] is not None}
+
+
+def _job_out(job: IngestionJob, *, deletable: bool = False) -> IngestionJobOut:
+    """Serialise a job, stamping the computed ``deletable`` flag."""
+    out = IngestionJobOut.model_validate(job)
+    out.deletable = deletable
+    return out
+
+
+def _jobs_out(db: Session, jobs: list[IngestionJob]) -> list[IngestionJobOut]:
+    """Serialise a list of jobs, computing ``deletable`` for each.
+
+    A job is deletable when it is COMMITTED and has no SFTP bridge row —
+    resolved with a single bulk query over the COMMITTED ids.
+    """
+    committed_ids = [j.id for j in jobs if j.status == "COMMITTED"]
+    bridged = _sftp_bridged_ids(db, committed_ids)
+    return [
+        _job_out(
+            j,
+            deletable=(j.status == "COMMITTED" and j.id not in bridged),
+        )
+        for j in jobs
+    ]
 
 
 def _client_ip(request: Request) -> Optional[str]:
@@ -348,7 +401,7 @@ def list_jobs(
         .all()
     )
     return PaginatedJobs(
-        items=[IngestionJobOut.model_validate(r) for r in rows],
+        items=_jobs_out(db, rows),
         page_info=PageInfo(
             total=total, page=page, page_size=page_size, pages=pages
         ),
@@ -372,7 +425,7 @@ def get_job(job_id: uuid.UUID, db: Session = Depends(get_db)) -> IngestionJobOut
                 "message": f"No ingestion job with id {job_id}",
             },
         )
-    return IngestionJobOut.model_validate(job)
+    return _jobs_out(db, [job])[0]
 
 
 @router.post(
@@ -523,6 +576,59 @@ def cancel_job(
     except IngestionError as exc:
         raise _http_error_for(exc)
     return IngestionJobOut.model_validate(job)
+
+
+@router.delete(
+    "/jobs/{job_id}/data",
+    response_model=DeleteDataResponse,
+    responses={
+        403: {"model": ErrorResponse},
+        404: {"model": ErrorResponse},
+        409: {"model": ErrorResponse},
+    },
+    dependencies=[Depends(RequirePlatformAdmin())],
+    summary="Delete a manually-uploaded committed job's inserted fact rows",
+)
+def delete_job_data(
+    job_id: uuid.UUID,
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> DeleteDataResponse:
+    """Hard-delete the fact rows a COMMITTED, manually-uploaded file loaded.
+
+    Only jobs uploaded through this page are deletable here. A job that was
+    pulled via SFTP (has an ``ingested_file`` bridge row) is managed from the
+    Admin → Ingestion Runs page instead, and is rejected with 409. The job
+    row itself is kept as ``DELETED`` history with an audit entry.
+    """
+    # Manual-only guard: reject SFTP-pulled jobs before touching any data.
+    if _sftp_bridged_ids(db, [job_id]):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "ingestion_sftp_managed",
+                "message": (
+                    "This file was pulled via SFTP. Delete its data from "
+                    "the Admin → Ingestion Runs page."
+                ),
+                "details": None,
+            },
+        )
+
+    svc = _service(db)
+    try:
+        result = svc.delete_committed_file(
+            job_id, current_user, actor_ip=_client_ip(request)
+        )
+    except IngestionError as exc:
+        raise _http_error_for(exc)
+
+    job = db.query(IngestionJob).filter(IngestionJob.id == job_id).first()
+    return DeleteDataResponse(
+        job=_job_out(job, deletable=False),
+        rows_deleted=int(result.get("rows_deleted", 0)),
+    )
 
 
 @router.get(

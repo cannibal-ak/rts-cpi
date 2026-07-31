@@ -15,7 +15,7 @@ import type {
   AdminUserListResponse, AdminResetTokenListResponse,
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
   PlatformHealthResponse, TenantSummaryResponse,
-  IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionAuditLog, IngestionPreview,
+  IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionDeleteDataResult, IngestionAuditLog, IngestionPreview,
 } from '../types';
 import type {
   SmtpConfigRead, SmtpConfigUpdate, SmtpTestRequest, SmtpTestResponse,
@@ -410,6 +410,8 @@ export const httpClient: CpiApiClient = {
       post<IngestionCommitResult>(`/api/v1/ingestion/jobs/${id}/commit`, { replace_existing: replaceExisting }),
     cancel: (id: string) =>
       del<IngestionJob>(`/api/v1/ingestion/jobs/${id}`),
+    deleteData: (id: string) =>
+      del<IngestionDeleteDataResult>(`/api/v1/ingestion/jobs/${id}/data`),
     getAudit: (id: string) =>
       get<IngestionAuditLog>(`/api/v1/ingestion/jobs/${id}/audit`),
     getPreview: (id: string) =>

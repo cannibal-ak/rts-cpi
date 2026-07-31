@@ -29,6 +29,7 @@ const statusColors: Record<string, 'success' | 'warning' | 'error' | 'info' | 'd
   REJECTED: 'warning',
   REPLACED: 'default',
   FAILED: 'error',
+  DELETED: 'error',
 };
 
 interface StatusChipProps {

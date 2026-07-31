@@ -568,7 +568,8 @@ export type IngestionStatus =
   | 'COMMITTED'
   | 'REJECTED'
   | 'REPLACED'
-  | 'FAILED';
+  | 'FAILED'
+  | 'DELETED';
 
 export type IngestionDomain = 'AIRLINE' | 'VELOCITY' | 'CFL';
 export type IngestionMode = 'STRICT' | 'LENIENT';
@@ -603,6 +604,9 @@ export interface IngestionJob {
   committed_at: string | null;
   replaced_by_job_id: string | null;
   error_message: string | null;
+  /** True only for a COMMITTED, manually-uploaded job whose inserted fact
+   *  rows can be deleted from the Ingestion Jobs page. Computed by the API. */
+  deletable?: boolean;
 }
 
 export type IngestionMode = 'STRICT' | 'LENIENT';
@@ -728,6 +732,11 @@ export interface IngestionCommitResult {
   job: IngestionJob;
   rows_inserted: number;
   replaced_job_id: string | null;
+}
+
+export interface IngestionDeleteDataResult {
+  job: IngestionJob;
+  rows_deleted: number;
 }
 
 export interface IngestionAuditEntry {
