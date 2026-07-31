@@ -366,3 +366,76 @@ def test_cancel_job_rejects_non_admin(
     )
     with pytest.raises(IngestionAuthError):
         svc.cancel_job(r.job.id, jy_jwt_payload)
+
+
+# ── cap_date sourced from the filename (mis-stamped CapDate guard) ──────
+
+
+def test_commit_stamps_cap_date_from_filename_not_in_file_capdate(
+    db_session, admin_jwt_payload, staging_dir
+):
+    """Regression guard for the WM_290726 incident: the recorded ``cap_date``
+    must come from the FILENAME, never the spreadsheet's in-file ``CapDate``
+    column. ``PRICING_CSV_ROW`` carries an in-file CapDate of ``01Apr26``; if
+    we name the file for the 2nd (``PW_020426.xlsx``) the rows must land under
+    ``cap_date = 2026-04-02`` (the filename), not ``2026-04-01`` (the cell)."""
+    import datetime as dt
+
+    svc = _make_service(db_session, staging_dir)
+    r = svc.upload_file(
+        _pricing_pw_bytes(rows=3), "PW_020426.xlsx", admin_jwt_payload
+    )
+    assert r.job.file_date == dt.date(2026, 4, 2)
+
+    vr = svc.validate_job(r.job.id, admin_jwt_payload)
+    assert vr.row_count_valid == 3
+
+    cr = svc.commit_job(r.job.id, admin_jwt_payload, replace_existing=True)
+    assert cr.rows_inserted == 3
+
+    rows = db_session.execute(
+        text(
+            "SELECT DISTINCT cap_date, report_date FROM airline_cpi_snapshot "
+            "WHERE source_file = :sf AND report_date = :rd"
+        ),
+        {"sf": "PW_020426.xlsx", "rd": cr.job.file_date},
+    ).all()
+    assert len(rows) == 1
+    cap_date, report_date = rows[0]
+    assert cap_date == dt.date(2026, 4, 2)
+    assert report_date == dt.date(2026, 4, 2)
+    assert cap_date == report_date
+
+
+def test_commit_velocity_dep_date_is_not_overridden_by_filename(
+    db_session, admin_jwt_payload, staging_dir
+):
+    """The filename-sourced capture-date change must NOT touch VELOCITY, which
+    keys on ``DepDate`` — a future departure date that legitimately differs
+    from the filename. File named for 01Apr26 but DepDate 15Apr26 -> the stored
+    ``dep_date`` must stay 2026-04-15."""
+    import datetime as dt
+
+    velocity = (
+        "DepDate,DepTime,CityPair,CapDate\n"
+        "4/15/2026,09:00,LHRJFK,4/1/2026\n"
+    ).encode("utf-8")
+    svc = _make_service(db_session, staging_dir)
+    r = svc.upload_file(velocity, "JY_VL_010426.csv", admin_jwt_payload)
+    assert r.job.file_date == dt.date(2026, 4, 1)
+
+    svc.validate_job(r.job.id, admin_jwt_payload)
+    cr = svc.commit_job(r.job.id, admin_jwt_payload)
+    assert cr.rows_inserted == 1
+
+    rows = db_session.execute(
+        text(
+            "SELECT DISTINCT dep_date, report_date FROM velocity_snapshot "
+            "WHERE source_file = :sf"
+        ),
+        {"sf": "JY_VL_010426.csv"},
+    ).all()
+    assert len(rows) == 1
+    dep_date, report_date = rows[0]
+    assert dep_date == dt.date(2026, 4, 15)
+    assert report_date == dt.date(2026, 4, 1)

@@ -277,6 +277,7 @@ class IngestionService:
         total = 0
         valid = 0
         rejected = 0
+        date_mismatch = 0
         rejection_reasons: list[dict[str, str]] = []
 
         date_field = self._date_field_for(job.domain)
@@ -312,7 +313,26 @@ class IngestionService:
                         }
                     )
                 continue
+            # Non-blocking observability: the recorded capture date will be
+            # taken from the filename (job.file_date) at commit; note when the
+            # in-file capture date disagrees so a mis-generating upstream feed
+            # can be flagged. VELOCITY's DepDate legitimately differs — skip it.
+            if job.domain != "VELOCITY" and parsed_dt != job.file_date:
+                date_mismatch += 1
             valid += 1
+
+        if date_mismatch:
+            logging.getLogger("uvicorn.error").warning(
+                "ingestion: %s (%s) — %d of %d rows carry an in-file %s "
+                "different from the filename date %s; the filename date is "
+                "recorded",
+                job.filename,
+                job.domain,
+                date_mismatch,
+                total,
+                date_field,
+                job.file_date.isoformat(),
+            )
 
         summary = {
             "total": total,
@@ -843,7 +863,11 @@ class IngestionService:
             params = {
                 "id": uuid.uuid4(),
                 "tid": job.tenant_id,
-                "cd": cap_date,
+                # cap_date recorded from the FILENAME (job.file_date),
+                # never the in-file CapDate column, so a mis-stamped
+                # source file cannot misfile rows under the wrong date.
+                # (cap_date is still parsed above only to skip empty rows.)
+                "cd": job.file_date,
                 "ct": parse_time(row.get("CapTime")) or datetime.now().time(),
                 "tt": (row.get("TripType") or "RT")[:4],
                 "ra": (row.get("RefAL") or job.tenant_code)[:3],
@@ -1059,7 +1083,9 @@ class IngestionService:
             params = {
                 "id": uuid.uuid4(),
                 "tid": job.tenant_id,
-                "cd": cap_date,
+                # cap_date recorded from the FILENAME (job.file_date),
+                # never the in-file CaptureDate column — see legacy insert.
+                "cd": job.file_date,
                 "ct": parse_time(row.get("CaptureTime")) or datetime.now().time(),
                 "tt": "OW",
                 "ra": host_al or job.tenant_code[:3],
@@ -1235,7 +1261,9 @@ class IngestionService:
                 "id": uuid.uuid4(),
                 "tid": job.tenant_id,
                 "owner": job.tenant_code,
-                "cd": cap_date,
+                # cap_date recorded from the FILENAME (job.file_date),
+                # never the in-file CapDate column — see legacy insert.
+                "cd": job.file_date,
                 "ct": parse_time(row.get("CapTime")) or datetime.now().time(),
                 "tt": (row.get("TripType") or "ONE_WAY")[:16],
                 "src": (row.get("Source") or job.tenant_code)[:64],
