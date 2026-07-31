@@ -37,7 +37,7 @@ from fastapi import (
     UploadFile,
 )
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import desc
+from sqlalchemy import desc, exists
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -385,6 +385,12 @@ def list_jobs(
     page_size: int = Query(50, ge=1, le=200),
 ) -> PaginatedJobs:
     q = db.query(IngestionJob)
+    # Ingestion Jobs tracks MANUAL uploads only; SFTP-pulled files are
+    # shown in the Ingestion Runs view. A job is SFTP-originated iff an
+    # ingested_file bridge row references it, so exclude those here.
+    q = q.filter(
+        ~exists().where(IngestedFile.ingestion_job_id == IngestionJob.id)
+    )
     if status:
         q = q.filter(IngestionJob.status == status.upper())
     if tenant_code:
