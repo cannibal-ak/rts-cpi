@@ -23,8 +23,8 @@ SLICE_IDS = [43, 46, 49, 50, 51, 52, 55]
 # Substitutions on sqlExpression strings. MAX and COUNT are deliberately NOT
 # matched. The `fare` column is the unioned ref+comp column from dataset 13.
 SUBS = [
-    (re.compile(r"\bAVG\(\s*fare\s*\)"), "AVG(NULLIF(fare, 0))"),
-    (re.compile(r"\bMIN\(\s*fare\s*\)"), "MIN(NULLIF(fare, 0))"),
+    (re.compile(r"\bAVG\(\s*fare\s*\)"), "COALESCE(AVG(COALESCE(fare, 0)), 0)"),
+    (re.compile(r"\bMIN\(\s*fare\s*\)"), "COALESCE(MIN(COALESCE(fare, 0)), 0)"),
 ]
 
 SAFE_GUARDS_FORBID = [

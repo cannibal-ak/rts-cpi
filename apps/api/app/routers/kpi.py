@@ -111,12 +111,12 @@ def _summary_sql_jy(view: str) -> dict[str, str]:
             WHERE cap_date = :cap_date
         """,
         "jy_avg_fare": f"""
-            SELECT ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 2)
+            SELECT COALESCE(ROUND(AVG(COALESCE(ref_tot_fare, 0))::numeric, 2), 0)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
         "competitors_avg_fare": f"""
-            SELECT ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 2)
+            SELECT COALESCE(ROUND(AVG(COALESCE(comp_tot_fare, 0))::numeric, 2), 0)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
@@ -184,9 +184,9 @@ def _detail_jy_jy_fare(db: Session, view: str, cap_date: str, currency: str | No
     rows = db.execute(text(f"""
         SELECT ref_org || '-' || ref_dst AS route,
                comp_al,
-               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS jy_fare,
-               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS comp_fare,
-               ROUND((AVG(NULLIF(ref_tot_fare, 0)) - AVG(NULLIF(comp_tot_fare, 0)))::numeric, 0) AS difference
+               COALESCE(ROUND(AVG(COALESCE(ref_tot_fare, 0))::numeric, 0), 0) AS jy_fare,
+               COALESCE(ROUND(AVG(COALESCE(comp_tot_fare, 0))::numeric, 0), 0) AS comp_fare,
+               COALESCE(ROUND((AVG(COALESCE(ref_tot_fare, 0)) - AVG(COALESCE(comp_tot_fare, 0)))::numeric, 0), 0) AS difference
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY ref_org, ref_dst, comp_al
@@ -196,8 +196,8 @@ def _detail_jy_jy_fare(db: Session, view: str, cap_date: str, currency: str | No
     return {
         "columns": ["#", "Route", "Competitor", "JY Fare", "Comp Fare", "Difference"],
         "rows": [
-            {"rank": i, "route": r[0], "comp_al": r[1], "jy_fare": _n_i(r[2]),
-             "comp_fare": _n_i(r[3]), "difference": _n_i(r[4])}
+            {"rank": i, "route": r[0], "comp_al": r[1], "jy_fare": _i(r[2]),
+             "comp_fare": _i(r[3]), "difference": _i(r[4])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -206,9 +206,9 @@ def _detail_jy_jy_fare(db: Session, view: str, cap_date: str, currency: str | No
 def _detail_jy_comp_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT comp_al,
-               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS avg_fare,
-               ROUND(MIN(NULLIF(comp_tot_fare, 0))::numeric, 0) AS min_fare,
-               ROUND(MAX(comp_tot_fare)::numeric, 0) AS max_fare,
+               COALESCE(ROUND(AVG(COALESCE(comp_tot_fare, 0))::numeric, 0), 0) AS avg_fare,
+               COALESCE(ROUND(MIN(COALESCE(comp_tot_fare, 0))::numeric, 0), 0) AS min_fare,
+               COALESCE(ROUND(MAX(COALESCE(comp_tot_fare, 0))::numeric, 0), 0) AS max_fare,
                COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
         FROM {view}
         WHERE cap_date = :cap_date
@@ -218,24 +218,18 @@ def _detail_jy_comp_fare(db: Session, view: str, cap_date: str, currency: str | 
     return {
         "columns": ["#", "Competitor", "Avg Fare", "Min Fare", "Max Fare", "Routes"],
         "rows": [
-            {"rank": i, "comp_al": r[0], "avg_fare": _n_i(r[1]),
-             "min_fare": _n_i(r[2]), "max_fare": _i(r[3]), "routes": _i(r[4])}
+            {"rank": i, "comp_al": r[0], "avg_fare": _i(r[1]),
+             "min_fare": _i(r[2]), "max_fare": _i(r[3]), "routes": _i(r[4])}
             for i, r in enumerate(rows, start=1)
         ],
     }
 
 
 def _detail_jy_comp_fare_by_route(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
-    # Per-route average competitor fare. Source rows are one per route×comp_al
-    # (same grouping/order as _detail_jy_jy_fare so route first-occurrence order
-    # matches the JY Avg Fare table); each route's per-competitor comp_fare
-    # values are then averaged with equal weight per competitor. NULL comp_fare
-    # values are excluded from the mean and routes with no valid competitor fare
-    # are dropped entirely.
     rows = db.execute(text(f"""
         SELECT ref_org || '-' || ref_dst AS route,
-               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS comp_fare,
-               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS jy_fare
+               COALESCE(ROUND(AVG(COALESCE(comp_tot_fare, 0))::numeric, 0), 0) AS comp_fare,
+               COALESCE(ROUND(AVG(COALESCE(ref_tot_fare, 0))::numeric, 0), 0) AS jy_fare
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY ref_org, ref_dst, comp_al
@@ -304,12 +298,12 @@ def _summary_sql_pw(view: str) -> dict[str, str]:
             WHERE cap_date = :cap_date
         """,
         "pw_avg_fare": f"""
-            SELECT ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 2)
+            SELECT COALESCE(ROUND(AVG(COALESCE(ref_tot_fare, 0))::numeric, 2), 0)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
         "competitors_avg_fare": f"""
-            SELECT ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 2)
+            SELECT COALESCE(ROUND(AVG(COALESCE(comp_tot_fare, 0))::numeric, 2), 0)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
