@@ -14,12 +14,17 @@ Why UUIDs are stored here instead of fetched from the Superset API:
   Superset container and stored here as the source of truth.
 """
 
+import asyncio
 import httpx
+import json
 import logging
 import re
+import time
+import prison
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.core.config import settings
@@ -32,6 +37,29 @@ logger = logging.getLogger(__name__)
 _log = logging.getLogger("uvicorn.error")
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# Superset dataset name -> id map. Provisioned out-of-band and effectively
+# static, but re-resolved periodically so a re-provisioned dataset is picked up.
+_DATASET_MAP_TTL_SECONDS = 300.0
+
+# Distinct-value lists backing the external filter bar's dropdowns. Each entry
+# costs a real query against a virtual dataset, and one page load asks for every
+# filter at once, so they are cached briefly. Keyed by (dataset_id, column).
+_FILTER_VALUES_TTL_SECONDS = 300.0
+_filter_values_cache: dict[tuple[int, str], tuple[float, list[str]]] = {}
+
+
+def _sort_filter_values(values: list[str]) -> list[str]:
+    """Order dropdown options the way a reader expects.
+
+    Superset returns them in query order, which for a numeric column like
+    ``days_left`` means 42, 29, 4. Sort numerically when every value is a
+    number, otherwise alphabetically.
+    """
+    try:
+        return sorted(values, key=float)
+    except (TypeError, ValueError):
+        return sorted(values)
 
 
 def _validate_cap_date(value: str, field: str) -> str:
@@ -187,6 +215,8 @@ class SupersetClient:
         self.password = settings.superset_admin_pass
         self._jwt_token: str | None = None
         self._session_cookies: dict | None = None
+        self._dataset_map_cache: dict[str, int] | None = None
+        self._dataset_map_at: float = 0.0
 
     # ── Auth helpers ──
 
@@ -236,16 +266,127 @@ class SupersetClient:
         """
         if not table_names:
             return []
+
+        # The name->id map is stable (datasets are provisioned out-of-band), but
+        # this listing is issued on EVERY guest-token request — twice, once per
+        # RLS group — and the SDK re-fetches a guest token on a refresh timer.
+        # A short TTL keeps it correct if a dataset is re-provisioned while
+        # removing it from the hot path.
+        now = time.monotonic()
+        if self._dataset_map_cache and now - self._dataset_map_at < _DATASET_MAP_TTL_SECONDS:
+            name_to_id = self._dataset_map_cache
+        else:
+            cookies = await self._session_cookies_safe()
+            url = f"{self.base_url}/api/v1/dataset/?q=(page:0,page_size:1000)"
+            async with httpx.AsyncClient(timeout=10.0) as c:
+                resp = await c.get(url, cookies=cookies)
+                if resp.status_code == 401:
+                    await self._login_session()
+                    resp = await c.get(url, cookies=self._session_cookies)
+                resp.raise_for_status()
+                all_ds = resp.json().get("result", [])
+            name_to_id = {d["table_name"]: d["id"] for d in all_ds if d.get("table_name")}
+            self._dataset_map_cache = name_to_id
+            self._dataset_map_at = now
+
+        return [name_to_id[n] for n in table_names if n in name_to_id]
+
+    # ── Generic authenticated calls ──
+
+    async def _session_get(self, path: str, timeout: float = 15.0) -> dict:
+        """GET a Superset API path with admin session cookies, re-auth once on 401."""
         cookies = await self._session_cookies_safe()
-        url = f"{self.base_url}/api/v1/dataset/?q=(page:0,page_size:1000)"
-        async with httpx.AsyncClient(timeout=10.0) as c:
-            resp = await c.get(url, cookies=cookies)
+        async with httpx.AsyncClient(timeout=timeout) as c:
+            resp = await c.get(f"{self.base_url}{path}", cookies=cookies)
             if resp.status_code == 401:
                 await self._login_session()
-                resp = await c.get(url, cookies=self._session_cookies)
+                resp = await c.get(f"{self.base_url}{path}", cookies=self._session_cookies)
             resp.raise_for_status()
-            all_ds = resp.json().get("result", [])
-            return [d["id"] for d in all_ds if d.get("table_name") in table_names]
+            return resp.json()
+
+    async def _session_post(self, path: str, body: dict, timeout: float = 30.0) -> dict:
+        """POST to a Superset API path with admin session cookies + CSRF token.
+
+        Superset guards POST routes with CSRF. ``WTF_CSRF_ENABLED`` is False in
+        the dev config but NOT in production, so code written against dev alone
+        would silently skip a step prod requires — we always do the full dance
+        (this mirrors the prod ``mint_form_data_key`` flow). JWT bearer auth
+        403s on these routes, hence session cookies. The CSRF fetch can rotate
+        the session cookie, so carry the rotated jar into the POST.
+        """
+        cookies = await self._session_cookies_safe()
+        async with httpx.AsyncClient(timeout=timeout) as c:
+            csrf_resp = await c.get(
+                f"{self.base_url}/api/v1/security/csrf_token/",
+                cookies=cookies, headers={"Referer": self.base_url},
+            )
+            if csrf_resp.status_code == 401:
+                await self._login_session()
+                cookies = self._session_cookies  # type: ignore
+                csrf_resp = await c.get(
+                    f"{self.base_url}/api/v1/security/csrf_token/",
+                    cookies=cookies, headers={"Referer": self.base_url},
+                )
+            csrf_resp.raise_for_status()
+            csrf = csrf_resp.json()["result"]
+            merged = {**cookies, **dict(csrf_resp.cookies)}
+            resp = await c.post(
+                f"{self.base_url}{path}", json=body, cookies=merged,
+                headers={"X-CSRFToken": csrf, "Referer": self.base_url},
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    # ── Native filter introspection (for the out-of-iframe filter bar) ──
+
+    async def get_native_filters(self, superset_id: int) -> list[dict]:
+        """Return a dashboard's ``native_filter_configuration``, or [] if absent.
+
+        This is the dashboard's OWN filter definition — the same one that draws
+        Superset's left-hand filter panel. Reading it (rather than hardcoding a
+        filter list) is what keeps an external filter bar 1:1 with the dashboard
+        when filters are added or retargeted in Superset.
+        """
+        data = await self._session_get(f"/api/v1/dashboard/{superset_id}")
+        raw = (data.get("result") or {}).get("json_metadata") or "{}"
+        try:
+            meta = json.loads(raw)
+        except json.JSONDecodeError:
+            _log.error(f"[filter-config] dashboard {superset_id} has unparseable json_metadata")
+            return []
+        return meta.get("native_filter_configuration") or []
+
+    async def fetch_column_values(
+        self, dataset_id: int, column: str, row_limit: int = 1000,
+    ) -> list[str]:
+        """Distinct values for a dataset column, via Superset's own chart-data API.
+
+        Superset's native filter populates its dropdown the same way, so the
+        options rendered outside the iframe match the ones inside it. Going
+        through Superset (rather than querying PostgreSQL) is also what lets
+        this work for the WM datasets, which are *virtual* — their SQL lives
+        only in Superset and has no view to select from.
+        """
+        payload = {
+            "datasource": {"id": dataset_id, "type": "table"},
+            "queries": [{
+                "columns": [column],
+                "metrics": [],
+                "filters": [],
+                "orderby": [],
+                "annotation_layers": [],
+                "row_limit": row_limit,
+                "extras": {"having": "", "where": ""},
+            }],
+            "result_format": "json",
+            "result_type": "results",
+        }
+        data = await self._session_post("/api/v1/chart/data", payload)
+        rows = (data.get("result") or [{}])[0].get("data") or []
+        values = [r.get(column) for r in rows]
+        return _sort_filter_values(
+            [str(v) for v in values if v is not None and str(v) != ""]
+        )
 
     # ── Guest token generation ──
 
@@ -632,3 +773,190 @@ def list_available_dates(
     dates = [d for d in dates if d]
 
     return {"dashboard_id": dashboard_id, "dates": dates}
+
+
+# ── External native-filter bar ───────────────────────────────────────────────
+#
+# These two endpoints let the React app render a dashboard's native filters
+# ABOVE the embedded iframe instead of inside Superset's left-hand panel.
+#
+# Why not RLS: the guest-token RLS path scopes by injecting SQL, which cannot
+# express a filter's per-chart *scope*. On the WM dashboard that scope is the
+# whole point — Price Position/Pricing Action/Cheapest Competitor apply to two
+# charts, the velocity filters to one, Route to all ten. Native filters already
+# encode that, so we drive them rather than reimplement them.
+#
+# How it reaches Superset: `filter-params` returns a rison-encoded dataMask that
+# the caller passes to the Embedded SDK as `urlParams.native_filters`. Superset's
+# dashboard bootstrap reads that URL param and hydrates its filter state from it.
+# NOTE it does so exactly ONCE, on mount — so applying new values requires
+# re-embedding the iframe. That is a property of Superset, not of this code, and
+# it is why the UI batches changes behind an Apply button.
+
+
+def _require_tenant_dashboard(
+    dashboard_id: str, user_identity: str, user_roles: list[str],
+) -> dict:
+    """Resolve a dashboard from the registry and enforce tenant access.
+
+    Same three checks the guest-token and charts endpoints make: known
+    dashboard, not a platform admin (they administer tenants rather than
+    consume their dashboards), and the caller's tenant owns this dashboard.
+    """
+    dash = DASHBOARDS.get(dashboard_id)
+    if not dash:
+        raise HTTPException(404, detail={
+            "message": f"Unknown dashboard_id '{dashboard_id}'. Valid IDs: {list(DASHBOARDS.keys())}",
+        })
+    if is_platform_admin(user_identity, user_roles):
+        raise HTTPException(403, detail={
+            "message": "Platform administrators do not have access to tenant dashboards. Sign in as the tenant to view its dashboard.",
+        })
+    if user_identity != dash["tenant"]:
+        raise HTTPException(403, detail={
+            "message": f"Access denied: '{dash['title']}' is restricted to {dash['tenant']} users.",
+        })
+    return dash
+
+
+def _filter_target(f: dict) -> tuple[Optional[int], Optional[str]]:
+    """Extract (dataset_id, column_name) from a native filter's first target."""
+    targets = f.get("targets") or []
+    if not targets:
+        return None, None
+    t = targets[0] or {}
+    return t.get("datasetId"), (t.get("column") or {}).get("name")
+
+
+async def _column_values_cached(dataset_id: int, column: str) -> list[str]:
+    key = (dataset_id, column)
+    hit = _filter_values_cache.get(key)
+    now = time.monotonic()
+    if hit and now - hit[0] < _FILTER_VALUES_TTL_SECONDS:
+        return hit[1]
+    values = await superset_client.fetch_column_values(dataset_id, column)
+    _filter_values_cache[key] = (now, values)
+    return values
+
+
+@router.get("/dashboards/{dashboard_id}/filter-config")
+async def get_dashboard_filter_config(
+    dashboard_id: str,
+    user_identity: str = Depends(get_user_identity),
+    user_roles: list[str] = Depends(get_user_roles),
+):
+    """Describe a dashboard's native filters, with their selectable values.
+
+    Returns one entry per ``filter_select`` native filter so the app can render
+    the dashboard's real filters without hardcoding either the filter list or
+    the option lists. Other filter types (time range, numerical range) are
+    skipped — they need different controls and no WM filter uses them today.
+    """
+    dash = _require_tenant_dashboard(dashboard_id, user_identity, user_roles)
+
+    try:
+        raw_filters = await superset_client.get_native_filters(dash["superset_id"])
+    except Exception as e:
+        _log.error(f"[filter-config] could not read dashboard {dash['superset_id']}: {e}")
+        raise HTTPException(502, detail={
+            "message": f"Could not read filter configuration from Superset: {e}",
+        })
+
+    selectable = []
+    for f in raw_filters:
+        if f.get("filterType") != "filter_select":
+            continue
+        ds_id, column = _filter_target(f)
+        if not ds_id or not column:
+            _log.error(f"[filter-config] filter {f.get('id')} has no usable target; skipping")
+            continue
+        selectable.append((f, ds_id, column))
+
+    # One query per filter; issue them concurrently so a 10-filter dashboard
+    # costs one round of latency rather than ten.
+    results = await asyncio.gather(
+        *(_column_values_cached(ds_id, col) for _, ds_id, col in selectable),
+        return_exceptions=True,
+    )
+
+    out: list[dict] = []
+    for (f, ds_id, column), values in zip(selectable, results):
+        if isinstance(values, BaseException):
+            # A filter whose values can't be loaded is still worth showing —
+            # it renders empty and disabled rather than vanishing silently.
+            _log.error(f"[filter-config] values failed for {f.get('id')} ({ds_id}.{column}): {values}")
+            values = []
+        control = f.get("controlValues") or {}
+        out.append({
+            "id": f["id"],
+            "field": column,
+            "label": f.get("name") or column,
+            "description": f.get("description") or None,
+            "dataset_id": ds_id,
+            "multi_select": bool(control.get("multiSelect", True)),
+            "values": values,
+        })
+
+    return {"dashboard_id": dashboard_id, "filters": out}
+
+
+class FilterParamsRequest(BaseModel):
+    """Selected values per native filter id, e.g. {"NATIVE_FILTER-Route": ["ANU → SLU"]}."""
+
+    selections: Dict[str, List[str]] = Field(default_factory=dict)
+
+
+@router.post("/dashboards/{dashboard_id}/filter-params")
+async def build_dashboard_filter_params(
+    dashboard_id: str,
+    body: FilterParamsRequest,
+    user_identity: str = Depends(get_user_identity),
+    user_roles: list[str] = Depends(get_user_roles),
+):
+    """Translate filter selections into a rison ``native_filters`` URL param.
+
+    Pure transform, no side effects — nothing is stored in Superset. The caller
+    passes the returned string to the Embedded SDK as
+    ``dashboardUiConfig.urlParams.native_filters``.
+
+    Only filter ids that actually exist on this dashboard are honoured, and the
+    column comes from the dashboard's own target definition rather than from the
+    request, so a caller cannot filter on an arbitrary column. Unlike the RLS
+    path this value is never interpolated into SQL — Superset parses it into its
+    own filter state — so there is no injection surface here.
+
+    An empty selection is omitted entirely, which is what "All" means to a
+    native filter. If nothing is selected the result is "" and the caller should
+    drop the URL param so the dashboard uses its own defaults.
+    """
+    dash = _require_tenant_dashboard(dashboard_id, user_identity, user_roles)
+
+    try:
+        raw_filters = await superset_client.get_native_filters(dash["superset_id"])
+    except Exception as e:
+        _log.error(f"[filter-params] could not read dashboard {dash['superset_id']}: {e}")
+        raise HTTPException(502, detail={
+            "message": f"Could not read filter configuration from Superset: {e}",
+        })
+
+    by_id = {f["id"]: f for f in raw_filters if f.get("id")}
+
+    data_mask: dict[str, dict] = {}
+    for filter_id, values in (body.selections or {}).items():
+        f = by_id.get(filter_id)
+        if not f:
+            continue                      # unknown id — ignore rather than trust
+        _, column = _filter_target(f)
+        if not column:
+            continue
+        vals = [str(v) for v in (values or []) if v is not None and str(v) != ""]
+        if not vals:
+            continue                      # nothing selected == "All"
+        data_mask[filter_id] = {
+            "id": filter_id,
+            "extraFormData": {"filters": [{"col": column, "op": "IN", "val": vals}]},
+            "filterState": {"value": vals, "label": ", ".join(vals)},
+            "ownState": {},
+        }
+
+    return {"native_filters": prison.dumps(data_mask) if data_mask else ""}
