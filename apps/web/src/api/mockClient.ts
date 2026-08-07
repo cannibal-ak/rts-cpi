@@ -1,7 +1,7 @@
 /**
  * In-memory mock API client — for offline demos without a backend.
  */
-import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, KpiKey, KpiSummaryResponse, KpiDetailResponse } from './client';
+import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, DashboardFilterConfigResponse, DashboardFilterSelections, KpiKey, KpiSummaryResponse, KpiDetailResponse } from './client';
 import type {
   Paginated,
   AlertRule,
@@ -526,6 +526,19 @@ export const mockClient: CpiApiClient = {
         { slice_id: 3, slice_name: 'Breakdown by Type', viz_type: 'pie',                     description: null, is_kpi: false },
       ],
     }),
+    getFilterConfig: (dashboardId: string): Promise<DashboardFilterConfigResponse> => delay({
+      dashboard_id: dashboardId,
+      filters: [
+        { id: 'NATIVE_FILTER-Route',   field: 'route',   label: 'Route (O&D)', description: 'Origin → Destination',
+          dataset_id: 32, multi_select: true, values: ['ANU → BGI', 'ANU → SLU', 'EIS → SXM'] },
+        { id: 'NATIVE_FILTER-Airline', field: 'airline', label: 'Airline',     description: 'WM + competitor carriers',
+          dataset_id: 32, multi_select: true, values: ['5L', 'BW', 'JY', 'S6', 'WM'] },
+      ],
+    }),
+    // The real endpoint rison-encodes a Superset dataMask. Mock mode has no
+    // Superset to feed, so return '' — the caller then omits the URL param.
+    buildFilterParams: (_dashboardId: string, _selections: DashboardFilterSelections) =>
+      delay({ native_filters: '' }),
   },
   kpi: {
     getSummary: (airlineCode: string, capDate: string, currency?: string): Promise<KpiSummaryResponse> => delay({

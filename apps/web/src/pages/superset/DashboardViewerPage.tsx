@@ -12,7 +12,9 @@ import {
 import { keyframes } from '@mui/system';
 import type { Theme } from '@mui/material/styles';
 import { api } from '../../api';
-import type { DashboardDateFilter } from '../../api/client';
+import type {
+  DashboardDateFilter, DashboardFilter, DashboardFilterSelections,
+} from '../../api/client';
 import { useSession } from '../../context/SessionContext';
 import { canAccessDashboard } from './dashboardAccess';
 import { useDashboardCharts } from '../../hooks/useDashboardCharts';
@@ -20,6 +22,7 @@ import ChartSelectorPanel from '../../components/dashboard/ChartSelectorPanel';
 import DateFilterToggle from '../../components/dashboard/DateFilterToggle';
 import SingleChartViewer from '../../components/dashboard/SingleChartViewer';
 import KPIRow from '../../components/dashboard/KPIRow';
+import WinairTopFilterBar from '../../components/dashboard/winair/WinairTopFilterBar';
 
 /**
  * Superset base URL — used by the Embedded SDK to construct the iframe src.
@@ -51,6 +54,13 @@ declare global {
           hideChartControls?: boolean;
           hideTab?: boolean;
           filters?: { visible?: boolean; expanded?: boolean };
+          /**
+           * Appended verbatim to the iframe's query string. This is the only
+           * channel for pushing filter state into an embedded dashboard — the
+           * SDK exposes readers (getDataMask) but no setter — which is why
+           * changing filters requires a re-embed.
+           */
+          urlParams?: Record<string, string>;
         };
       }) => Promise<{ unmount: () => void }>;
     };
@@ -102,6 +112,73 @@ export default function DashboardViewerPage() {
   useEffect(() => { fjlCurrencyRef.current = fjlCurrency; }, [fjlCurrency]);
 
   const meta = id ? DASHBOARD_META[id] : undefined;
+
+  // ── WinAir global filter bar ──
+  // WM shows the dashboard's own native filters ABOVE the iframe instead of in
+  // Superset's left-hand panel. Selections travel as a rison dataMask on the
+  // iframe URL, which Superset reads once at mount — so `appliedFilterParams`
+  // is what the embed is currently built from, and `pendingFilters` is what the
+  // user has staged. Apply promotes one to the other and re-embeds.
+  const isWinair = meta?.tenant === 'WM';
+  const [filterConfig, setFilterConfig] = useState<DashboardFilter[]>([]);
+  const [filtersLoading, setFiltersLoading] = useState(false);
+  const [filtersError, setFiltersError] = useState<string | null>(null);
+  const [pendingFilters, setPendingFilters] = useState<DashboardFilterSelections>({});
+  const [appliedFilters, setAppliedFilters] = useState<DashboardFilterSelections>({});
+  const [applyingFilters, setApplyingFilters] = useState(false);
+  const [appliedFilterParams, setAppliedFilterParams] = useState('');
+  const appliedFilterParamsRef = useRef(appliedFilterParams);
+  useEffect(() => { appliedFilterParamsRef.current = appliedFilterParams; }, [appliedFilterParams]);
+
+  const normalizeSelections = (s: DashboardFilterSelections) =>
+    JSON.stringify(
+      Object.entries(s)
+        .filter(([, v]) => v && v.length > 0)
+        .map(([k, v]) => [k, [...v].sort()] as [string, string[]])
+        .sort((a, b) => a[0].localeCompare(b[0])),
+    );
+  const filtersDirty = normalizeSelections(pendingFilters) !== normalizeSelections(appliedFilters);
+
+  useEffect(() => {
+    if (!id || !isWinair) {
+      setFilterConfig([]);
+      return;
+    }
+    let cancelled = false;
+    setFiltersLoading(true);
+    setFiltersError(null);
+    api.superset.getFilterConfig(id)
+      .then(res => { if (!cancelled) setFilterConfig(res.filters ?? []); })
+      .catch(err => {
+        if (cancelled) return;
+        console.error('[WinairFilters] filter-config failed:', err);
+        setFiltersError(err?.message ?? 'could not load filters');
+      })
+      .finally(() => { if (!cancelled) setFiltersLoading(false); });
+    return () => { cancelled = true; };
+  }, [id, isWinair]);
+
+  const applyWinairFilters = async (selections: DashboardFilterSelections) => {
+    if (!id) return;
+    setApplyingFilters(true);
+    try {
+      const { native_filters } = await api.superset.buildFilterParams(id, selections);
+      setAppliedFilters(selections);
+      setAppliedFilterParams(native_filters);
+      appliedFilterParamsRef.current = native_filters;   // the embed reads this synchronously
+      setRefreshKey(k => k + 1);
+    } catch (err: any) {
+      console.error('[WinairFilters] filter-params failed:', err);
+      setFiltersError(err?.message ?? 'could not apply filters');
+    } finally {
+      setApplyingFilters(false);
+    }
+  };
+
+  const handleWinairReset = () => {
+    setPendingFilters({});
+    void applyWinairFilters({});
+  };
 
   // ── Slice & dice: chart selector + isolated chart view (additive) ──
   // viewMode toggles the right pane between the embedded dashboard SDK iframe
@@ -200,6 +277,12 @@ export default function DashboardViewerPage() {
     if (!id || !mountRef.current || !meta) return;
 
     let unmount: (() => void) | undefined;
+    // `unmount` is only assigned after two awaits. If refreshKey bumps again
+    // before then (Apply twice in quick succession), cleanup would run with it
+    // still undefined and the in-flight embed would leak — its guest-token
+    // refresh timer keeps polling forever. This flag lets the late assignment
+    // tear itself down instead.
+    let disposed = false;
 
     const embed = async () => {
       try {
@@ -261,11 +344,19 @@ export default function DashboardViewerPage() {
             hideChartControls: true,   // hide chart-level three-dot menus
             hideTab: false,
             filters: {
-              visible: true,
-              expanded: true,   // start with filters visible (restyled as horizontal bar via dashboard CSS)
+              // WinAir drives the same native filters from the bar above, so
+              // Superset's own panel would be a duplicate set of controls.
+              visible: !isWinair,
+              expanded: !isWinair,   // others: filters visible (restyled as a horizontal bar via dashboard CSS)
             },
+            // Seed the dashboard's native filter state from the top bar.
+            // Omitted when empty so the dashboard falls back to its own defaults.
+            ...(isWinair && appliedFilterParamsRef.current
+              ? { urlParams: { native_filters: appliedFilterParamsRef.current } }
+              : {}),
           },
         });
+        if (disposed) { result.unmount(); return; }
         unmount = result.unmount;
 
         // Give Superset a moment to render inside the iframe
@@ -282,7 +373,7 @@ export default function DashboardViewerPage() {
 
     embed();
 
-    return () => { unmount?.(); };
+    return () => { disposed = true; unmount?.(); };
   }, [id, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const LoadingIcon = meta?.isAirline ? Flight : DirectionsBoat;
@@ -396,9 +487,31 @@ export default function DashboardViewerPage() {
         flexGrow: 1,
         minHeight: 0,
       }}>
+        {/* WinAir: the dashboard's native filters, lifted out of Superset's
+            left-hand panel into a global bar. Replaces the plain date row —
+            the date toggle is folded into the bar. */}
+        {isWinair && (
+          <WinairTopFilterBar
+            filters={filterConfig}
+            filtersLoading={filtersLoading}
+            filtersError={filtersError}
+            pending={pendingFilters}
+            onPendingChange={setPendingFilters}
+            dirty={filtersDirty}
+            applying={applyingFilters}
+            onApply={() => void applyWinairFilters(pendingFilters)}
+            onReset={handleWinairReset}
+            availableDates={availableDates}
+            dateFilter={dateFilter}
+            onDateFilterChange={handleDateFilterChange}
+            datesLoading={datesLoading}
+          />
+        )}
+
         {/* Date filter bar — drives cap_date RLS on every chart in this dashboard.
             For FJL, a Currency dropdown sits to the right of the date toggle and
             is threaded into KPIRow so the tiles stay within a single currency. */}
+        {!isWinair && (
         <Box sx={{ mb: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>
           <DateFilterToggle
             availableDates={availableDates}
@@ -445,6 +558,7 @@ export default function DashboardViewerPage() {
             </>
           )}
         </Box>
+        )}
 
         {/* KPI row — CPI-rendered tiles + click-to-expand detail (JY + PW + FJL).
             These replace the Superset big-number tiles so the values and their

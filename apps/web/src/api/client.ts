@@ -41,6 +41,28 @@ export interface DashboardChartsResponse {
   charts: DashboardChart[];
 }
 
+// ── Superset native filters, surfaced outside the iframe ────
+// One entry per filter_select native filter on the dashboard, read from
+// Superset's own native_filter_configuration. `id` is the NATIVE_FILTER-*
+// key the dataMask must be keyed by when sending selections back.
+export interface DashboardFilter {
+  id: string;
+  field: string;
+  label: string;
+  description: string | null;
+  dataset_id: number;
+  multi_select: boolean;
+  values: string[];
+}
+
+export interface DashboardFilterConfigResponse {
+  dashboard_id: string;
+  filters: DashboardFilter[];
+}
+
+/** Selected values keyed by native filter id. An absent/empty entry means "All". */
+export type DashboardFilterSelections = Record<string, string[]>;
+
 // ── Query params ────────────────────────────
 export interface JobQuery {
   page?: number;
@@ -244,6 +266,17 @@ export interface CpiApiClient {
         dates: string[];
     }>;
     getDashboardCharts(dashboardId: string): Promise<DashboardChartsResponse>;
+    /** The dashboard's own native filters + their selectable values. */
+    getFilterConfig(dashboardId: string): Promise<DashboardFilterConfigResponse>;
+    /**
+     * Turn selections into the rison `native_filters` URL param for the
+     * Embedded SDK. Returns '' when nothing is selected, in which case the
+     * caller should omit the param so the dashboard uses its own defaults.
+     */
+    buildFilterParams(
+      dashboardId: string,
+      selections: DashboardFilterSelections,
+    ): Promise<{ native_filters: string }>;
   };
   kpi: {
     getSummary(airlineCode: string, capDate: string, currency?: string): Promise<KpiSummaryResponse>;
