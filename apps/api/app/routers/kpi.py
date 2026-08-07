@@ -83,11 +83,7 @@ _FJL_DEFAULT_CURRENCY = "NOK"
 
 
 def _resolve_currency(code: str, currency: str | None) -> str | None:
-    """For FJL: default to NOK and validate. For ALT (Sky): always EUR. For others: ignore (return None)."""
-    if code == "ALT":
-        return "EUR"
-    if code == "WM":
-        return "USD"
+    """For FJL: default to NOK and validate. For others: ignore (return None)."""
     if code != "FJL":
         return None
     resolved = (currency or _FJL_DEFAULT_CURRENCY).upper()
@@ -115,12 +111,12 @@ def _summary_sql_jy(view: str) -> dict[str, str]:
             WHERE cap_date = :cap_date
         """,
         "jy_avg_fare": f"""
-            SELECT ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 2)
+            SELECT COALESCE(ROUND(AVG(COALESCE(ref_tot_fare, 0))::numeric, 2), 0)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
         "competitors_avg_fare": f"""
-            SELECT ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 2)
+            SELECT COALESCE(ROUND(AVG(COALESCE(comp_tot_fare, 0))::numeric, 2), 0)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
@@ -188,9 +184,9 @@ def _detail_jy_jy_fare(db: Session, view: str, cap_date: str, currency: str | No
     rows = db.execute(text(f"""
         SELECT ref_org || '-' || ref_dst AS route,
                comp_al,
-               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS jy_fare,
-               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS comp_fare,
-               ROUND((AVG(NULLIF(ref_tot_fare, 0)) - AVG(NULLIF(comp_tot_fare, 0)))::numeric, 0) AS difference
+               COALESCE(ROUND(AVG(COALESCE(ref_tot_fare, 0))::numeric, 0), 0) AS jy_fare,
+               COALESCE(ROUND(AVG(COALESCE(comp_tot_fare, 0))::numeric, 0), 0) AS comp_fare,
+               COALESCE(ROUND((AVG(COALESCE(ref_tot_fare, 0)) - AVG(COALESCE(comp_tot_fare, 0)))::numeric, 0), 0) AS difference
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY ref_org, ref_dst, comp_al
@@ -200,8 +196,8 @@ def _detail_jy_jy_fare(db: Session, view: str, cap_date: str, currency: str | No
     return {
         "columns": ["#", "Route", "Competitor", "JY Fare", "Comp Fare", "Difference"],
         "rows": [
-            {"rank": i, "route": r[0], "comp_al": r[1], "jy_fare": _n_i(r[2]),
-             "comp_fare": _n_i(r[3]), "difference": _n_i(r[4])}
+            {"rank": i, "route": r[0], "comp_al": r[1], "jy_fare": _i(r[2]),
+             "comp_fare": _i(r[3]), "difference": _i(r[4])}
             for i, r in enumerate(rows, start=1)
         ],
     }
@@ -210,9 +206,9 @@ def _detail_jy_jy_fare(db: Session, view: str, cap_date: str, currency: str | No
 def _detail_jy_comp_fare(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
     rows = db.execute(text(f"""
         SELECT comp_al,
-               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS avg_fare,
-               ROUND(MIN(NULLIF(comp_tot_fare, 0))::numeric, 0) AS min_fare,
-               ROUND(MAX(comp_tot_fare)::numeric, 0) AS max_fare,
+               COALESCE(ROUND(AVG(COALESCE(comp_tot_fare, 0))::numeric, 0), 0) AS avg_fare,
+               COALESCE(ROUND(MIN(COALESCE(comp_tot_fare, 0))::numeric, 0), 0) AS min_fare,
+               COALESCE(ROUND(MAX(COALESCE(comp_tot_fare, 0))::numeric, 0), 0) AS max_fare,
                COUNT(DISTINCT ref_org || '-' || ref_dst) AS routes
         FROM {view}
         WHERE cap_date = :cap_date
@@ -222,24 +218,18 @@ def _detail_jy_comp_fare(db: Session, view: str, cap_date: str, currency: str | 
     return {
         "columns": ["#", "Competitor", "Avg Fare", "Min Fare", "Max Fare", "Routes"],
         "rows": [
-            {"rank": i, "comp_al": r[0], "avg_fare": _n_i(r[1]),
-             "min_fare": _n_i(r[2]), "max_fare": _i(r[3]), "routes": _i(r[4])}
+            {"rank": i, "comp_al": r[0], "avg_fare": _i(r[1]),
+             "min_fare": _i(r[2]), "max_fare": _i(r[3]), "routes": _i(r[4])}
             for i, r in enumerate(rows, start=1)
         ],
     }
 
 
 def _detail_jy_comp_fare_by_route(db: Session, view: str, cap_date: str, currency: str | None = None) -> dict[str, Any]:
-    # Per-route average competitor fare. Source rows are one per route×comp_al
-    # (same grouping/order as _detail_jy_jy_fare so route first-occurrence order
-    # matches the JY Avg Fare table); each route's per-competitor comp_fare
-    # values are then averaged with equal weight per competitor. NULL comp_fare
-    # values are excluded from the mean and routes with no valid competitor fare
-    # are dropped entirely.
     rows = db.execute(text(f"""
         SELECT ref_org || '-' || ref_dst AS route,
-               ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 0) AS comp_fare,
-               ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 0) AS jy_fare
+               COALESCE(ROUND(AVG(COALESCE(comp_tot_fare, 0))::numeric, 0), 0) AS comp_fare,
+               COALESCE(ROUND(AVG(COALESCE(ref_tot_fare, 0))::numeric, 0), 0) AS jy_fare
         FROM {view}
         WHERE cap_date = :cap_date
         GROUP BY ref_org, ref_dst, comp_al
@@ -308,12 +298,12 @@ def _summary_sql_pw(view: str) -> dict[str, str]:
             WHERE cap_date = :cap_date
         """,
         "pw_avg_fare": f"""
-            SELECT ROUND(AVG(NULLIF(ref_tot_fare, 0))::numeric, 2)
+            SELECT COALESCE(ROUND(AVG(COALESCE(ref_tot_fare, 0))::numeric, 2), 0)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
         "competitors_avg_fare": f"""
-            SELECT ROUND(AVG(NULLIF(comp_tot_fare, 0))::numeric, 2)
+            SELECT COALESCE(ROUND(AVG(COALESCE(comp_tot_fare, 0))::numeric, 2), 0)
             FROM {view}
             WHERE cap_date = :cap_date
         """,
@@ -626,63 +616,11 @@ def _detail_fjl_dep_dates(db: Session, view: str, cap_date: str, currency: str |
     }
 
 
-# Sky Airways (demo tenant) reuses the JY KPI machinery verbatim — same
-# summary SQL and detail builders, same key set — only the user-facing labels
-# differ (JY -> Sky). See AIRLINE_CFG["ALT"] below.
-_ALT_KPI_META = {
-    "airlines_analyzed":    {"label": "Airlines Analyzed",    "subheader": "Distinct competitors tracked"},
-    "markets_covered":      {"label": "Markets Covered",      "subheader": "Origin-destination pairs analyzed"},
-    "jy_avg_fare":          {"label": "Sky Avg Fare",         "subheader": "Average Sky fare across all routes"},
-    "competitors_avg_fare": {"label": "Competitors Avg Fare", "subheader": "Average competitor fare across all routes"},
-    "dep_dates_monitored":  {"label": "Dep Dates Monitored",  "subheader": "Future travel dates with pricing data"},
-}
-
-
-# WinAir (WM) — pricing-only tenant — reuses the JY KPI machinery verbatim
-# (KPI confirmed velocity-free); only the user-facing labels differ (JY -> WM).
-# See AIRLINE_CFG["WM"] below.
-_WM_KPI_META = {
-    "airlines_analyzed":    {"label": "Airlines Analyzed",    "subheader": "Distinct competitors tracked"},
-    "markets_covered":      {"label": "Markets Covered",      "subheader": "Origin-destination pairs analyzed"},
-    "jy_avg_fare":          {"label": "WM Avg Fare",          "subheader": "Average WM fare across all routes"},
-    "competitors_avg_fare": {"label": "Competitors Avg Fare", "subheader": "Average competitor fare across all routes"},
-    "dep_dates_monitored":  {"label": "Dep Dates Monitored",  "subheader": "Future travel dates with pricing data"},
-}
-
-
 AIRLINE_CFG: dict[str, dict[str, Any]] = {
     "JY": {
         "view": "vw_airline_cpi_jy_snapshot",
         "summary_sql": _summary_sql_jy,
         "meta": _JY_KPI_META,
-        "float_keys": _JY_FLOAT_KEYS,
-        "null_keys": _JY_NULL_KEYS,
-        "details": {
-            "airlines_analyzed": _detail_jy_airlines,
-            "markets_covered": _detail_jy_markets,
-            "jy_avg_fare": _detail_jy_jy_fare,
-            "competitors_avg_fare": _detail_jy_comp_fare_by_route,
-            "dep_dates_monitored": _detail_jy_dep_dates,
-        },
-    },
-    "ALT": {
-        "view": "vw_airline_cpi_alt_snapshot",
-        "summary_sql": _summary_sql_jy,
-        "meta": _ALT_KPI_META,
-        "float_keys": _JY_FLOAT_KEYS,
-        "null_keys": _JY_NULL_KEYS,
-        "details": {
-            "airlines_analyzed": _detail_jy_airlines,
-            "markets_covered": _detail_jy_markets,
-            "jy_avg_fare": _detail_jy_jy_fare,
-            "competitors_avg_fare": _detail_jy_comp_fare_by_route,
-            "dep_dates_monitored": _detail_jy_dep_dates,
-        },
-    },
-    "WM": {
-        "view": "vw_airline_cpi_wm_snapshot",
-        "summary_sql": _summary_sql_jy,
-        "meta": _WM_KPI_META,
         "float_keys": _JY_FLOAT_KEYS,
         "null_keys": _JY_NULL_KEYS,
         "details": {

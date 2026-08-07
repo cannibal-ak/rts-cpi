@@ -89,18 +89,10 @@ DASHBOARDS = {
         "domain": "cfl",
         "tenant": "FJL",
     },
-    "4": {
-        "title": "Airline CPI ALT Dashboard",
-        "superset_id": 5,                                          # Superset ID=5
-        "uuid": "df9365eb-a4c2-47bd-bc2a-ee6a925954fa",
-        "embedded_uuid": "04a5c649-1478-4d6e-a7b2-c81e7312c286",
-        "domain": "airline",
-        "tenant": "ALT",
-    },
     "5": {
         "title": "Airline CPI WM Dashboard",
-        "superset_id": 6,                                          # Superset ID=6
-        "uuid": "a20fedec-2428-4836-afd5-46967007a2e8",
+        "superset_id": 6,
+        "uuid": "36365808-d276-44ea-8cc7-e305e2bb9718",
         "embedded_uuid": "36365808-d276-44ea-8cc7-e305e2bb9718",
         "domain": "airline",
         "tenant": "WM",
@@ -115,7 +107,6 @@ TENANT_TABLES = {
     "JY":  ["vw_airline_cpi_jy_snapshot"],
     "PW":  ["vw_airline_cpi_pw_snapshot"],
     "FJL": ["vw_cfl_cpi_fjl_snapshot"],
-    "ALT": ["vw_airline_cpi_alt_snapshot"],
     "WM":  ["vw_airline_cpi_wm_snapshot"],
 }
 
@@ -140,39 +131,17 @@ TENANT_CAPDATE_ONLY_TABLES = {
         "pw_all_carriers_fares",
         "pw_velocity_normalized",
     ],
-    "ALT": [
-        "alt_all_airlines_fares",
-        "alt_velocity_normalized",
-        "alt_pricing_recommendations",
-    ],
-    "WM":  [
-        "wm_all_airlines_fares",
-        "wm_pricing_recommendations",
-        "wm_velocity_normalized",
-    ],
     "FJL": [
         "vds_cfl_cheapest_competitor",
         "FJL Pricing — Fare by Dep Date (Aggregated)",
         "FJL Pricing — Fare by Cap Date (Aggregated)",
         "FJL Pricing — Fare Monitor (Row-Level)",
     ],
+    "WM":  [
+        "wm_all_airlines_fares",
+        "wm_pricing_recommendations",
+    ],
 }
-
-# FJL currency scoping. FJL fares are stored as PER-CURRENCY rows (native
-# scraped values, never FX-converted), so syncing the app's currency selector
-# into Superset means ANDing a currency row-filter onto the cap_date RLS clause.
-# Unlike cap_date (uniform `cap_date` column everywhere), the currency column
-# name differs by dataset: the row-level views project `curr_code`, while the
-# aggregated virtual datasets project it as `currency`. Keyed by Superset
-# dataset id so the right column is used per dataset. Datasets absent from this
-# map (all JY/PW datasets, dataset 22 which has no currency column) get the
-# plain cap_date-only clause, unchanged.
-FJL_CURRENCY_COLUMN_BY_DATASET = {
-    5: "curr_code", 16: "curr_code",
-    19: "currency", 20: "currency", 21: "currency",
-    23: "currency", 24: "currency",  # not on dashboard 2, harmless
-}
-ALLOWED_FJL_CURRENCIES = {"NOK", "EUR", "DKK"}
 
 
 # ── Superset client ─────────────────────────────────────────
@@ -297,24 +266,26 @@ superset_client = SupersetClient()
 # ── Endpoint ─────────────────────────────────────────────────
 
 @router.get("/guest-token")
-async def fetch_guest_token(
+async def get_guest_token(
     dashboard_id: str,
     cap_date_eq: Optional[str] = None,
     cap_date_from: Optional[str] = None,
     cap_date_to: Optional[str] = None,
+    route: Optional[str] = None,
+    airline: Optional[str] = None,
+    flight_num: Optional[str] = None,
+    dtd_bucket: Optional[str] = None,
+    price_status: Optional[str] = None,
+    recommendation: Optional[str] = None,
+    fare_component: Optional[str] = None,
     currency: Optional[str] = None,
     user_identity: str = Depends(get_user_identity),
     user_roles: list[str] = Depends(get_user_roles),
 ):
     """Return a Superset guest token + dashboard UUID for embedding.
 
-    Optional cap_date_* params append an extra RLS clause so chart queries
-    are server-side scoped to a single day (cap_date_eq) or a window
-    (cap_date_from..cap_date_to). The React DateFilterToggle drives this.
-
-    Optional `currency` (FJL only: NOK | EUR | DKK) ANDs a per-dataset currency
-    row-filter onto the cap_date clause so the FJL app currency selector scopes
-    every chart to a single currency. The React Currency dropdown drives this.
+    Optional cap_date_*, route, airline, flight_num, dtd_bucket, price_status, recommendation, currency
+    params append extra RLS clauses so chart queries are server-side scoped. The React top filter bar drives this.
     """
 
     # 1. Lookup dashboard config
@@ -325,26 +296,16 @@ async def fetch_guest_token(
         })
 
     # 2. Access control
-    #    Platform admins (rts tenant) manage pipelines and tenants — they
-    #    do not consume tenant dashboards. Tenant users only access their own
-    #    dashboard.  Note: the previous ``is_admin = "TENANT_ADMIN" in user_roles``
-    #    check was structurally broken — every authenticated user receives
-    #    TENANT_ADMIN via get_user_roles (deps.py), so the bypass fired for
-    #    everyone. Use is_platform_admin() which is identity-based.
     if is_platform_admin(user_identity, user_roles):
         raise HTTPException(403, detail={
             "message": "Platform administrators do not have access to tenant dashboards. Sign in as the tenant to view its dashboard.",
         })
-    if user_identity != dash["tenant"]:
+    if user_identity.upper() != dash["tenant"].upper():
         raise HTTPException(403, detail={
             "message": f"Access denied: '{dash['title']}' is restricted to {dash['tenant']} users.",
         })
 
     # 3. Build RLS rules (tenant-level row filtering).
-    #    Per-tenant views already filter by tenant_code, so RLS rules are a
-    #    defense-in-depth measure. Platform admins were short-circuited above,
-    #    so by this point we always have a tenant user whose identity matches
-    #    the dashboard's tenant.
     rls_rules: list[dict] = []
     tenant_tables = TENANT_TABLES.get(dash["tenant"], [])
     capdate_only_tables = TENANT_CAPDATE_ONLY_TABLES.get(dash["tenant"], [])
@@ -364,12 +325,9 @@ async def fetch_guest_token(
 
     # tenant_code clause: only datasets that actually have a tenant_code column.
     for ds_id in tenant_dataset_ids:
-        rls_rules.append({"dataset": ds_id, "clause": f"tenant_code = '{user_identity}'"})
+        rls_rules.append({"dataset": ds_id, "clause": f"tenant_code = '{user_identity.upper()}'"})
 
     # 3b. Optional cap_date scoping.
-    #     Validate first (regex + strptime) — these strings are interpolated
-    #     into a SQL clause string sent to Superset. Single day wins over range
-    #     if both are present.
     cap_date_clause: Optional[str] = None
     if cap_date_eq:
         _validate_cap_date(cap_date_eq, "cap_date_eq")
@@ -381,28 +339,35 @@ async def fetch_guest_token(
             raise HTTPException(400, detail={"message": "cap_date_from must be <= cap_date_to"})
         cap_date_clause = f"cap_date >= '{cap_date_from}' AND cap_date <= '{cap_date_to}'"
 
-    # 3c. Optional FJL currency scoping. Like cap_date, this value is
-    #     interpolated into an RLS clause string, so it must be validated
-    #     against a fixed allow-list — never interpolate unvalidated input.
-    if currency is not None:
-        currency = currency.upper()
-        if currency not in ALLOWED_FJL_CURRENCIES:
-            raise HTTPException(400, detail={
-                "message": f"Invalid currency: must be one of {sorted(ALLOWED_FJL_CURRENCIES)}",
-            })
-
-    # cap_date clause: applies to BOTH the tenant view datasets and the
-    # cap-date-only KPI virtual datasets. Both groups have a cap_date column.
-    # For FJL, AND a per-dataset currency row-filter onto the same rule when a
-    # currency was supplied (column name varies by dataset — see
-    # FJL_CURRENCY_COLUMN_BY_DATASET). Datasets not in that map keep the exact
-    # cap_date-only clause they had before.
     if cap_date_clause:
         for ds_id in tenant_dataset_ids + capdate_only_dataset_ids:
-            clause = cap_date_clause
-            if currency and ds_id in FJL_CURRENCY_COLUMN_BY_DATASET:
-                clause += f" AND {FJL_CURRENCY_COLUMN_BY_DATASET[ds_id]} = '{currency}'"
-            rls_rules.append({"dataset": ds_id, "clause": clause})
+            rls_rules.append({"dataset": ds_id, "clause": cap_date_clause})
+
+    # 3c. Optional route filtering (e.g. 'EIS-SXM' -> origin='EIS', destination='SXM')
+    if route and '-' in route and route.lower() != 'all':
+        parts = route.split('-')
+        org = parts[0].strip().replace("'", "")
+        dst = parts[1].strip().replace("'", "")
+        for ds_id in tenant_dataset_ids:
+            rls_rules.append({"dataset": ds_id, "clause": f"ref_org = '{org}' AND ref_dst = '{dst}'"})
+        for ds_id in capdate_only_dataset_ids:
+            rls_rules.append({"dataset": ds_id, "clause": f"origin = '{org}' AND destination = '{dst}'"})
+
+    # 3d. Optional airline filtering (e.g. 'WM', '5L', 'JY')
+    if airline and airline.lower() != 'all':
+        al_clean = airline.strip().replace("'", "")
+        for ds_id in tenant_dataset_ids:
+            rls_rules.append({"dataset": ds_id, "clause": f"ref_al = '{al_clean}' OR comp_al = '{al_clean}'"})
+        for ds_id in capdate_only_dataset_ids:
+            rls_rules.append({"dataset": ds_id, "clause": f"airline = '{al_clean}' OR comp_al = '{al_clean}'"})
+
+    # 3e. Optional flight number filtering (e.g. 'WM-2041')
+    if flight_num and flight_num.lower() not in ('all', 'all flights'):
+        flt_clean = flight_num.strip().replace("'", "")
+        for ds_id in tenant_dataset_ids:
+            rls_rules.append({"dataset": ds_id, "clause": f"ref_flt_num = '{flt_clean}' OR comp_flt_num = '{flt_clean}'"})
+        for ds_id in capdate_only_dataset_ids:
+            rls_rules.append({"dataset": ds_id, "clause": f"flt_num = '{flt_clean}'"})
 
     # 4. Get guest token (use numeric Superset ID – see create_guest_token docstring)
     try:
@@ -576,8 +541,6 @@ _DASHBOARD_DATE_VIEW = {
     "1": "vw_airline_cpi_jy_snapshot",
     "2": "vw_airline_cpi_pw_snapshot",
     "3": "vw_cfl_cpi_fjl_snapshot",
-    "4": "vw_airline_cpi_alt_snapshot",
-    "5": "vw_airline_cpi_wm_snapshot",
 }
 
 # Whitelist of view names we'll ever query from this endpoint. The view name

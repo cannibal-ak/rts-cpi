@@ -31,7 +31,7 @@ GUEST_TOKEN_HEADER_NAME = "X-GuestToken"
 WTF_CSRF_ENABLED = False          # Disable for local dev API access
 ENABLE_CORS = True
 CORS_OPTIONS = {
-    "origins": ["http://localhost:5173", "http://localhost:8080", "http://localhost:3000", "http://192.168.101.10:8080", "http://192.168.101.10:9090", "http://192.168.101.10:5173"],
+    "origins": ["http://localhost:5173", "http://localhost:8080", "http://localhost:3000", "http://192.168.101.10:8080", "http://192.168.101.10:9090", "http://192.168.101.10:5173", "https://112.196.72.93:9444", "https://112.196.72.93:8488"],
     "supports_credentials": True,
     "allow_headers": ["Authorization", "Content-Type", "X-CSRFToken", "X-Tenant-ID", "X-User-Identity", "X-User-Roles"],
 }

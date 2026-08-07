@@ -12,3 +12,4 @@ import { httpClient } from './httpClient';
 const useRealApi = !!import.meta.env.VITE_API_BASE_URL;
 
 export const api = useRealApi ? httpClient : mockClient;
+export { isAbortError } from './httpClient';

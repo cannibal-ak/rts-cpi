@@ -14,16 +14,10 @@ import type {
   AdminUserListResponse, AdminResetTokenListResponse,
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
   PlatformHealthResponse, TenantSummaryResponse,
-  IngestionJob, IngestionUploadResponse, IngestionValidationResult,
-  IngestionCommitResult, IngestionDeleteDataResult, IngestionAuditLog, IngestionPreview,
 } from '../types';
 import type {
   SmtpConfigRead, SmtpConfigUpdate, SmtpTestRequest, SmtpTestResponse,
 } from '../types/smtpConfig';
-import type {
-  AdminTenantOption, AdminInviteUserResponse, AdminResendInviteResponse,
-  AdminSendResetEmailResponse, InviteVerifyResponse, InviteAcceptResponse,
-} from '../types';
 
 // ── Superset chart manifest ────────────────
 export interface DashboardChart {
@@ -54,16 +48,6 @@ export interface SnapshotQuery {
   page?: number;
   page_size?: number;
   [key: string]: string | number | undefined;
-}
-
-/**
- * Per-request controls for the snapshot list calls. `signal` lets a caller
- * cancel in-flight requests (e.g. the grid unmounting or the user switching
- * tabs mid-load); `timeoutMs` overrides the client default.
- */
-export interface RequestOptions {
-  signal?: AbortSignal;
-  timeoutMs?: number;
 }
 
 /**
@@ -129,18 +113,18 @@ export interface KpiDetailResponse {
 export interface CpiApiClient {
   // Airline (tenant-aware: pass tenant='JY' or 'PW')
   airline: {
-    listSnapshots(q?: SnapshotQuery, opts?: RequestOptions): Promise<Paginated<AirlineSnapshot>>;
+    listSnapshots(q?: SnapshotQuery): Promise<Paginated<AirlineSnapshot>>;
     getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
     exportSnapshots(q?: Record<string, string>): Promise<void>;
     velocity: {
-      listSnapshots(q?: SnapshotQuery, opts?: RequestOptions): Promise<Paginated<VelocitySnapshot>>;
+      listSnapshots(q?: SnapshotQuery): Promise<Paginated<VelocitySnapshot>>;
       getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
       exportSnapshots(q?: Record<string, string>): Promise<void>;
     };
   };
   // CFL (tenant-aware: pass tenant='FJL')
   cfl: {
-    listSnapshots(q?: SnapshotQuery, opts?: RequestOptions): Promise<Paginated<CflSnapshot>>;
+    listSnapshots(q?: SnapshotQuery): Promise<Paginated<CflSnapshot>>;
     getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
     exportSnapshots(q?: Record<string, string>): Promise<void>;
   };
@@ -179,22 +163,14 @@ export interface CpiApiClient {
       list(query?: IngestionRunListQuery): Promise<Paginated<IngestionRun>>;
       get(id: string): Promise<IngestionRunDetail>;
       cancel(id: string): Promise<IngestionRun>;
-      deleteFileData(ingestedFileId: string): Promise<{ rows_deleted: number }>;
-      reingestFile(ingestedFileId: string): Promise<RunNowResult>;
     };
 
     // ── Password Management ──
     passwordManagement: {
       listUsers(): Promise<AdminUserListResponse>;
-      listTenants(): Promise<AdminTenantOption[]>;
-      inviteUser(body: { email: string; display_name: string; tenant_id: string; role?: string }): Promise<AdminInviteUserResponse>;
-      resendInvite(body: { email?: string; user_id?: string }): Promise<AdminResendInviteResponse>;
-      sendResetEmail(body: { email: string }): Promise<AdminSendResetEmailResponse>;
+      listResetCodes(limit?: number): Promise<AdminResetTokenListResponse>;
+      generateCode(email: string): Promise<AdminGenerateResetCodeResponse>;
       forceReset(email: string, newPassword: string, forceChangeOnLogin: boolean): Promise<AdminForceResetResponse>;
-      deactivateUser(userId: string): Promise<void>;
-      reactivateUser(userId: string): Promise<void>;
-      deleteUser(userId: string): Promise<void>;
-      resetMfa(userId: string): Promise<{ user_id: string; email: string; mfa_reset: boolean }>;
     };
 
     // ── Admin Dashboard (Home page) ──
@@ -214,11 +190,6 @@ export interface CpiApiClient {
       };
     };
   };
-  // Public auth (invite acceptance — no JWT required)
-  auth: {
-    verifyInvite(token: string): Promise<InviteVerifyResponse>;
-    acceptInvite(body: { token: string; new_password: string }): Promise<InviteAcceptResponse>;
-  };
   // Stats
   stats: {
     getFreshnessMetrics(): Promise<DataFreshness[]>;
@@ -232,7 +203,7 @@ export interface CpiApiClient {
     getGuestToken(
       dashboardId: string,
       dateFilter?: DashboardDateFilter,
-      currency?: string,
+      extraFilters?: { route?: string; currency?: string; fareComponent?: string },
     ): Promise<{
         token: string;
         dashboard_uuid: string;
@@ -256,7 +227,6 @@ export interface CpiApiClient {
     validate(id: string): Promise<IngestionValidationResult>;
     commit(id: string, replaceExisting: boolean): Promise<IngestionCommitResult>;
     cancel(id: string): Promise<IngestionJob>;
-    deleteData(id: string): Promise<IngestionDeleteDataResult>;
     getAudit(id: string): Promise<IngestionAuditLog>;
     getPreview(id: string): Promise<IngestionPreview>;
   };

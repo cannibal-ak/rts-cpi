@@ -20,6 +20,7 @@ import ChartSelectorPanel from '../../components/dashboard/ChartSelectorPanel';
 import DateFilterToggle from '../../components/dashboard/DateFilterToggle';
 import SingleChartViewer from '../../components/dashboard/SingleChartViewer';
 import KPIRow from '../../components/dashboard/KPIRow';
+import WinairTopFilterBar from '../../components/dashboard/winair/WinairTopFilterBar';
 
 /**
  * Superset base URL — used by the Embedded SDK to construct the iframe src.
@@ -33,7 +34,6 @@ const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline:
   '1': { title: 'JY Dashboard', tenant: 'JY', isAirline: true, freshnessDomain: 'Airline CPI \u2013 JY' },
   '2': { title: 'PW Dashboard', tenant: 'PW', isAirline: true, freshnessDomain: 'Airline CPI \u2013 PW' },
   '3': { title: 'FJL Dashboard', tenant: 'FJL', isAirline: false, freshnessDomain: 'Cruise/Ferry CPI \u2013 FJL' },
-  '4': { title: 'Sky Dashboard', tenant: 'ALT', isAirline: true, freshnessDomain: 'Airline CPI \u2013 SKY' },
   '5': { title: 'WinAir Dashboard', tenant: 'WM', isAirline: true, freshnessDomain: 'Airline CPI \u2013 WM' },
 };
 
@@ -63,14 +63,6 @@ const pulse = keyframes`
   100% { transform: scale(1); opacity: 0.8; }
 `;
 
-// FJL fares are rendered symbol-less in the embedded Superset charts (the wrong
-// '$' was stripped, and a static D3 symbol can't track the live currency); this
-// map backs the "Values in <CUR>" indicator. Mirrors KPIRow's CURRENCY_SYMBOL —
-// kept local rather than exporting that const across modules.
-const FJL_CURRENCY_SYMBOL: Record<'NOK' | 'EUR' | 'DKK', string> = {
-  NOK: 'kr', EUR: '€', DKK: 'kr',
-};
-
 export default function DashboardViewerPage() {
   const { id } = useParams<{ id: string }>();
   const { session } = useSession();
@@ -92,14 +84,27 @@ export default function DashboardViewerPage() {
   const dateFilterRef = useRef<DashboardDateFilter>(dateFilter);
   useEffect(() => { dateFilterRef.current = dateFilter; }, [dateFilter]);
 
-  // FJL KPIs are computed within a single currency at a time (raw rows span
-  // EUR/DKK/NOK across regional sites). NOK is the default since Fjord Line
-  // is Norwegian. JY/PW have no currency dimension and ignore this state.
   const [fjlCurrency, setFjlCurrency] = useState<'NOK' | 'EUR' | 'DKK'>('NOK');
-  // Kept in a ref so the SDK's fetchGuestToken closure always reads the latest
-  // currency (same pattern as dateFilterRef above).
-  const fjlCurrencyRef = useRef(fjlCurrency);
-  useEffect(() => { fjlCurrencyRef.current = fjlCurrency; }, [fjlCurrency]);
+
+  // WinAir custom filter state (Route, Airline, FlightNum, DtdBucket, PricePosition, PriceAction, Currency) driving RLS
+  const [winairExtraFilters, setWinairExtraFilters] = useState<{
+    route?: string;
+    airline?: string;
+    flightNum?: string;
+    dtdBucket?: string;
+    pricePosition?: string;
+    priceAction?: string;
+    currency?: string;
+    fareComponent?: string;
+  }>({ route: 'EIS-SXM', currency: 'USD' });
+  const winairExtraFiltersRef = useRef(winairExtraFilters);
+  useEffect(() => { winairExtraFiltersRef.current = winairExtraFilters; }, [winairExtraFilters]);
+
+  const handleWinairFilterChange = (next: Record<string, any>) => {
+    const updated = { ...winairExtraFiltersRef.current, ...next };
+    setWinairExtraFilters(updated);
+    setRefreshKey(k => k + 1);
+  };
 
   const meta = id ? DASHBOARD_META[id] : undefined;
 
@@ -225,10 +230,7 @@ export default function DashboardViewerPage() {
         //   the cap_date RLS clause — otherwise the iframe briefly loads
         //   unfiltered data before the SDK re-fetches.
         setIsLoading(true);
-        const metadata = await api.superset.getGuestToken(
-          id, dateFilterRef.current,
-          meta.tenant === 'FJL' ? fjlCurrencyRef.current : undefined,
-        );
+        const metadata = await api.superset.getGuestToken(id, dateFilterRef.current, winairExtraFiltersRef.current);
 
         // ── 3b. Fetch data freshness to get the report date ──
         try {
@@ -242,18 +244,12 @@ export default function DashboardViewerPage() {
         }
 
         // ── 4. Embed the dashboard ──
-        //   SDK creates an iframe to: {SUPERSET_URL}/embedded/{embedded_uuid}
-        //   which is Superset's canvas-only view (no global nav, no chrome).
-        //   The guest token is sent to the iframe via postMessage.
         const result = await window.supersetEmbeddedSdk.embedDashboard({
           id: metadata.embedded_uuid,
           supersetDomain: SUPERSET_URL,
           mountPoint: mountRef.current!,
           fetchGuestToken: async () => {
-            const { token } = await api.superset.getGuestToken(
-              id, dateFilterRef.current,
-              meta.tenant === 'FJL' ? fjlCurrencyRef.current : undefined,
-            );
+            const { token } = await api.superset.getGuestToken(id, dateFilterRef.current, winairExtraFiltersRef.current);
             return token;
           },
           dashboardUiConfig: {
@@ -261,8 +257,8 @@ export default function DashboardViewerPage() {
             hideChartControls: true,   // hide chart-level three-dot menus
             hideTab: false,
             filters: {
-              visible: true,
-              expanded: true,   // start with filters visible (restyled as horizontal bar via dashboard CSS)
+              visible: meta?.tenant === 'WM' ? false : true,
+              expanded: meta?.tenant === 'WM' ? false : true,
             },
           },
         });
@@ -396,69 +392,57 @@ export default function DashboardViewerPage() {
         flexGrow: 1,
         minHeight: 0,
       }}>
-        {/* Date filter bar — drives cap_date RLS on every chart in this dashboard.
-            For FJL, a Currency dropdown sits to the right of the date toggle and
-            is threaded into KPIRow so the tiles stay within a single currency. */}
-        <Box sx={{ mb: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>
-          <DateFilterToggle
+        {meta?.tenant === 'WM' ? (
+          <WinairTopFilterBar
             availableDates={availableDates}
-            value={dateFilter}
-            onChange={handleDateFilterChange}
-            disabled={datesLoading || availableDates.length === 0}
+            dateFilter={dateFilter}
+            onDateFilterChange={handleDateFilterChange}
+            datesLoading={datesLoading}
+            onFilterStateChange={handleWinairFilterChange}
           />
-          <Box sx={{ flexGrow: 1 }} />
-          {meta?.tenant === 'FJL' && (
-            <>
-              {/* Embedded charts now show fares without a symbol; this indicator
-                  names the active currency. Plain label — re-renders on toggle,
-                  no re-embed needed. */}
-              <Typography
-                sx={{ fontSize: 12, color: 'text.secondary', whiteSpace: 'nowrap' }}
-                aria-live="polite"
-              >
-                Values in {fjlCurrency} ({FJL_CURRENCY_SYMBOL[fjlCurrency]})
-              </Typography>
-              <FormControl size="small" sx={{ ml: 1.5, minWidth: 88 }}>
-              {/* No floating <InputLabel> here — at size="small" with the
-                  outlined variant it tends to clip the notch and visually
-                  push into the row above. renderValue keeps the control
-                  self-describing ("Currency: NOK") without the label. */}
-              <Select
-                value={fjlCurrency}
-                onChange={(e) => {
-                  setFjlCurrency(e.target.value as 'NOK' | 'EUR' | 'DKK');
-                  setRefreshKey(k => k + 1);   // re-embed with the new currency-scoped guest token
-                }}
-                renderValue={(v) => `Currency: ${v}`}
-                inputProps={{ 'aria-label': 'Currency' }}
-                sx={{
-                  fontSize: 13,
-                  height: 32,
-                  '& .MuiSelect-select': { py: '6px', pl: 1.25, pr: '24px !important' },
-                }}
-              >
-                <MenuItem value="NOK" sx={{ fontSize: 13 }}>NOK</MenuItem>
-                <MenuItem value="EUR" sx={{ fontSize: 13 }}>EUR</MenuItem>
-                <MenuItem value="DKK" sx={{ fontSize: 13 }}>DKK</MenuItem>
-              </Select>
-              </FormControl>
-            </>
-          )}
-        </Box>
+        ) : (
+          <>
+            {/* Date filter bar — drives cap_date RLS on every chart in this dashboard.
+                For FJL, a Currency dropdown sits to the right of the date toggle and
+                is threaded into KPIRow so the tiles stay within a single currency. */}
+            <Box sx={{ mb: 0.5, display: 'flex', alignItems: 'center', gap: 1 }}>
+              <DateFilterToggle
+                availableDates={availableDates}
+                value={dateFilter}
+                onChange={handleDateFilterChange}
+                disabled={datesLoading || availableDates.length === 0}
+              />
+              <Box sx={{ flexGrow: 1 }} />
+              {meta?.tenant === 'FJL' && (
+                <FormControl size="small" sx={{ ml: 1.5, minWidth: 88 }}>
+                  <Select
+                    value={fjlCurrency}
+                    onChange={(e) => setFjlCurrency(e.target.value as 'NOK' | 'EUR' | 'DKK')}
+                    renderValue={(v) => `Currency: ${v}`}
+                    inputProps={{ 'aria-label': 'Currency' }}
+                    sx={{
+                      fontSize: 13,
+                      height: 32,
+                      '& .MuiSelect-select': { py: '6px', pl: 1.25, pr: '24px !important' },
+                    }}
+                  >
+                    <MenuItem value="NOK" sx={{ fontSize: 13 }}>NOK</MenuItem>
+                    <MenuItem value="EUR" sx={{ fontSize: 13 }}>EUR</MenuItem>
+                    <MenuItem value="DKK" sx={{ fontSize: 13 }}>DKK</MenuItem>
+                  </Select>
+                </FormControl>
+              )}
+            </Box>
 
-        {/* KPI row — CPI-rendered tiles + click-to-expand detail (JY + PW + FJL).
-            These replace the Superset big-number tiles so the values and their
-            drill-downs share a single source of truth and respond to the Cap
-            Date picker above. The KPI set is per-airline (see KPIRow).
-            cap_date: single-day uses the picked day; range uses the window's
-            end (most recent) day, since the KPI queries are single-day.
-            currency: only meaningful for FJL; JY/PW ignore it server-side. */}
-        {(meta?.tenant === 'JY' || meta?.tenant === 'PW' || meta?.tenant === 'ALT' || meta?.tenant === 'WM' || meta?.tenant === 'FJL') && (
-          <KPIRow
-            airlineCode={meta.tenant}
-            capDate={(dateFilter.mode === 'single' ? dateFilter.capDateEq : dateFilter.capDateTo) ?? ''}
-            currency={meta.tenant === 'FJL' ? fjlCurrency : undefined}
-          />
+            {/* KPI row — CPI-rendered tiles + click-to-expand detail (JY + PW + FJL). */}
+            {(meta?.tenant === 'JY' || meta?.tenant === 'PW' || meta?.tenant === 'FJL') && (
+              <KPIRow
+                airlineCode={meta.tenant}
+                capDate={(dateFilter.mode === 'single' ? dateFilter.capDateEq : dateFilter.capDateTo) ?? ''}
+                currency={meta.tenant === 'FJL' ? fjlCurrency : undefined}
+              />
+            )}
+          </>
         )}
 
         {/* Dashboard container */}
@@ -509,7 +493,6 @@ export default function DashboardViewerPage() {
               (the filter bar's APPLY FILTERS button) get clipped by the Paper's
               overflow:hidden. */}
           <Box
-            key={refreshKey}
             ref={mountRef}
             sx={{
               position: 'absolute',

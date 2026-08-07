@@ -15,16 +15,12 @@ import type {
   AdminUserListResponse, AdminResetTokenListResponse,
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
   PlatformHealthResponse, TenantSummaryResponse,
-  IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionDeleteDataResult, IngestionAuditLog, IngestionPreview,
+  IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionAuditLog, IngestionPreview,
 } from '../types';
 import type {
   SmtpConfigRead, SmtpConfigUpdate, SmtpTestRequest, SmtpTestResponse,
 } from '../types/smtpConfig';
 import { authStorage } from '../utils/authStorage';
-import type {
-  AdminTenantOption, AdminInviteUserResponse, AdminResendInviteResponse,
-  AdminSendResetEmailResponse, InviteVerifyResponse, InviteAcceptResponse,
-} from '../types';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
@@ -33,6 +29,10 @@ let _accessToken: string | null = null;
 
 export function setHttpClientAccessToken(token: string | null) {
   _accessToken = token;
+}
+
+export function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError';
 }
 
 export function getHttpClientAccessToken(): string | null {
@@ -47,7 +47,7 @@ function headers(): Record<string, string> {
   return h;
 }
 
-async function doRefresh(): Promise<boolean> {
+async function attemptRefresh(): Promise<boolean> {
   const refreshToken = authStorage.getRefreshToken();
   if (!refreshToken) return false;
 
@@ -66,74 +66,6 @@ async function doRefresh(): Promise<boolean> {
     // Refresh failed
   }
   return false;
-}
-
-// The grids fire several requests concurrently. When a token expires mid-flight
-// they all see 401 at once, and each one used to launch its own
-// POST /auth/refresh — a burst of identical refreshes racing each other.
-// Collapse them onto a single in-flight promise; the rest await that result.
-let _refreshInFlight: Promise<boolean> | null = null;
-
-async function attemptRefresh(): Promise<boolean> {
-  if (!_refreshInFlight) {
-    _refreshInFlight = doRefresh().finally(() => { _refreshInFlight = null; });
-  }
-  return _refreshInFlight;
-}
-
-// Same problem on the failure path: a burst of failed refreshes each assigned
-// window.location. Guard so only the first one navigates.
-let _loggingOut = false;
-
-function forceLogout(): never {
-  if (!_loggingOut) {
-    _loggingOut = true;
-    authStorage.removeRefreshToken();
-    _accessToken = null;
-    window.location.href = '/login';
-  }
-  throw new Error('Session expired');
-}
-
-/** Per-request options: caller-supplied abort signal and/or a timeout. */
-export interface RequestOptions {
-  signal?: AbortSignal;
-  timeoutMs?: number;
-}
-
-// Grid pages can legitimately take a while on a cold cache; 60s is a backstop
-// against a request that hangs forever, not a latency target.
-const DEFAULT_TIMEOUT_MS = 60_000;
-
-/**
- * Compose a caller's abort signal with a timeout into one signal.
- * Written by hand rather than with AbortSignal.any(), which is too recent to
- * rely on across the browsers this app has to support.
- */
-function withTimeout(opts?: RequestOptions): { signal: AbortSignal; dispose: () => void } {
-  const ctrl = new AbortController();
-  const timer = setTimeout(
-    () => ctrl.abort(new DOMException('Request timed out', 'TimeoutError')),
-    opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-  );
-  const outer = opts?.signal;
-  const onOuterAbort = () => ctrl.abort(outer?.reason);
-  if (outer) {
-    if (outer.aborted) ctrl.abort(outer.reason);
-    else outer.addEventListener('abort', onOuterAbort, { once: true });
-  }
-  return {
-    signal: ctrl.signal,
-    dispose: () => {
-      clearTimeout(timer);
-      outer?.removeEventListener('abort', onOuterAbort);
-    },
-  };
-}
-
-/** True for a cancelled or timed-out request, so callers can ignore it. */
-export function isAbortError(err: unknown): boolean {
-  return err instanceof DOMException && (err.name === 'AbortError' || err.name === 'TimeoutError');
 }
 
 /**
@@ -174,14 +106,6 @@ async function handleResponse<T>(res: Response): Promise<T> {
       throw new Error('Password change required');
     }
 
-    // Handle forced MFA enrollment (Phase 4 gate — only fires when MFA_ENFORCED is on)
-    if (res.status === 403 && errorCode === 'mfa_setup_required') {
-      if (window.location.pathname !== '/setup-mfa') {
-        window.location.href = '/setup-mfa?required=1';
-      }
-      throw new Error('MFA setup required');
-    }
-
     const err = new Error(`API ${res.status}: ${message}`) as Error & ApiErrorShape;
     err.status = res.status;
     err.errorCode = errorCode;
@@ -197,23 +121,26 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-async function fetchWithAuth<T>(url: string, init: RequestInit, opts?: RequestOptions): Promise<T> {
-  const { signal, dispose } = withTimeout(opts);
-  try {
-    let res = await fetch(url, { ...init, signal });
+async function fetchWithAuth<T>(url: string, init: RequestInit): Promise<T> {
+  let res = await fetch(url, init);
 
-    // On 401, attempt a single refresh then retry
-    if (res.status === 401) {
-      const refreshed = await attemptRefresh();
-      if (!refreshed) forceLogout();
-      // Retry with the newly refreshed token
-      res = await fetch(url, { ...init, headers: { ...headers() }, signal });
+  // On 401, attempt a single refresh then retry
+  if (res.status === 401) {
+    const refreshed = await attemptRefresh();
+    if (refreshed) {
+      // Update headers with new token
+      const newInit = { ...init, headers: { ...headers() } };
+      res = await fetch(url, newInit);
+    } else {
+      // Refresh failed — force logout by clearing state and redirecting
+      authStorage.removeRefreshToken();
+      _accessToken = null;
+      window.location.href = '/login';
+      throw new Error('Session expired');
     }
-
-    return await handleResponse<T>(res);
-  } finally {
-    dispose();
   }
+
+  return handleResponse<T>(res);
 }
 
 // Build a request URL that works for both absolute BASE
@@ -244,19 +171,13 @@ function buildQuery(params?: Record<string, string | number | undefined>): strin
   return s ? `?${s}` : '';
 }
 
-async function get<T>(path: string, params?: Record<string, string | number | undefined>, opts?: RequestOptions): Promise<T> {
+async function get<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
   const url = buildUrl(path, BASE) + buildQuery(params);
   try {
-    return await fetchWithAuth<T>(url, { headers: headers() }, opts);
+    return await fetchWithAuth<T>(url, { headers: headers() });
   } catch (err: any) {
-    // Cancellations and timeouts must reach the caller unwrapped, so it can
-    // tell "this request was superseded" from "the backend is unreachable".
-    if (isAbortError(err)) throw err;
-    // err.message was read unguarded here; a non-Error rejection made
-    // `.startsWith` throw a TypeError that masked the real failure.
-    const msg = typeof err?.message === 'string' ? err.message : String(err);
-    if (msg.startsWith('API ') || msg === 'Session expired' || msg === 'Password change required' || msg === 'MFA setup required') throw err;
-    throw new Error(`Network Error: ${msg}. Is the backend at ${BASE} reachable?`);
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
+    throw new Error(`Network Error: ${err.message}. Is the backend at ${BASE} reachable?`);
   }
 }
 
@@ -268,24 +189,7 @@ async function post<T>(path: string, body: unknown): Promise<T> {
       body: JSON.stringify(body),
     });
   } catch (err: any) {
-    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required' || err.message === 'MFA setup required') throw err;
-    throw new Error(`Network Error: ${err.message}`);
-  }
-}
-
-// Unauthenticated POST — no Authorization header, no 401-refresh/redirect
-// interceptor. For public endpoints (e.g. accept-invite) reachable by
-// logged-out users.
-async function publicPost<T>(path: string, body: unknown): Promise<T> {
-  try {
-    const res = await fetch(`${BASE}${path}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    return await handleResponse<T>(res);
-  } catch (err: any) {
-    if (err.message.startsWith('API ')) throw err;
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
     throw new Error(`Network Error: ${err.message}`);
   }
 }
@@ -326,7 +230,7 @@ async function postMultipart<T>(path: string, files: File[]): Promise<T> {
   try {
     return await fetchWithAuth<T>(`${BASE}${path}`, init);
   } catch (err: any) {
-    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required' || err.message === 'MFA setup required') throw err;
+    if (err.message.startsWith('API ') || err.message === 'Session expired' || err.message === 'Password change required') throw err;
     throw new Error(`Network Error: ${err.message}`);
   }
 }
@@ -374,15 +278,15 @@ async function processDownload(res: Response): Promise<void> {
 
 export const httpClient: CpiApiClient = {
   airline: {
-    listSnapshots: (q?: SnapshotQuery, opts?: RequestOptions) =>
-      get<Paginated<AirlineSnapshot>>('/api/v1/airline/snapshots', q as Record<string, string | number | undefined>, opts),
+    listSnapshots: (q?: SnapshotQuery) =>
+      get<Paginated<AirlineSnapshot>>('/api/v1/airline/snapshots', q as Record<string, string | number | undefined>),
     getFilterMetadata: (tenant?: string) =>
       get<FilterMetadata[]>('/api/v1/airline/filter-metadata', tenant ? { tenant } : undefined),
     exportSnapshots: (q?: Record<string, string>) =>
       download('/api/v1/airline/export', q),
     velocity: {
-      listSnapshots: (q?: SnapshotQuery, opts?: RequestOptions) =>
-        get<Paginated<VelocitySnapshot>>('/api/v1/airline/velocity/snapshots', q as Record<string, string | number | undefined>, opts),
+      listSnapshots: (q?: SnapshotQuery) =>
+        get<Paginated<VelocitySnapshot>>('/api/v1/airline/velocity/snapshots', q as Record<string, string | number | undefined>),
       getFilterMetadata: (tenant?: string) =>
         get<FilterMetadata[]>('/api/v1/airline/velocity/filter-metadata', tenant ? { tenant } : undefined),
       exportSnapshots: (q?: Record<string, string>) =>
@@ -390,8 +294,8 @@ export const httpClient: CpiApiClient = {
     },
   },
   cfl: {
-    listSnapshots: (q?: SnapshotQuery, opts?: RequestOptions) =>
-      get<Paginated<CflSnapshot>>('/api/v1/cfl/snapshots', q as Record<string, string | number | undefined>, opts),
+    listSnapshots: (q?: SnapshotQuery) =>
+      get<Paginated<CflSnapshot>>('/api/v1/cfl/snapshots', q as Record<string, string | number | undefined>),
     getFilterMetadata: (tenant?: string) =>
       get<FilterMetadata[]>('/api/v1/cfl/filter-metadata', tenant ? { tenant } : undefined),
     exportSnapshots: (q?: Record<string, string>) =>
@@ -410,8 +314,6 @@ export const httpClient: CpiApiClient = {
       post<IngestionCommitResult>(`/api/v1/ingestion/jobs/${id}/commit`, { replace_existing: replaceExisting }),
     cancel: (id: string) =>
       del<IngestionJob>(`/api/v1/ingestion/jobs/${id}`),
-    deleteData: (id: string) =>
-      del<IngestionDeleteDataResult>(`/api/v1/ingestion/jobs/${id}/data`),
     getAudit: (id: string) =>
       get<IngestionAuditLog>(`/api/v1/ingestion/jobs/${id}/audit`),
     getPreview: (id: string) =>
@@ -494,39 +396,19 @@ export const httpClient: CpiApiClient = {
         get<IngestionRunDetail>(`/api/v1/admin/ingestion-runs/${id}`),
       cancel: (id: string) =>
         post<IngestionRun>(`/api/v1/admin/ingestion-runs/${id}/cancel`, {}),
-      deleteFileData: (ingestedFileId: string) =>
-        del<{ rows_deleted: number }>(`/api/v1/admin/ingestion-runs/files/${ingestedFileId}/data`),
-      reingestFile: (ingestedFileId: string) =>
-        post<RunNowResult>(`/api/v1/admin/ingestion-runs/files/${ingestedFileId}/reingest`, {}),
     },
     passwordManagement: {
       listUsers: () => get<AdminUserListResponse>('/api/v1/admin/password-management/users'),
-      listTenants: () => get<AdminTenantOption[]>('/api/v1/admin/password-management/tenants'),
-      inviteUser: (body: { email: string; display_name: string; tenant_id: string; role?: string }) =>
-        post<AdminInviteUserResponse>('/api/v1/admin/password-management/invite-user', { role: 'TENANT_ADMIN', ...body }),
-      resendInvite: (body: { email?: string; user_id?: string }) =>
-        post<AdminResendInviteResponse>('/api/v1/admin/password-management/resend-invite', body),
-      sendResetEmail: (body: { email: string }) =>
-        post<AdminSendResetEmailResponse>('/api/v1/admin/password-management/send-reset-email', body),
+      listResetCodes: (limit?: number) =>
+        get<AdminResetTokenListResponse>('/api/v1/admin/password-management/reset-codes', limit ? { limit } : undefined),
+      generateCode: (email: string) =>
+        post<AdminGenerateResetCodeResponse>('/api/v1/admin/password-management/generate-code', { email }),
       forceReset: (email: string, newPassword: string, forceChangeOnLogin: boolean) =>
         post<AdminForceResetResponse>('/api/v1/admin/password-management/force-reset', {
           email,
           new_password: newPassword,
           force_change_on_login: forceChangeOnLogin,
         }),
-      // No request body; 204 No Content (handleResponse short-circuits it).
-      deactivateUser: (userId: string) =>
-        post<void>(`/api/v1/admin/password-management/users/${userId}/deactivate`, {}),
-      reactivateUser: (userId: string) =>
-        post<void>(`/api/v1/admin/password-management/users/${userId}/reactivate`, {}),
-      // DELETE -> 204 No Content; handleResponse resolves void.
-      deleteUser: (userId: string) =>
-        del<void>(`/api/v1/admin/password-management/users/${userId}`),
-      // Clears the user's enrolled authenticator + recovery codes (idempotent);
-      // they re-enroll at next sign-in. Returns a small JSON body.
-      resetMfa: (userId: string) =>
-        post<{ user_id: string; email: string; mfa_reset: boolean }>(
-          `/api/v1/admin/password-management/users/${userId}/reset-mfa`, {}),
     },
     dashboard: {
       getHealth: () => get<PlatformHealthResponse>('/api/v1/admin/dashboard/health'),
@@ -543,12 +425,6 @@ export const httpClient: CpiApiClient = {
       },
     },
   },
-  auth: {
-    verifyInvite: (token: string) =>
-      publicPost<InviteVerifyResponse>('/api/v1/auth/verify-invite', { token }),
-    acceptInvite: (body: { token: string; new_password: string }) =>
-      publicPost<InviteAcceptResponse>('/api/v1/auth/accept-invite', body),
-  },
   stats: {
     getFreshnessMetrics: () => get<DataFreshness[]>('/api/v1/stats/freshness'),
   },
@@ -557,7 +433,20 @@ export const httpClient: CpiApiClient = {
     updateUserRoles: (roles, tenant_id) => post<{ roles: string[] }>('/api/v1/tenant/update-roles', { tenant_id, roles }),
   },
   superset: {
-    getGuestToken: (dashboardId: string, dateFilter?: DashboardDateFilter, currency?: string) => {
+    getGuestToken: (
+      dashboardId: string,
+      dateFilter?: DashboardDateFilter,
+      extraFilters?: {
+        route?: string;
+        airline?: string;
+        flightNum?: string;
+        dtdBucket?: string;
+        pricePosition?: string;
+        priceAction?: string;
+        currency?: string;
+        fareComponent?: string;
+      },
+    ) => {
       const params: Record<string, string | number | undefined> = {
         dashboard_id: dashboardId,
       };
@@ -567,9 +456,14 @@ export const httpClient: CpiApiClient = {
         params.cap_date_from = dateFilter.capDateFrom;
         params.cap_date_to   = dateFilter.capDateTo;
       }
-      if (currency) {
-        params.currency = currency;
-      }
+      if (extraFilters?.route) params.route = extraFilters.route;
+      if (extraFilters?.airline) params.airline = extraFilters.airline;
+      if (extraFilters?.flightNum) params.flight_num = extraFilters.flightNum;
+      if (extraFilters?.dtdBucket) params.dtd_bucket = extraFilters.dtdBucket;
+      if (extraFilters?.pricePosition) params.price_status = extraFilters.pricePosition;
+      if (extraFilters?.priceAction) params.recommendation = extraFilters.priceAction;
+      if (extraFilters?.currency) params.currency = extraFilters.currency;
+      if (extraFilters?.fareComponent) params.fare_component = extraFilters.fareComponent;
       return get<{
         token: string;
         dashboard_uuid: string;

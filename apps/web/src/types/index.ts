@@ -1,6 +1,6 @@
 // ──────── User & Session ────────
-export type UserRole = 'TENANT_ADMIN' | 'TENANT_USER';
-export type ModuleCode = 'airline_jy' | 'airline_pw' | 'airline_alt' | 'cfl_fjl' | 'airline_wm';
+export type UserRole = 'TENANT_ADMIN';
+export type ModuleCode = 'airline_jy' | 'airline_pw' | 'cfl_fjl' | 'airline_alt' | 'airline_wm';
 export type Capability = 'alerts' | 'exports' | 'saved_views';
 
 export interface TenantSession {
@@ -525,39 +525,6 @@ export interface AdminForceResetResponse {
   message: string;
 }
 
-export interface AdminTenantOption {
-  tenant_id: string;
-  slug: string;
-  name: string;
-}
-
-export interface AdminInviteUserResponse {
-  user_id: string;
-  email: string;
-  invite_sent: boolean;
-}
-
-export interface AdminResendInviteResponse {
-  success: boolean;
-  invite_sent: boolean;
-  message: string;
-}
-
-export interface AdminSendResetEmailResponse {
-  sent: boolean;
-  message: string;
-}
-
-export interface InviteVerifyResponse {
-  valid: boolean;
-  email?: string | null;
-}
-
-export interface InviteAcceptResponse {
-  success: boolean;
-  message: string;
-}
-
 
 // ──────── Data Ops (restored from 66b5965) ────────
 export type IngestionStatus =
@@ -568,8 +535,7 @@ export type IngestionStatus =
   | 'COMMITTED'
   | 'REJECTED'
   | 'REPLACED'
-  | 'FAILED'
-  | 'DELETED';
+  | 'FAILED';
 
 export type IngestionDomain = 'AIRLINE' | 'VELOCITY' | 'CFL';
 export type IngestionMode = 'STRICT' | 'LENIENT';
@@ -604,9 +570,6 @@ export interface IngestionJob {
   committed_at: string | null;
   replaced_by_job_id: string | null;
   error_message: string | null;
-  /** True only for a COMMITTED, manually-uploaded job whose inserted fact
-   *  rows can be deleted from the Ingestion Jobs page. Computed by the API. */
-  deletable?: boolean;
 }
 
 export type IngestionMode = 'STRICT' | 'LENIENT';
@@ -732,11 +695,6 @@ export interface IngestionCommitResult {
   job: IngestionJob;
   rows_inserted: number;
   replaced_job_id: string | null;
-}
-
-export interface IngestionDeleteDataResult {
-  job: IngestionJob;
-  rows_deleted: number;
 }
 
 export interface IngestionAuditEntry {
