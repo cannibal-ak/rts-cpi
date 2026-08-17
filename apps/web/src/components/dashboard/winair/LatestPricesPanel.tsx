@@ -382,11 +382,6 @@ export default function LatestPricesPanel({
   // ── Render ──────────────────────────────────────────────────────────
   const hasRoutes = effectiveRoutes.length > 0;
   const showChart = hasRoutes && !loading && !error && points.length > 0;
-  const perRoute = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const p of points) counts.set(p.market, (counts.get(p.market) ?? 0) + 1);
-    return counts;
-  }, [points]);
 
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: 0 }}>
@@ -395,9 +390,7 @@ export default function LatestPricesPanel({
         <Typography sx={{ fontSize: 12.5, fontWeight: 600 }}>Latest Prices</Typography>
         {/* Routes only. The capture date is already in the page header, the
             airline count is readable from the legend, and the explanation of
-            the default belonged in a tooltip rather than across the chart.
-            The fare count rides on its own route's chip, so scale stays
-            visible without a second line of prose. */}
+            the default belonged in a tooltip rather than across the chart. */}
         {markets.map(m => (
           <Tooltip
             key={m}
@@ -407,7 +400,7 @@ export default function LatestPricesPanel({
           >
             <Chip
               size="small"
-              label={`${m.replace('-', ' → ')} · ${perRoute.get(m) ?? 0}`}
+              label={m.replace('-', ' → ')}
               // Outlined for a route the user did not choose, so a default
               // never reads as a selection.
               variant={defaultRoute ? 'outlined' : 'filled'}
