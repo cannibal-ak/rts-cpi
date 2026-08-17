@@ -670,6 +670,31 @@ export default function DashboardViewerPage() {
         //   SDK creates an iframe to: {SUPERSET_URL}/embedded/{embedded_uuid}
         //   which is Superset's canvas-only view (no global nav, no chrome).
         //   The guest token is sent to the iframe via postMessage.
+        //
+        // Extra query params for that iframe URL. The SDK spreads these LAST
+        // over its own derived params, so uiConfig here replaces the value it
+        // computes from the hide* flags below.
+        const urlParams: Record<string, string> = {};
+        // While a section is pinned, the teal bar is the sole navigation and
+        // Superset's own top-level tab strip would repeat the same five names.
+        // uiConfig 13 = hideTitle(1) + hideNav(4) + hideChartControls(8):
+        // hideNav stops the strip from mounting at all. Section content is
+        // rendered by a separate component keyed off the permalink's
+        // activeTabs, so switching (and the nested Line/Bar/Table sub-tabs)
+        // still works. Unpinned WinAir — the "Dashboard" fallback entry —
+        // keeps the strip: it is the only navigation there.
+        if (isWinair && supersetTabRef.current) urlParams.uiConfig = '13';
+        // Seed the dashboard's state from outside the iframe. A permalink
+        // wins when one is pinned: it already carries the filters as well
+        // as the tab, so passing native_filters too would give Superset two
+        // sources of truth for the same thing. Both omitted when empty, so
+        // the dashboard falls back to its own defaults.
+        if (permalinkKeyRef.current) {
+          urlParams.permalink_key = permalinkKeyRef.current;
+        } else if (isWinair && appliedFilterParamsRef.current) {
+          urlParams.native_filters = appliedFilterParamsRef.current;
+        }
+
         const result = await window.supersetEmbeddedSdk.embedDashboard({
           id: metadata.embedded_uuid,
           supersetDomain: SUPERSET_URL,
@@ -695,16 +720,7 @@ export default function DashboardViewerPage() {
               visible: !isWinair,
               expanded: !isWinair,   // others: filters visible (restyled as a horizontal bar via dashboard CSS)
             },
-            // Seed the dashboard's state from outside the iframe. A permalink
-            // wins when one is pinned: it already carries the filters as well
-            // as the tab, so passing native_filters too would give Superset two
-            // sources of truth for the same thing. Both omitted when empty, so
-            // the dashboard falls back to its own defaults.
-            ...(permalinkKeyRef.current
-              ? { urlParams: { permalink_key: permalinkKeyRef.current } }
-              : isWinair && appliedFilterParamsRef.current
-                ? { urlParams: { native_filters: appliedFilterParamsRef.current } }
-                : {}),
+            ...(Object.keys(urlParams).length ? { urlParams } : {}),
           },
         });
         if (disposed) { result.unmount(); return; }
