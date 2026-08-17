@@ -2,7 +2,7 @@ import { Box, Tabs, Tab, Alert, Skeleton, CircularProgress } from '@mui/material
 import { ScatterPlot } from '@mui/icons-material';
 import type { DashboardTab } from '../../../api/client';
 import {
-  BANNER_HEADER_BG, HAIRLINE, LABEL_INK, MUTED_INK,
+  BANNER_HEADER_BG, LABEL_INK, MUTED_INK,
   FIELD_BG, FIELD_BG_ACTIVE, FIELD_LINE, FIELD_LINE_ACTIVE,
 } from '../bannerTheme';
 
@@ -59,9 +59,11 @@ export default function WinairTabBar({
     <Box
       sx={{
         bgcolor: BANNER_HEADER_BG,
-        borderTopLeftRadius: 8,
-        borderTopRightRadius: 8,
-        borderBottom: `1px solid ${HAIRLINE}`,
+        // Same radius/elevation spec as WinairTopFilterBar's card, so the two
+        // read as siblings; the margin is the gap between them.
+        borderRadius: 1.5,
+        boxShadow: 1,
+        mb: 0.75,
         px: 1,
       }}
     >
