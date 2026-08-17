@@ -32,12 +32,14 @@ interface WinairTabBarProps {
 /**
  * WinAir's one row of navigation: Latest Prices, then the dashboard's sections.
  *
- * Superset's own tab row is hidden inside the iframe whenever a section is
- * pinned (uiConfig hideNav bit, set in DashboardViewerPage's embed), so this
- * bar is the ONLY way to reach four fifths of the dashboard. That is why it
- * degrades loudly rather than quietly: a failed tab fetch still leaves Latest
- * Prices and a plain "Dashboard" entry reachable — and that unpinned fallback
- * embeds without hideNav, so Superset's own row returns as the navigation.
+ * Superset's own tab row is hidden inside the iframe (WM-EMBED-HIDE-TOPTABS
+ * css block on dashboard 6 — Superset 3.1.0 ignores the uiConfig hideNav bit
+ * the embed also sends), so this bar is the ONLY way to reach four fifths of
+ * the dashboard. That is why it degrades loudly rather than quietly: a failed
+ * tab fetch still leaves Latest Prices and a plain "Dashboard" entry
+ * reachable. Once a Superset upgrade honours hideNav (sent only while a
+ * section is pinned), the css block can go and that fallback view will get
+ * Superset's own row back as its navigation.
  *
  * Presentational only — it does no fetching and knows nothing about the URL.
  */
