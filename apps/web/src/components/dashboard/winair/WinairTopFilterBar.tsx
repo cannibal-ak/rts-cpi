@@ -185,7 +185,7 @@ export default function WinairTopFilterBar({
                   borderRadius: '8px',
                   px: 1.75,
                   boxShadow: 'none',
-                  '&:hover': { bgcolor: '#e6f2f6', boxShadow: 'none' },
+                  '&:hover': { bgcolor: '#fbeaea', boxShadow: 'none' },
                   '&.Mui-disabled': { bgcolor: 'rgba(255,255,255,0.25)', color: 'rgba(255,255,255,0.6)' },
                 }}
               >
@@ -228,7 +228,8 @@ export default function WinairTopFilterBar({
         ))}
 
         {!filtersLoading && filtersError && (
-          <Typography sx={{ gridColumn: '1 / -1', fontSize: 12.5, color: '#ffd9d9' }}>
+          // Pale amber, not pink — pink disappears against the red banner.
+          <Typography sx={{ gridColumn: '1 / -1', fontSize: 12.5, color: '#FFECB3' }}>
             Filters unavailable — {filtersError}
           </Typography>
         )}

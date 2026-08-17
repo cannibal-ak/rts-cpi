@@ -148,8 +148,9 @@ export default function WinairTabBar({
             mb: 0.75,
             fontSize: 11.5,
             bgcolor: 'rgba(255,255,255,0.10)',
-            color: '#ffd9d9',
-            '& .MuiAlert-icon': { color: '#ffd9d9', py: 0.5 },
+            // Pale amber, not pink — pink disappears against the red banner.
+            color: '#FFECB3',
+            '& .MuiAlert-icon': { color: '#FFECB3', py: 0.5 },
           }}
         >
           {error}

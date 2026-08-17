@@ -24,6 +24,7 @@ import DateFilterToggle from '../../components/dashboard/DateFilterToggle';
 import SingleChartViewer from '../../components/dashboard/SingleChartViewer';
 import KPIRow from '../../components/dashboard/KPIRow';
 import CapDateChip from '../../components/dashboard/CapDateChip';
+import { BANNER_BG } from '../../components/dashboard/bannerTheme';
 import WinairTopFilterBar from '../../components/dashboard/winair/WinairTopFilterBar';
 import LatestPricesPanel from '../../components/dashboard/winair/LatestPricesPanel';
 import WinairTabBar, { PRICES_TAB, DASHBOARD_TAB } from '../../components/dashboard/winair/WinairTabBar';
@@ -776,7 +777,16 @@ export default function DashboardViewerPage() {
             size="small"
             variant="outlined"
             color="primary"
-            sx={{ ml: 2, fontWeight: 500 }}
+            sx={{
+              ml: 2,
+              fontWeight: 500,
+              // WinAir's chips follow its brand red, not the app primary.
+              ...(isWinair && {
+                color: BANNER_BG,
+                borderColor: BANNER_BG,
+                '& .MuiChip-icon': { color: BANNER_BG },
+              }),
+            }}
           />
         )}
 
@@ -796,6 +806,7 @@ export default function DashboardViewerPage() {
             // the embed, so it always applies to whatever is on screen.
             appliesToView={isWinair || activeViewMode === 'dashboard'}
             compact={isHeaderTight}
+            accent={BANNER_BG}
           />
         )}
 
