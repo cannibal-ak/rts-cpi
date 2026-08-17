@@ -39,7 +39,7 @@ export const navigationItems: NavItem[] = [
     hideForSuperAdmin: true,
   },
   {
-    label: 'Airline CPI \u2013 WinAir',
+    label: 'Airline CPI Data',
     path: '/cpi/airline/wm',
     icon: 'Flight',
     requiredModules: ['airline_wm'],

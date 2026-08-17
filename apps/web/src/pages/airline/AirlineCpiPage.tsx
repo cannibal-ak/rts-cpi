@@ -17,7 +17,7 @@ const TENANT_LABELS: Record<string, string> = {
   JY: 'Airline CPI – JY',
   PW: 'Airline CPI – PW',
   ALT: 'Airline CPI – SKY',
-  WM: 'Airline CPI – WinAir',
+  WM: 'Airline CPI Data',
 };
 
 export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
