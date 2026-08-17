@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Drawer,
+  Divider,
   List,
   ListItemButton,
   ListItemIcon,
@@ -11,6 +12,7 @@ import {
   useTheme,
   useMediaQuery,
 } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   Home, Flight, DirectionsBoat, Dashboard,
   CloudUpload,
@@ -18,9 +20,11 @@ import {
   Email,
   Storage, Schedule, PlayCircleFilled, VpnKey, AssignmentTurnedIn,
   PriceChange, Speed,
+  LogoutOutlined,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSession } from '../../context/SessionContext';
+import { useAuth } from '../../context/AuthContext';
 import { navigationItems } from '../../mock/navigation';
 import { NavItem } from '../../types';
 import { isSuperAdmin } from '../../utils/access';
@@ -103,6 +107,7 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const { hasAccess, session } = useSession();
+  const { logout } = useAuth();
 
   const filteredItems = navigationItems.filter(item => {
     if (item.requireSuperAdmin && !isSuperAdmin(session)) return false;
@@ -218,42 +223,83 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
             flexShrink: 0,
             borderRight: 1,
             borderColor: 'divider',
-            overflowY: 'auto',
             overflowX: 'hidden',
-            py: 1,
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            gap: 0.5,
           }}
         >
-          {sections.map(s => (
-            <Tooltip key={s.key} title={s.title} placement="right" arrow>
-              <ListItemButton
-                selected={railActiveKey === s.key}
-                onClick={() => showSection(s)}
-                sx={{
-                  width: 44,
-                  minHeight: 44,
-                  maxHeight: 44,
-                  flexGrow: 0,
-                  borderRadius: '10px',
-                  justifyContent: 'center',
-                  px: 0,
-                  '&.Mui-selected': {
-                    bgcolor: 'primary.main',
-                    color: 'primary.contrastText',
-                    '& .MuiListItemIcon-root': { color: 'primary.contrastText' },
-                    '&:hover': { bgcolor: 'primary.dark' },
-                  },
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: 0, justifyContent: 'center' }}>
-                  {iconMap[s.iconKey] || <Home />}
-                </ListItemIcon>
-              </ListItemButton>
-            </Tooltip>
-          ))}
+          <Box
+            sx={{
+              width: '100%',
+              flexGrow: 1,
+              overflowY: 'auto',
+              overflowX: 'hidden',
+              py: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 0.5,
+            }}
+          >
+            {sections.map(s => (
+              <Tooltip key={s.key} title={s.title} placement="right" arrow>
+                <ListItemButton
+                  selected={railActiveKey === s.key}
+                  onClick={() => showSection(s)}
+                  sx={{
+                    width: 44,
+                    minHeight: 44,
+                    maxHeight: 44,
+                    flexGrow: 0,
+                    borderRadius: '10px',
+                    justifyContent: 'center',
+                    px: 0,
+                    '&.Mui-selected': {
+                      bgcolor: 'primary.main',
+                      color: 'primary.contrastText',
+                      '& .MuiListItemIcon-root': { color: 'primary.contrastText' },
+                      '&:hover': { bgcolor: 'primary.dark' },
+                    },
+                  }}
+                >
+                  <ListItemIcon sx={{ minWidth: 0, justifyContent: 'center' }}>
+                    {iconMap[s.iconKey] || <Home />}
+                  </ListItemIcon>
+                </ListItemButton>
+              </Tooltip>
+            ))}
+          </Box>
+
+          {/* Sign out sits below the scrolling sections so it stays reachable
+              in both the rail and expanded states. Same fire-and-forget flow
+              as the AppBar popover's Sign out. */}
+          <Divider sx={{ width: 28, my: 0.5 }} />
+          <Tooltip title="Sign out" placement="right" arrow>
+            <ListItemButton
+              onClick={() => {
+                logout();
+                navigate('/login');
+              }}
+              sx={{
+                width: 44,
+                minHeight: 44,
+                maxHeight: 44,
+                flexGrow: 0,
+                borderRadius: '10px',
+                justifyContent: 'center',
+                px: 0,
+                mb: 1,
+                '&:hover': {
+                  bgcolor: (t) => alpha(t.palette.error.main, 0.08),
+                },
+              }}
+            >
+              <ListItemIcon sx={{ minWidth: 0, justifyContent: 'center', color: 'error.main' }}>
+                <LogoutOutlined />
+              </ListItemIcon>
+            </ListItemButton>
+          </Tooltip>
         </Box>
 
         {/* Panel: the active section's contents. Collapsing hides only this. */}

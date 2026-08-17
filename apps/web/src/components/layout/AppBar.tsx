@@ -11,7 +11,7 @@ import {
   Tooltip,
 } from '@mui/material';
 import {
-  Menu as MenuIcon,
+  MenuOpen,
   LightMode,
   DarkMode,
   PersonOutlined,
@@ -33,9 +33,10 @@ import { TENANT_CONFIG, TENANT_FALLBACK } from '../../utils/tenantConfig';
 
 interface AppBarProps {
   onToggleSidebar: () => void;
+  sidebarOpen: boolean;
 }
 
-export default function AppBar({ onToggleSidebar }: AppBarProps) {
+export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
   const { session } = useSession();
   const { mode, toggleTheme } = useThemeMode();
   const { logout } = useAuth();
@@ -95,14 +96,19 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
       }}
     >
       <Toolbar sx={{ gap: 1 }}>
-        <IconButton
-          edge="start"
-          aria-label="Toggle sidebar navigation"
-          onClick={onToggleSidebar}
-          sx={{ mr: 1 }}
-        >
-          <MenuIcon />
-        </IconButton>
+        <Tooltip title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}>
+          <IconButton
+            edge="start"
+            aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+            onClick={onToggleSidebar}
+            sx={{ mr: 1 }}
+          >
+            {/* MenuOpen's arrow points left (collapse); mirrored when the
+                sidebar is collapsed so the arrow points the way the panel
+                will move. */}
+            <MenuOpen sx={{ transform: sidebarOpen ? 'none' : 'scaleX(-1)' }} />
+          </IconButton>
+        </Tooltip>
 
         {isPwTenant ? (
           <Box

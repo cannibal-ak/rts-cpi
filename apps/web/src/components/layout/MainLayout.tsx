@@ -46,7 +46,7 @@ export default function MainLayout() {
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden' }}>
-      <AppBar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} />
+      <AppBar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} sidebarOpen={sidebarOpen} />
       <Sidebar
         open={sidebarOpen}
         onOpen={() => setSidebarOpen(true)}
