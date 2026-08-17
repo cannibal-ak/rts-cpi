@@ -1,7 +1,7 @@
 /**
  * In-memory mock API client — for offline demos without a backend.
  */
-import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, DashboardFilterConfigResponse, DashboardFilterSelections, KpiKey, KpiSummaryResponse, KpiDetailResponse } from './client';
+import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, DashboardFilterConfigResponse, DashboardFilterSelections, DashboardPermalinkResponse, DashboardTabsResponse, KpiKey, KpiSummaryResponse, KpiDetailResponse, PriceHistoryQuery, PricePointsQuery } from './client';
 import type {
   Paginated,
   AlertRule,
@@ -73,6 +73,32 @@ export const mockClient: CpiApiClient = {
       delay(paginate(mockAirlineSnapshots, q?.page as number, q?.page_size as number)),
     getFilterMetadata: (_tenant?: string) => delay(mockFilterMetadata.airline),
     exportSnapshots: (_q?: Record<string, string>) => delay(undefined),
+    // No fixture: the Latest Prices chart is WinAir-only and the mock
+    // client has no WM session. An empty result renders the panel's
+    // "pick a route" state rather than a broken chart.
+    //
+    // Note for anyone testing offline: the WinAir tab bar cannot be
+    // exercised here either — mockClient's mintDashboardPermalink returns
+    // {key: null} unconditionally, so no Superset section can be selected.
+    listPricePoints: (q: PricePointsQuery) =>
+      delay({
+        cap_date: null,
+        routes: (q.routes ?? '').split(',').filter(Boolean),
+        currency: null,
+        truncated: false,
+        truncated_routes: [],
+        points: [],
+      }),
+    getPriceHistory: (q: PriceHistoryQuery) =>
+      delay({
+        airline: q.airline,
+        flt_num: q.flt_num ?? null,
+        origin: q.origin,
+        destination: q.destination,
+        dep_date: q.dep_date,
+        curr: null,
+        points: [],
+      }),
     velocity: {
       listSnapshots: (q?: SnapshotQuery) =>
         delay(paginate([], q?.page as number, q?.page_size as number)),
@@ -526,19 +552,48 @@ export const mockClient: CpiApiClient = {
         { slice_id: 3, slice_name: 'Breakdown by Type', viz_type: 'pie',                     description: null, is_kpi: false },
       ],
     }),
+    getDashboardTabs: (dashboardId: string): Promise<DashboardTabsResponse> => delay({
+      dashboard_id: Number(dashboardId),
+      dashboard_app_id: dashboardId,
+      // Only the WinAir dashboard is tabbed; everything else reports no tabs,
+      // which callers read as "not tab-navigable".
+      tabs: dashboardId === '5'
+        ? [
+            { id: 'TAB-wmNav1', label: 'Lowest Available Fare' },
+            { id: 'TAB-wmNav2', label: 'Pricing Recommendations' },
+            { id: 'TAB-wmNav3', label: 'Competitor Breakdown' },
+            { id: 'TAB-wmNav4', label: 'Min/Max Fare' },
+            { id: 'TAB-wmNav5', label: 'Velocity' },
+          ]
+        : [],
+    }),
+    // No Superset to store state in offline, so no key — the caller then embeds
+    // without the param, same as the buildFilterParams '' contract below.
+    mintDashboardPermalink: (
+      _dashboardId: string,
+      _opts: { activeTab?: string; selections?: DashboardFilterSelections },
+    ): Promise<DashboardPermalinkResponse> => delay({ key: null }),
     getFilterConfig: (dashboardId: string): Promise<DashboardFilterConfigResponse> => delay({
       dashboard_id: dashboardId,
       filters: [
-        { id: 'NATIVE_FILTER-Route',   field: 'route',   label: 'Route (O&D)', description: 'Origin → Destination',
-          dataset_id: 32, multi_select: true, values: ['ANU → BGI', 'ANU → SLU', 'EIS → SXM'] },
-        { id: 'NATIVE_FILTER-Airline', field: 'airline', label: 'Airline',     description: 'WM + competitor carriers',
-          dataset_id: 32, multi_select: true, values: ['5L', 'BW', 'JY', 'S6', 'WM'] },
+        // Scopes differ on purpose so chart view's per-chart filtering is
+        // exercisable offline: Route reaches both charts, Days Left only one.
+        { id: 'NATIVE_FILTER-Route',    field: 'route',     label: 'Route (O&D)', description: 'Origin → Destination',
+          dataset_id: 32, multi_select: true, values: ['ANU → BGI', 'ANU → SLU', 'EIS → SXM'],
+          charts_in_scope: [1, 2, 3] },
+        { id: 'NATIVE_FILTER-DaysLeft', field: 'days_left', label: 'Days Left',   description: 'Days to departure',
+          dataset_id: 34, multi_select: true, values: ['0', '7', '14', '30'],
+          charts_in_scope: [3] },
       ],
     }),
     // The real endpoint rison-encodes a Superset dataMask. Mock mode has no
     // Superset to feed, so return '' — the caller then omits the URL param.
     buildFilterParams: (_dashboardId: string, _selections: DashboardFilterSelections) =>
       delay({ native_filters: '' }),
+    // No Superset to mint against offline. A null key is the "nothing to
+    // overlay" contract, so chart view falls back to the plain explore URL.
+    mintChartFormDataKey: (_dashboardId: string, _sliceId: number) =>
+      delay({ key: null, cap_date: null, applied: [], out_of_scope: [] }),
   },
   kpi: {
     getSummary: (airlineCode: string, capDate: string, currency?: string): Promise<KpiSummaryResponse> => delay({

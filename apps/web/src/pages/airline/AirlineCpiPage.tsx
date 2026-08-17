@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, type MutableRefObject } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Box, Tabs, Tab, Breadcrumbs, Link, Typography, Tooltip, Button } from '@mui/material';
 import { NavigateNext, FileDownload } from '@mui/icons-material';
 import AirlineCpiPricingTab from './AirlineCpiPricingTab';
@@ -23,7 +24,12 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   // when the user switches tabs.
   const [pricingFilters, setPricingFilters] = useState<Record<string, string>>({});
   const [velocityFilters, setVelocityFilters] = useState<Record<string, string>>({});
-  const [tab, setTab] = useState<0 | 1>(0); // 0 = Pricing, 1 = Velocity
+
+  // The active tab lives in the URL (?tab=pricing|velocity) so the sidebar can
+  // link straight to it and a refresh/bookmark keeps you where you were.
+  // Anything other than 'velocity' — including no param at all — means Pricing,
+  // so a bare /cpi/airline/<tenant> behaves exactly as before.
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [freshness, setFreshness] = useState<DataFreshness | null>(null);
 
@@ -37,10 +43,15 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT', 'WM'];
   const showTabs = TENANTS_WITH_VELOCITY.includes(tenantCode);
 
+  const tab: 0 | 1 = showTabs && searchParams.get('tab') === 'velocity' ? 1 : 0;
+  const setTab = (next: 0 | 1) =>
+    setSearchParams({ tab: next === 1 ? 'velocity' : 'pricing' }, { replace: true });
+
+  // Switching module is a fresh route with no ?tab, so the tab resets to
+  // Pricing on its own — only the per-tab filters need clearing here.
   useEffect(() => {
     setPricingFilters({});
     setVelocityFilters({});
-    setTab(0);
   }, [tenantCode]);
 
   useEffect(() => {

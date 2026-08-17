@@ -17,12 +17,15 @@ import {
   Security, Settings, Description, ViewModule,
   Email,
   Storage, Schedule, PlayCircleFilled, VpnKey, AssignmentTurnedIn,
+  PriceChange, Speed,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSession } from '../../context/SessionContext';
 import { navigationItems } from '../../mock/navigation';
 import { NavItem } from '../../types';
 import { isSuperAdmin } from '../../utils/access';
+import SidebarDashboardCharts from './SidebarDashboardCharts';
+import { subItemSx, subItemTextProps } from './sidebarSubItem';
 
 const DRAWER_WIDTH = 260;
 const MINI_DRAWER_WIDTH = 68;
@@ -38,7 +41,27 @@ const iconMap: Record<string, React.ReactElement> = {
   PlayCircleFilled: <PlayCircleFilled />,
   VpnKey: <VpnKey />,
   AssignmentTurnedIn: <AssignmentTurnedIn />,
+  PriceChange: <PriceChange />,
+  Speed: <Speed />,
 };
+
+// A child path carries its own query string (e.g. '/cpi/airline/wm?tab=velocity'),
+// so matching on pathname alone would light up every sibling. Compare the path
+// and every param the child names; params it does not name are ignored.
+function isChildActive(pathname: string, search: string, childPath: string): boolean {
+  const [childPathname, childQuery = ''] = childPath.split('?');
+  if (pathname !== childPathname) return false;
+  if (!childQuery) return true;
+  const current = new URLSearchParams(search);
+  const wanted = new URLSearchParams(childQuery);
+  for (const [key, value] of wanted.entries()) {
+    // A tab param the URL has not set yet still means the first tab, which is
+    // what a bare /cpi/airline/wm renders.
+    const actual = current.get(key) ?? (key === 'tab' ? 'pricing' : null);
+    if (actual !== value) return false;
+  }
+  return true;
+}
 
 interface SidebarProps {
   open: boolean;
@@ -154,9 +177,22 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                   })()
                 ) : (
                   catItems.map(item => {
-                    const isSelected = location.pathname === item.path;
+                    // Dashboards owns an async sub-list (the chart names) rather
+                    // than static children, and its own route is /dashboards/:id,
+                    // so both checks below need a prefix match for it.
+                    const isDashboardsRow = item.path === '/dashboards';
+                    const onPath = isDashboardsRow
+                      ? location.pathname.startsWith('/dashboards')
+                      : location.pathname === item.path;
+                    // Rows that own sub-items are section headers: highlighting
+                    // them solid as well as the active child would show two
+                    // filled rows at once, so they get a lighter accent instead.
+                    const hasSubItems = open && (!!item.children?.length || isDashboardsRow);
+                    const isSelected = onPath && !hasSubItems;
+                    const subItems = open ? item.children ?? [] : [];
                     return (
-                      <Tooltip key={item.path} title={item.label} placement="right" arrow disableHoverListener={open}>
+                      <React.Fragment key={item.path}>
+                      <Tooltip title={item.label} placement="right" arrow disableHoverListener={open}>
                         <ListItemButton
                           selected={isSelected}
                           onClick={() => handleNav(item.path)}
@@ -167,6 +203,10 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                             justifyContent: open ? 'initial' : 'center',
                             px: open ? 2 : 1,
                             minHeight: 44,
+                            ...(hasSubItems && onPath && {
+                              color: 'primary.main',
+                              '& .MuiListItemIcon-root': { color: 'primary.main' },
+                            }),
                             '&.Mui-selected': {
                               bgcolor: 'primary.main',
                               color: 'primary.contrastText',
@@ -192,11 +232,43 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
                             }}
                             primaryTypographyProps={{
                               fontSize: 13,
-                              fontWeight: isSelected ? 700 : 500,
+                              fontWeight: isSelected || (hasSubItems && onPath) ? 700 : 500,
                             }}
                           />
                         </ListItemButton>
                       </Tooltip>
+
+                      {/* Static sub-items (WinAir's Pricing / Velocity tabs) */}
+                      {subItems.map(child => {
+                        const childSelected = isChildActive(
+                          location.pathname, location.search, child.path,
+                        );
+                        return (
+                          <ListItemButton
+                            key={child.path}
+                            selected={childSelected}
+                            onClick={() => handleNav(child.path)}
+                            sx={subItemSx}
+                          >
+                            <ListItemIcon sx={{ minWidth: 0, mr: 1.5, justifyContent: 'center' }}>
+                              {React.cloneElement(
+                                iconMap[child.icon] || <Home />,
+                                { sx: { fontSize: 17 } },
+                              )}
+                            </ListItemIcon>
+                            <ListItemText
+                              primary={child.label}
+                              primaryTypographyProps={subItemTextProps(childSelected)}
+                            />
+                          </ListItemButton>
+                        );
+                      })}
+
+                      {/* Chart names for this tenant's Superset dashboard */}
+                      {open && item.path === '/dashboards' && (
+                        <SidebarDashboardCharts onNavigate={handleNav} />
+                      )}
+                      </React.Fragment>
                     );
                   })
                 )}

@@ -1,15 +1,12 @@
-import { Box, Button, Typography, Skeleton, Tooltip } from '@mui/material';
-import { FilterAltOff, Check } from '@mui/icons-material';
-import DateFilterToggle from '../DateFilterToggle';
+import type React from 'react';
+import { Box, Button, Typography, Skeleton, Tooltip, Chip } from '@mui/material';
+import { FilterAltOff, Check, Tune } from '@mui/icons-material';
 import FilterSelect from './FilterSelect';
+import { BANNER_BG, BANNER_HEADER_BG, LABEL_INK } from '../bannerTheme';
 import type {
-  DashboardDateFilter,
   DashboardFilter,
   DashboardFilterSelections,
 } from '../../../api/client';
-
-/** WinAir brand teal. A fixed dark surface, so it reads the same in both themes. */
-const BANNER_BG = '#005973';
 
 export interface WinairTopFilterBarProps {
   /** The dashboard's own native filters, from GET .../filter-config. */
@@ -27,10 +24,19 @@ export interface WinairTopFilterBarProps {
   onApply: () => void;
   onReset: () => void;
 
-  availableDates: string[];
-  dateFilter: DashboardDateFilter;
-  onDateFilterChange: (next: DashboardDateFilter) => void;
-  datesLoading?: boolean;
+  /**
+   * Name of the single chart these filters apply to, when the bar is scoped to
+   * one (Chart view). Undefined means the whole dashboard.
+   */
+  scopeLabel?: string;
+
+  /**
+   * Extra controls rendered into the same grid after the dashboard's own
+   * filters — used for the Latest Prices tab's time ranges, which have no
+   * Superset counterpart. Pass them only on the pane they act on, so a
+   * control is never on screen where it would do nothing.
+   */
+  extraControls?: React.ReactNode;
 }
 
 /**
@@ -39,6 +45,20 @@ export interface WinairTopFilterBarProps {
  *
  * Controls are built from the dashboard's own filter definitions, so adding or
  * retargeting a filter in Superset shows up here with no code change.
+ *
+ * An actions row over a grid of the native filters. The grid is deliberate — a
+ * wrapped flex row sized each control to its own label, so nothing lined up
+ * either horizontally or vertically once the row wrapped, and the action
+ * buttons ended up wherever the wrap dropped them. Fixed columns keep both
+ * stable at any width. The actions stay out of the grid on purpose: auto-fill
+ * would size Apply to a single 170px track.
+ *
+ * The cap date is NOT here — it lives in the page header (CapDateChip), where
+ * it is reachable from Chart view too. It used to lead this bar on its own
+ * darker strip, because it scopes charts server-side via the guest token's RLS
+ * clause while the filters below do not; with it gone, everything left acts on
+ * the grid below and a second background would assert a split that no longer
+ * exists.
  *
  * Changes are staged and applied on the Apply button rather than live. That is
  * forced by Superset, not a preference: an embedded dashboard reads filter
@@ -56,70 +76,71 @@ export default function WinairTopFilterBar({
   applying,
   onApply,
   onReset,
-  availableDates,
-  dateFilter,
-  onDateFilterChange,
-  datesLoading = false,
+  scopeLabel,
+  extraControls,
 }: WinairTopFilterBarProps) {
+  // Count only what is on screen: a stale selection for a filter this dashboard
+  // no longer surfaces would otherwise be counted with no control to clear it.
+  const activeCount = filters.filter(f => (pending[f.id] ?? []).length > 0).length;
+  // Clear stays keyed off the FULL pending set — a selection the bar is not
+  // showing is still the user's, and they must always be able to drop it.
   const hasAnySelection = Object.values(pending).some(v => v && v.length > 0);
 
   return (
-    <Box sx={{ width: '100%', mb: 0.75, borderRadius: 1.5, overflow: 'hidden', boxShadow: 1 }}>
+    <Box
+      sx={{
+        width: '100%', mb: 0.75, borderRadius: 1.5, overflow: 'hidden', boxShadow: 1,
+        bgcolor: BANNER_BG,
+        color: '#ffffff',
+        px: 1.75, pt: 1, pb: 1.5,
+      }}
+    >
+      {/* ── Actions row ─────────────────────────────────────────────────── */}
       <Box
         sx={{
-          bgcolor: BANNER_BG,
-          color: '#ffffff',
-          px: 1.5,
-          py: 1,
           display: 'flex',
           alignItems: 'center',
           flexWrap: 'wrap',
-          gap: 1,
+          gap: 1.25,
+          rowGap: 1,
+          mb: 1.25,
         }}
       >
-        {/* Cap date first — it scopes every chart server-side via the guest
-            token's RLS clause, unlike the native filters beside it. */}
-        <Box sx={{ bgcolor: 'rgba(255,255,255,0.14)', borderRadius: 1, px: 0.75, py: 0.25 }}>
-          <DateFilterToggle
-            availableDates={availableDates}
-            value={dateFilter}
-            onChange={onDateFilterChange}
-            disabled={datesLoading || availableDates.length === 0}
-          />
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
+          <Tune sx={{ fontSize: 17, color: 'rgba(255,255,255,0.75)' }} />
+          <Typography sx={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>
+            Filters
+          </Typography>
+          {/* Say out loud what these controls act on. Without it the bar looks
+              identical in both views while doing something different in each. */}
+          {scopeLabel && (
+            <Typography
+              noWrap
+              sx={{ fontSize: 12, color: LABEL_INK, minWidth: 0 }}
+              title={scopeLabel}
+            >
+              — {scopeLabel} only
+            </Typography>
+          )}
         </Box>
 
-        {filtersLoading && (
-          <>
-            {[0, 1, 2, 3].map(i => (
-              <Skeleton
-                key={i}
-                variant="rounded"
-                width={170}
-                height={34}
-                sx={{ bgcolor: 'rgba(255,255,255,0.18)' }}
-              />
-            ))}
-          </>
-        )}
-
-        {!filtersLoading && filtersError && (
-          <Typography sx={{ fontSize: 12.5, color: '#ffd9d9' }}>
-            Filters unavailable — {filtersError}
-          </Typography>
-        )}
-
-        {!filtersLoading && !filtersError && filters.map(f => (
-          <FilterSelect
-            key={f.id}
-            label={f.label}
-            description={f.description}
-            options={f.values}
-            value={pending[f.id] ?? []}
-            multiple={f.multi_select}
-            onDark
-            onChange={next => onPendingChange({ ...pending, [f.id]: next })}
-          />
-        ))}
+        {/* aria-live on the host, not the Chip — the Chip unmounts at zero,
+            and a removed node announces nothing. */}
+        <Box aria-live="polite" sx={{ display: 'flex', alignItems: 'center' }}>
+          {hasAnySelection && (
+            <Chip
+              label={`${activeCount} active`}
+              size="small"
+              sx={{
+                height: 20,
+                fontSize: 11,
+                fontWeight: 500,
+                bgcolor: 'rgba(255,255,255,0.88)',
+                color: BANNER_HEADER_BG,
+              }}
+            />
+          )}
+        </Box>
 
         <Box sx={{ flexGrow: 1 }} />
 
@@ -136,10 +157,13 @@ export default function WinairTopFilterBar({
                   color: '#ffffff',
                   fontSize: 12,
                   textTransform: 'none',
+                  borderRadius: '8px',
+                  px: 1.25,
+                  '&:hover': { bgcolor: 'rgba(255,255,255,0.10)' },
                   '&.Mui-disabled': { color: 'rgba(255,255,255,0.4)' },
                 }}
               >
-                Clear
+                Clear all
               </Button>
             </span>
           </Tooltip>
@@ -154,10 +178,12 @@ export default function WinairTopFilterBar({
                 startIcon={<Check fontSize="small" />}
                 sx={{
                   bgcolor: '#ffffff',
-                  color: BANNER_BG,
+                  color: BANNER_HEADER_BG,
                   fontSize: 12,
                   fontWeight: 700,
                   textTransform: 'none',
+                  borderRadius: '8px',
+                  px: 1.75,
                   boxShadow: 'none',
                   '&:hover': { bgcolor: '#e6f2f6', boxShadow: 'none' },
                   '&.Mui-disabled': { bgcolor: 'rgba(255,255,255,0.25)', color: 'rgba(255,255,255,0.6)' },
@@ -168,6 +194,71 @@ export default function WinairTopFilterBar({
             </span>
           </Tooltip>
         </Box>
+      </Box>
+
+      {/* ── Filter grid ──────────────────────────────────────────────────
+          One column count for the whole grid, so every field shares a width
+          and lines up on both axes however many filters the dashboard
+          defines. auto-fill rather than auto-fit: auto-fit collapses the
+          empty tracks, which would stretch a two-filter dashboard's controls
+          across half the screen each. */}
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))',
+          gap: '12px 14px',
+          alignItems: 'end',
+        }}
+      >
+        {/* Four, matching WM's filter count after suppression — a skeleton
+            count that overshoots reflows the grid on every load. */}
+        {filtersLoading && [0, 1, 2, 3].map(i => (
+          <Box key={i}>
+            <Skeleton
+              variant="text"
+              width="55%"
+              sx={{ fontSize: 11, bgcolor: 'rgba(255,255,255,0.14)' }}
+            />
+            <Skeleton
+              variant="rounded"
+              height={34}
+              sx={{ bgcolor: 'rgba(255,255,255,0.18)' }}
+            />
+          </Box>
+        ))}
+
+        {!filtersLoading && filtersError && (
+          <Typography sx={{ gridColumn: '1 / -1', fontSize: 12.5, color: '#ffd9d9' }}>
+            Filters unavailable — {filtersError}
+          </Typography>
+        )}
+
+        {!filtersLoading && !filtersError && filters.length === 0 && (
+          <Typography sx={{ gridColumn: '1 / -1', fontSize: 12.5, color: LABEL_INK }}>
+            This dashboard has no filters.
+          </Typography>
+        )}
+
+        {!filtersLoading && !filtersError && filters.map(f => (
+          <FilterSelect
+            key={f.id}
+            id={f.id}
+            label={f.label}
+            description={f.description}
+            options={f.values}
+            value={pending[f.id] ?? []}
+            multiple={f.multi_select}
+            onDark
+            onChange={next => onPendingChange({ ...pending, [f.id]: next })}
+          />
+        ))}
+
+        {/* Extra controls that belong to whatever pane is showing, sharing the
+            grid so they line up with the dashboard's own filters. Unlike those,
+            these act immediately — they are client-side and need no re-embed,
+            so making the user press Apply would be a wait invented for the sake
+            of symmetry. The caller only passes them where they apply. */}
+        {extraControls}
       </Box>
     </Box>
   );

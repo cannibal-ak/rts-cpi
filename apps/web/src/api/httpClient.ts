@@ -2,7 +2,7 @@
  * HTTP-based API client — talks to the real FastAPI backend.
  * Uses JWT Bearer tokens for authentication (Phase 2).
  */
-import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, DashboardDateFilter, DashboardFilterConfigResponse, DashboardFilterSelections, KpiKey, KpiSummaryResponse, KpiDetailResponse } from './client';
+import type { CpiApiClient, SnapshotQuery, JobQuery, ChartFormDataKeyResponse, DashboardChartsResponse, DashboardDateFilter, DashboardFilterConfigResponse, DashboardFilterSelections, DashboardPermalinkResponse, DashboardTabsResponse, KpiKey, KpiSummaryResponse, KpiDetailResponse, PriceHistoryQuery, PriceHistoryResponse, PricePointsQuery, PricePointsResponse } from './client';
 import type {
   Paginated, AirlineSnapshot, VelocitySnapshot, CflSnapshot, FilterMetadata,
   AlertRule, AlertEvent,
@@ -380,6 +380,10 @@ export const httpClient: CpiApiClient = {
       get<FilterMetadata[]>('/api/v1/airline/filter-metadata', tenant ? { tenant } : undefined),
     exportSnapshots: (q?: Record<string, string>) =>
       download('/api/v1/airline/export', q),
+    listPricePoints: (q: PricePointsQuery, opts?: RequestOptions) =>
+      get<PricePointsResponse>('/api/v1/airline/price-points', q as Record<string, string | number | undefined>, opts),
+    getPriceHistory: (q: PriceHistoryQuery, opts?: RequestOptions) =>
+      get<PriceHistoryResponse>('/api/v1/airline/price-points/history', q as Record<string, string | number | undefined>, opts),
     velocity: {
       listSnapshots: (q?: SnapshotQuery, opts?: RequestOptions) =>
         get<Paginated<VelocitySnapshot>>('/api/v1/airline/velocity/snapshots', q as Record<string, string | number | undefined>, opts),
@@ -585,6 +589,18 @@ export const httpClient: CpiApiClient = {
       get<DashboardChartsResponse>(
         `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/charts`,
       ),
+    getDashboardTabs: (dashboardId: string) =>
+      get<DashboardTabsResponse>(
+        `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/tabs`,
+      ),
+    mintDashboardPermalink: (
+      dashboardId: string,
+      { activeTab, selections }: { activeTab?: string; selections?: DashboardFilterSelections },
+    ) =>
+      post<DashboardPermalinkResponse>(
+        `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/permalink`,
+        { active_tab: activeTab ?? null, selections: selections ?? {} },
+      ),
     getFilterConfig: (dashboardId: string) =>
       get<DashboardFilterConfigResponse>(
         `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/filter-config`,
@@ -594,6 +610,25 @@ export const httpClient: CpiApiClient = {
         `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/filter-params`,
         { selections },
       ),
+    mintChartFormDataKey: (
+      dashboardId: string,
+      sliceId: number,
+      { dateFilter, selections }: {
+        dateFilter?: DashboardDateFilter; selections?: DashboardFilterSelections;
+      },
+    ) => {
+      const payload: Record<string, unknown> = { selections: selections ?? {} };
+      if (dateFilter?.mode === 'single' && dateFilter.capDateEq) {
+        payload.cap_date_eq = dateFilter.capDateEq;
+      } else if (dateFilter?.mode === 'range' && dateFilter.capDateFrom && dateFilter.capDateTo) {
+        payload.cap_date_from = dateFilter.capDateFrom;
+        payload.cap_date_to = dateFilter.capDateTo;
+      }
+      return post<ChartFormDataKeyResponse>(
+        `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/charts/${sliceId}/form-data-key`,
+        payload,
+      );
+    },
   },
   kpi: {
     getSummary: (airlineCode: string, capDate: string, currency?: string) =>

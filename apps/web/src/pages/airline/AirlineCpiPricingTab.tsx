@@ -82,6 +82,10 @@ interface SummaryColumn {
   align?: 'left' | 'right';
   width: number;
   render: (row: AirlineSnapshot) => ReactNode;
+  /** Plain-text value for the cell's native tooltip. Set it on any column
+   *  whose content can outrun its fixed width — connection itineraries
+   *  concatenate a flight number per leg, so they routinely do. */
+  title?: (row: AirlineSnapshot) => string;
 }
 
 const SUMMARY_COLUMNS: SummaryColumn[] = [
@@ -92,14 +96,16 @@ const SUMMARY_COLUMNS: SummaryColumn[] = [
               sx={{ height: 16, fontSize: 10, '& .MuiChip-label': { px: 0.5 } }} />
       : DASH },
   { label: 'AL',        align: 'left',  width: 36, render: r => fmtText(r.ref_al) },
-  { label: 'Flt',       align: 'left',  width: 60, render: r => fmtText(r.ref_flt_num) },
+  { label: 'Flt',       align: 'left',  width: 110, render: r => fmtText(r.ref_flt_num),
+    title: r => fmtText(r.ref_flt_num) },
   { label: 'Dep',       align: 'left',  width: 84, render: r => fmtDate(r.ref_dep_date) },
   { label: 'Cab',       align: 'left',  width: 40, render: r => fmtText(r.ref_cab_code) },
   { label: 'Ref fare',  align: 'right', width: 76, render: r => (
       <Box component="span" sx={{ fontFamily: 'monospace', fontSize: 11 }}>{fmtCurrency(r.ref_tot_fare)}</Box>
   )},
   { label: 'Comp',      align: 'left',  width: 40, render: r => fmtText(r.comp_al) },
-  { label: 'C.Flt',     align: 'left',  width: 60, render: r => fmtText(r.comp_flt_num) },
+  { label: 'C.Flt',     align: 'left',  width: 110, render: r => fmtText(r.comp_flt_num),
+    title: r => fmtText(r.comp_flt_num) },
   { label: 'C.Dep',     align: 'left',  width: 84, render: r => fmtDate(r.comp_dep_date) },
   { label: 'C.Cab',     align: 'left',  width: 40, render: r => fmtText(r.comp_cab_code) },
   { label: 'Comp fare', align: 'right', width: 76, render: r => (
@@ -784,7 +790,7 @@ function PricingRow({ row, expanded, onToggle }: PricingRowProps) {
           </IconButton>
         </TableCell>
         {SUMMARY_COLUMNS.map(col => (
-          <TableCell key={col.label} align={col.align ?? 'left'}>
+          <TableCell key={col.label} align={col.align ?? 'left'} title={col.title?.(row)}>
             {col.render(row)}
           </TableCell>
         ))}

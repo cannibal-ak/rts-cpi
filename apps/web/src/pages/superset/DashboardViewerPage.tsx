@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Box, Paper, IconButton, Typography, Fade, Chip, Tooltip,
   ToggleButton, ToggleButtonGroup, useMediaQuery,
@@ -13,16 +13,26 @@ import { keyframes } from '@mui/system';
 import type { Theme } from '@mui/material/styles';
 import { api } from '../../api';
 import type {
-  DashboardDateFilter, DashboardFilter, DashboardFilterSelections,
+  DashboardDateFilter, DashboardFilter, DashboardFilterSelections, DashboardTab,
 } from '../../api/client';
+import { filterAppliesTo } from '../../api/client';
 import { useSession } from '../../context/SessionContext';
-import { canAccessDashboard } from './dashboardAccess';
+import { canAccessDashboard, hasChartView } from './dashboardAccess';
 import { useDashboardCharts } from '../../hooks/useDashboardCharts';
 import ChartSelectorPanel from '../../components/dashboard/ChartSelectorPanel';
 import DateFilterToggle from '../../components/dashboard/DateFilterToggle';
 import SingleChartViewer from '../../components/dashboard/SingleChartViewer';
 import KPIRow from '../../components/dashboard/KPIRow';
+import CapDateChip from '../../components/dashboard/CapDateChip';
 import WinairTopFilterBar from '../../components/dashboard/winair/WinairTopFilterBar';
+import LatestPricesPanel from '../../components/dashboard/winair/LatestPricesPanel';
+import WinairTabBar, { PRICES_TAB, DASHBOARD_TAB } from '../../components/dashboard/winair/WinairTabBar';
+import TimeRangeFilter, {
+  FULL_DEP_RANGE, FULL_DURATION_RANGE, type Range,
+} from '../../components/dashboard/winair/PriceChartFilters';
+import {
+  DEP_TIME_MIN, DEP_TIME_MAX, DURATION_MIN, DURATION_MAX,
+} from '../../components/dashboard/winair/priceChartTheme';
 
 /**
  * Superset base URL — used by the Embedded SDK to construct the iframe src.
@@ -39,6 +49,9 @@ const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline:
   '4': { title: 'Sky Dashboard', tenant: 'ALT', isAirline: true, freshnessDomain: 'Airline CPI \u2013 SKY' },
   '5': { title: 'WinAir Dashboard', tenant: 'WM', isAirline: true, freshnessDomain: 'Airline CPI \u2013 WM' },
 };
+
+// Dashboards allow-listed for the Chart-view filter overlay (see chartFiltersEnabled).
+const CHART_FILTER_DASHBOARDS = ['5'];
 
 // Superset Embedded SDK type (UMD bundle loaded via CDN in index.html)
 declare global {
@@ -120,12 +133,25 @@ export default function DashboardViewerPage() {
   // is what the embed is currently built from, and `pendingFilters` is what the
   // user has staged. Apply promotes one to the other and re-embeds.
   const isWinair = meta?.tenant === 'WM';
+  // Dashboards whose Chart view mints a form_data_key overlay so the global
+  // filter bar reaches the standalone explore iframe. App-route ids. WM only for
+  // now — it is the only dashboard with an out-of-iframe bar. Extend one at a
+  // time, each after checking Chart view against Dashboard view for a filtered
+  // chart: the overlay merges with each slice's SAVED adhoc_filters.
+  const chartFiltersEnabled = !!id && CHART_FILTER_DASHBOARDS.includes(id);
   const [filterConfig, setFilterConfig] = useState<DashboardFilter[]>([]);
   const [filtersLoading, setFiltersLoading] = useState(false);
   const [filtersError, setFiltersError] = useState<string | null>(null);
   const [pendingFilters, setPendingFilters] = useState<DashboardFilterSelections>({});
   const [appliedFilters, setAppliedFilters] = useState<DashboardFilterSelections>({});
   const [applyingFilters, setApplyingFilters] = useState(false);
+  // Chart view keeps its OWN selections, per slice, rather than sharing the
+  // dashboard's. Applying a filter while looking at one chart must affect that
+  // chart and nothing else — the dashboard's own filter state is a separate
+  // thing the user set separately, and a shared set would silently re-filter
+  // every other chart the moment they switched to it.
+  const [chartPending, setChartPending] = useState<Record<number, DashboardFilterSelections>>({});
+  const [chartApplied, setChartApplied] = useState<Record<number, DashboardFilterSelections>>({});
   const [appliedFilterParams, setAppliedFilterParams] = useState('');
   const appliedFilterParamsRef = useRef(appliedFilterParams);
   useEffect(() => { appliedFilterParamsRef.current = appliedFilterParams; }, [appliedFilterParams]);
@@ -137,7 +163,6 @@ export default function DashboardViewerPage() {
         .map(([k, v]) => [k, [...v].sort()] as [string, string[]])
         .sort((a, b) => a[0].localeCompare(b[0])),
     );
-  const filtersDirty = normalizeSelections(pendingFilters) !== normalizeSelections(appliedFilters);
 
   useEffect(() => {
     if (!id || !isWinair) {
@@ -162,11 +187,35 @@ export default function DashboardViewerPage() {
     if (!id) return;
     setApplyingFilters(true);
     try {
-      const { native_filters } = await api.superset.buildFilterParams(id, selections);
+      if (supersetTabRef.current) {
+        // A tab is pinned, so filters have to travel in the SAME permalink -
+        // a permalink_key next to a native_filters param would leave two
+        // sources of truth for filter state racing each other on mount.
+        const { key } = await api.superset.mintDashboardPermalink(id, {
+          activeTab: supersetTabRef.current, selections,
+        });
+        permalinkKeyRef.current = key;
+        // Cache under the same key the tab effect uses, so switching away and
+        // back on this filter state is free.
+        if (key) {
+          permalinkCacheRef.current.set(
+            `${supersetTabRef.current}|${normalizeSelections(selections)}`, key,
+          );
+        }
+        setAppliedFilterParams('');
+        appliedFilterParamsRef.current = '';
+      } else {
+        const { native_filters } = await api.superset.buildFilterParams(id, selections);
+        permalinkKeyRef.current = null;
+        setAppliedFilterParams(native_filters);
+        appliedFilterParamsRef.current = native_filters;   // the embed reads this synchronously
+      }
       setAppliedFilters(selections);
-      setAppliedFilterParams(native_filters);
-      appliedFilterParamsRef.current = native_filters;   // the embed reads this synchronously
-      setRefreshKey(k => k + 1);
+      // On Latest Prices the iframe is hidden: the panel refetches from
+      // appliedFilters on its own, so re-embedding now would run every chart
+      // in a pane nobody is looking at. Defer it to the next Superset tab.
+      if (isWinair && !supersetTabRef.current) embedStaleRef.current = true;
+      else setRefreshKey(k => k + 1);
     } catch (err: any) {
       console.error('[WinairFilters] filter-params failed:', err);
       setFiltersError(err?.message ?? 'could not apply filters');
@@ -187,19 +236,196 @@ export default function DashboardViewerPage() {
   const [viewMode, setViewMode] = useState<'dashboard' | 'chart'>('dashboard');
   const [selectedSliceId, setSelectedSliceId] = useState<number | null>(null);
 
+  // WinAir reads its charts inside the embedded dashboard only, so the whole
+  // Chart view - toggle, selector panel and single-chart pane - is off there.
+  // activeViewMode, not viewMode, is what the rest of the component reads, so
+  // a stale 'chart' in state can never surface the pane on such a dashboard.
+  const chartViewEnabled = hasChartView(id);
+  const activeViewMode = chartViewEnabled ? viewMode : 'dashboard';
+
+  // The selection is mirrored into ?chart=<slice_id> so the sidebar can link
+  // straight to a chart and so a chart view is bookmarkable. The state above
+  // stays authoritative for rendering — the param is a second way in, not a
+  // replacement (chartPending/chartApplied are keyed off selectedSliceId).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const chartParam = searchParams.get('chart');
+
+  // ── Tab deep-linking (?tab=TAB-xxx, set by the sidebar and, for WinAir, by
+  // the tab bar) ──
+  // The Embedded SDK cannot select a tab after mount and Superset reads the
+  // URL once, so the tab travels as a minted permalink_key instead. Both the
+  // key and the tab live in refs because the embed effect reads them
+  // synchronously while building dashboardUiConfig.
+  const tabParam = searchParams.get('tab');
+  // WinAir's bar always has a selection. No ?tab= means Latest Prices, which
+  // is CPI-rendered and must never be sent to Superset as a tab id.
+  const activeTab = isWinair ? (tabParam ?? PRICES_TAB) : null;
+  // Only genuine Superset layout ids reach the permalink endpoint. Named
+  // supersetTab, not tabParam, so the invariant is visible at every read site.
+  const supersetTab =
+    tabParam && tabParam !== PRICES_TAB && tabParam !== DASHBOARD_TAB ? tabParam : null;
+  const supersetTabRef = useRef<string | null>(supersetTab);
+  const permalinkKeyRef = useRef<string | null>(null);
+  const appliedFiltersRef = useRef<DashboardFilterSelections>({});
+  useEffect(() => { supersetTabRef.current = supersetTab; }, [supersetTab]);
+  useEffect(() => { appliedFiltersRef.current = appliedFilters; }, [appliedFilters]);
+
+  // ── WinAir section list ──
+  // Fetched only where the bar replaces Superset's own tab row. Everyone else
+  // keeps that row, so their sidebar-only use of /tabs is untouched.
+  const [winairTabs, setWinairTabs] = useState<DashboardTab[]>([]);
+  const [tabsLoading, setTabsLoading] = useState(false);
+  const [tabError, setTabError] = useState<string | null>(null);
+  const [switchingTab, setSwitchingTab] = useState(false);
+
+  // Departure-time and duration windows for the Latest Prices chart. Owned
+  // here because their controls render inside the filter bar, which lives on
+  // this page rather than in the pane they filter. Deliberately NOT reset when
+  // the route changes — "morning departures under two hours" is a question
+  // asked of every route the user looks at, not of one.
+  const [depTimeRange, setDepTimeRange] = useState<Range>(FULL_DEP_RANGE);
+  const [durationRange, setDurationRange] = useState<Range>(FULL_DURATION_RANGE);
+
+  useEffect(() => {
+    if (!id || !isWinair) { setWinairTabs([]); return; }
+    let cancelled = false;
+    setTabsLoading(true);
+    setTabError(null);
+    api.superset.getDashboardTabs(id)
+      .then(res => {
+        if (cancelled) return;
+        // Only a real navigation strip may stand in for Superset's tab row.
+        // Without this the bar could steer by one section's sub-tabs and
+        // address a fifth of the dashboard while looking complete.
+        if (res.tabs_are_navigation && res.tabs.length > 0) {
+          setWinairTabs(res.tabs);
+        } else {
+          setWinairTabs([]);
+          setTabError('Dashboard sections are unavailable — showing the dashboard whole.');
+        }
+      })
+      .catch(err => {
+        if (cancelled) return;
+        console.error('[WinairTabs] tab fetch failed:', err);
+        setWinairTabs([]);
+        setTabError('Could not load the dashboard sections — showing the dashboard whole.');
+      })
+      .finally(() => { if (!cancelled) setTabsLoading(false); });
+    return () => { cancelled = true; };
+  }, [id, isWinair]);
+
+  // Minted permalinks, keyed on tab + the filter state baked into them.
+  // Re-opening a section already visited costs no Superset round-trip, which
+  // is most of the cost of a tab switch.
+  const permalinkCacheRef = useRef<Map<string, string>>(new Map());
+  // The embed is deferred while WinAir sits on Latest Prices, so anything
+  // that would have forced a re-embed just marks it stale instead.
+  const embedStaleRef = useRef(false);
+  const embeddedOnceRef = useRef(false);
+
+  // Mint a fresh permalink whenever the pinned tab changes, then re-embed.
+  // Filter changes do NOT come through here - applyWinairFilters re-mints with
+  // the tab included, so the two never fight over the embed.
+  useEffect(() => {
+    if (!id) return;
+    if (!supersetTab) {
+      // Left a pinned tab. For WinAir that means Latest Prices is showing and
+      // the iframe is hidden, so re-embedding would be work nobody can see —
+      // mark it stale and let the next Superset tab pay for it.
+      if (permalinkKeyRef.current) {
+        permalinkKeyRef.current = null;
+        if (isWinair) embedStaleRef.current = true;
+        else setRefreshKey(k => k + 1);
+      }
+      return;
+    }
+    const cacheKey = `${supersetTab}|${normalizeSelections(appliedFiltersRef.current)}`;
+    const cached = permalinkCacheRef.current.get(cacheKey);
+    if (cached) {
+      permalinkKeyRef.current = cached;
+      setRefreshKey(k => k + 1);
+      return;
+    }
+    let cancelled = false;
+    setSwitchingTab(true);
+    api.superset.mintDashboardPermalink(id, {
+      activeTab: supersetTab, selections: appliedFiltersRef.current,
+    })
+      .then(({ key }) => {
+        if (cancelled) return;
+        // A null key is a SUCCESS response meaning "nothing to pin". Treated
+        // as a key it would leave the bar naming one section while the iframe
+        // showed another, so it is a failure for our purposes.
+        if (!key) throw new Error('no permalink returned');
+        permalinkCacheRef.current.set(cacheKey, key);
+        permalinkKeyRef.current = key;
+        setTabError(null);
+        setRefreshKey(k => k + 1);
+      })
+      .catch(err => {
+        if (cancelled) return;
+        // Must still embed: with Superset's own tab row hidden, leaving the
+        // iframe untouched would strand the user on a stale section with a
+        // spinner and no way out.
+        console.error('[DashboardTabs] permalink mint failed:', err);
+        permalinkKeyRef.current = null;
+        if (isWinair) setTabError('Could not open that section — showing the dashboard default.');
+        setRefreshKey(k => k + 1);
+      })
+      .finally(() => { if (!cancelled) setSwitchingTab(false); });
+    return () => { cancelled = true; };
+  }, [id, supersetTab, isWinair]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Move the WinAir bar. `?tab=` is the single source of truth for the selection. */
+  const selectTab = (next: string) => {
+    const p = new URLSearchParams(searchParams);
+    if (next === PRICES_TAB) p.delete('tab');
+    else p.set('tab', next);
+    // replace, not push — a tab is a view of one page, and a history entry per
+    // click would make Back walk the tab strip instead of leaving the page.
+    setSearchParams(p, { replace: true });
+  };
+
+  const writeChartParam = (sliceId: number | null) => {
+    const next = new URLSearchParams(searchParams);
+    if (sliceId === null) next.delete('chart');
+    else next.set('chart', String(sliceId));
+    setSearchParams(next, { replace: true });
+  };
+
+  // Passing undefined skips the fetch entirely - no point asking Superset for a
+  // chart manifest the page will never show.
   const { analyticsCharts, loading: chartsLoading, error: chartsError, refetch: refetchCharts } =
-    useDashboardCharts(id);
+    useDashboardCharts(chartViewEnabled ? id : undefined);
 
   // Narrow viewport → collapse selector into a horizontal chip rail
   const isNarrow = useMediaQuery((t: Theme) => t.breakpoints.down('md'));
+
+  // Below lg the header runs out of room once the cap-date chip joins it and
+  // the title starts wrapping to a second line, so the chip drops its
+  // "Cap date:" prefix and shows just the date. Its tooltip and the popover's
+  // own heading still name it. Deliberately a wider threshold than isNarrow —
+  // with the sidebar open there is ~260px less room than this measures.
+  const isHeaderTight = useMediaQuery((t: Theme) => t.breakpoints.down('lg'));
 
   // When the chart list resolves (initial load OR dashboard switch), default
   // to the first chart.  If the current selection still exists in the new
   // list (e.g. an unrelated re-render), keep it — avoids snapping back to
   // chart 1 every time the manifest re-resolves.
   useEffect(() => {
-    if (analyticsCharts.length === 0) {
-      setSelectedSliceId(null);
+    // Deliberately do NOT null the selection on an empty list. The manifest is
+    // memoised on [data, loading, error], so it re-identifies on every load
+    // flip; nulling here and re-defaulting on the next tick is what snapped the
+    // user back to the first chart mid-session. The render is already gated on
+    // analyticsCharts.length, so holding a stale id is harmless.
+    if (analyticsCharts.length === 0) return;
+    // A ?chart= that names a real slice wins over the first-chart default —
+    // otherwise a sidebar deep link would flash the right chart and then snap
+    // back to chart 1 the moment the manifest resolved.
+    const fromUrl = chartParam === null ? NaN : Number(chartParam);
+    if (Number.isFinite(fromUrl) && analyticsCharts.some(c => c.slice_id === fromUrl)) {
+      setSelectedSliceId(fromUrl);
+      setViewMode('chart');
       return;
     }
     setSelectedSliceId(prev =>
@@ -207,11 +433,13 @@ export default function DashboardViewerPage() {
         ? prev
         : analyticsCharts[0].slice_id
     );
-  }, [analyticsCharts]);
+  }, [analyticsCharts, chartParam]);
 
-  // Returning to a different dashboard always starts in Dashboard mode.
+  // Returning to a different dashboard always starts in Dashboard mode —
+  // unless the URL asked for a specific chart, which the effect above adopts.
   useEffect(() => {
-    setViewMode('dashboard');
+    if (!searchParams.get('chart')) setViewMode('dashboard');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
   // ── Load available cap_date values for this dashboard ──
@@ -241,7 +469,12 @@ export default function DashboardViewerPage() {
 
   const handleDateFilterChange = (next: DashboardDateFilter) => {
     setDateFilter(next);
-    setRefreshKey(k => k + 1);   // bump → re-embed with new RLS-scoped guest token
+    // On Latest Prices the iframe is hidden and the panel refetches on its own
+    // capDate prop, so a re-embed here would re-run every chart out of sight.
+    // fetchGuestToken reads dateFilterRef, so a deferred embed still picks up
+    // the current date whenever it eventually runs.
+    if (isWinair && !supersetTabRef.current) embedStaleRef.current = true;
+    else setRefreshKey(k => k + 1);   // bump → re-embed with new RLS-scoped guest token
   };
 
   // Effective selection — falls back to the first chart if state hasn't
@@ -254,9 +487,98 @@ export default function DashboardViewerPage() {
     [analyticsCharts, effectiveSliceId],
   );
 
+  // ── Filter bar bindings ──────────────────────────────────────────────────
+  // The one bar serves both views, but they own different state: the dashboard
+  // has a single global selection set, chart view has one set per chart.
+  const inChartView = activeViewMode === 'chart' && effectiveSliceId !== null;
+
+  // In chart view the bar offers only the filters that reach the SELECTED chart
+  // — the dashboard's own scope, read from Superset, not a guess.
+  const barFilters = useMemo(
+    () => (inChartView
+      ? filterConfig.filter(f => filterAppliesTo(f, effectiveSliceId))
+      : filterConfig),
+    [filterConfig, inChartView, effectiveSliceId],
+  );
+
+  const barPending = inChartView ? (chartPending[effectiveSliceId!] ?? {}) : pendingFilters;
+  const barApplied = inChartView ? (chartApplied[effectiveSliceId!] ?? {}) : appliedFilters;
+  const barDirty = normalizeSelections(barPending) !== normalizeSelections(barApplied);
+
+  // ── Latest Prices scope, read off the SAME filter bar ──
+  // The pane takes its route and refinements from what the user already
+  // applied above, rather than growing a second set of controls that could
+  // disagree with the dashboard beside it. Selections are keyed by native
+  // filter id, so the column name (`field`) is what maps a filter to a
+  // meaning — the ids are Superset's and carry none.
+  const pricesScope = useMemo(() => {
+    // EVERY selected value, not the first. All four WinAir filters are
+    // multi-select, and taking only the first made the chart quietly disagree
+    // with the Superset section beside it — which reads as a data problem
+    // rather than a missing feature.
+    const allValuesOf = (field: string): string[] => {
+      const filter = filterConfig.find(f => f.field === field);
+      return filter ? (appliedFilters[filter.id] ?? []) : [];
+    };
+    // Numeric filter values arrive as rendered, e.g. stops as "0.0"/"1.0"
+    // because the dataset column is a float. Number() normalises that;
+    // non-integers are dropped rather than sent on to be rejected.
+    const toInts = (values: string[]): number[] =>
+      values.map(Number).filter(n => Number.isInteger(n));
+
+    const routeFilter = filterConfig.find(f => f.field === 'route');
+    // "EIS → SXM" is the label wm_all_airlines_fares builds; the API takes
+    // the two stations as ORG-DST. Keep both: the label is what the filter
+    // bar expects back when the panel offers a shortcut.
+    const toRoute = (label: string): { market: string; label: string } | null => {
+      const parts = label.split('→').map(s => s.trim());
+      return parts.length === 2 && parts[0] && parts[1]
+        ? { market: `${parts[0]}-${parts[1]}`, label }
+        : null;
+    };
+    const notNull = <T,>(v: T | null): v is T => v !== null;
+
+    return {
+      routes: allValuesOf('route').map(toRoute).filter(notNull).map(r => r.market),
+      fltNums: allValuesOf('flt_num'),
+      stops: toInts(allValuesOf('stops')),
+      daysLeft: toInts(allValuesOf('days_left')),
+      // The panel falls back to the first of these when no route is applied,
+      // so Latest Prices opens with a chart instead of an empty box.
+      routeOptions: (routeFilter?.values ?? []).map(toRoute).filter(notNull),
+    };
+  }, [filterConfig, appliedFilters]);
+
+  const handleBarPendingChange = (next: DashboardFilterSelections) => {
+    if (inChartView) setChartPending(m => ({ ...m, [effectiveSliceId!]: next }));
+    else setPendingFilters(next);
+  };
+
+  const handleBarApply = () => {
+    if (!inChartView) { void applyWinairFilters(pendingFilters); return; }
+    // Chart view commits locally and does NOT bump refreshKey: the dashboard
+    // iframe is a different view with its own filters, and re-embedding it here
+    // would re-run every chart on it for something not on screen — which is
+    // also what threw the user back to the first chart.
+    setChartApplied(m => ({ ...m, [effectiveSliceId!]: barPending }));
+  };
+
+  const handleBarReset = () => {
+    // "Clear all" has to mean all of it. The time ranges render in the same
+    // bar, so leaving them narrowed here would clear the visible dropdowns
+    // while the chart stayed filtered by controls that just reset to look
+    // untouched.
+    setDepTimeRange(FULL_DEP_RANGE);
+    setDurationRange(FULL_DURATION_RANGE);
+    if (!inChartView) { handleWinairReset(); return; }
+    setChartPending(m => ({ ...m, [effectiveSliceId!]: {} }));
+    setChartApplied(m => ({ ...m, [effectiveSliceId!]: {} }));
+  };
+
   const handleSelectChart = (sliceId: number) => {
     setSelectedSliceId(sliceId);
     setViewMode('chart');     // clicking a chart name auto-switches to chart view
+    writeChartParam(sliceId); // keep the URL (and the sidebar highlight) in step
   };
 
   const handlePrev = () => {
@@ -264,6 +586,7 @@ export default function DashboardViewerPage() {
     const idx = selectedIndex < 0 ? 0 : selectedIndex;
     const next = (idx - 1 + analyticsCharts.length) % analyticsCharts.length;
     setSelectedSliceId(analyticsCharts[next].slice_id);
+    writeChartParam(analyticsCharts[next].slice_id);
   };
 
   const handleNext = () => {
@@ -271,10 +594,40 @@ export default function DashboardViewerPage() {
     const idx = selectedIndex < 0 ? 0 : selectedIndex;
     const next = (idx + 1) % analyticsCharts.length;
     setSelectedSliceId(analyticsCharts[next].slice_id);
+    writeChartParam(analyticsCharts[next].slice_id);
   };
+
+  // Freshness belongs to the data, not to the embed. It used to be fetched
+  // inside the embed effect, which re-ran it on every tab switch for a value
+  // that cannot change in between — and left the header's date blank entirely
+  // whenever the embed was deferred.
+  useEffect(() => {
+    if (!meta) return;
+    let cancelled = false;
+    api.stats.getFreshnessMetrics()
+      .then(freshness => {
+        if (cancelled) return;
+        const match = freshness.find(f => f.domain === meta.freshnessDomain);
+        if (match?.report_date) setDataDate(match.report_date);
+      })
+      .catch(() => { /* non-critical — the dashboard works without the date */ });
+    return () => { cancelled = true; };
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!id || !mountRef.current || !meta) return;
+
+    // WinAir lands on Latest Prices, which is CPI-rendered. Embedding the
+    // dashboard behind it would spend a guest token and every chart query on
+    // a pane nobody has asked for. Deferred until a section is selected —
+    // after which the iframe stays mounted and this gate never fires again.
+    // isLoading must still be cleared here: it initialises true and is only
+    // ever cleared inside this effect, so returning early without it leaves
+    // the Refresh button disabled for good.
+    if (isWinair && activeTab === PRICES_TAB && !embeddedOnceRef.current) {
+      setIsLoading(false);
+      return;
+    }
 
     let unmount: (() => void) | undefined;
     // `unmount` is only assigned after two awaits. If refreshKey bumps again
@@ -313,17 +666,6 @@ export default function DashboardViewerPage() {
           meta.tenant === 'FJL' ? fjlCurrencyRef.current : undefined,
         );
 
-        // ── 3b. Fetch data freshness to get the report date ──
-        try {
-          const freshness = await api.stats.getFreshnessMetrics();
-          const match = freshness.find(f => f.domain === meta.freshnessDomain);
-          if (match?.report_date) {
-            setDataDate(match.report_date);
-          }
-        } catch {
-          // Non-critical — dashboard still works without the date
-        }
-
         // ── 4. Embed the dashboard ──
         //   SDK creates an iframe to: {SUPERSET_URL}/embedded/{embedded_uuid}
         //   which is Superset's canvas-only view (no global nav, no chrome).
@@ -346,18 +688,31 @@ export default function DashboardViewerPage() {
             filters: {
               // WinAir drives the same native filters from the bar above, so
               // Superset's own panel would be a duplicate set of controls.
+              // NOTE: Superset 3.1.0 ignores visible (show_filters is declared but
+              // never consumed) — the panel is actually hidden by the
+              // WM-EMBED-HIDE-FILTERBAR css block in dashboard 6's metadata.
+              // visible becomes functional after a Superset upgrade; keep it.
               visible: !isWinair,
               expanded: !isWinair,   // others: filters visible (restyled as a horizontal bar via dashboard CSS)
             },
-            // Seed the dashboard's native filter state from the top bar.
-            // Omitted when empty so the dashboard falls back to its own defaults.
-            ...(isWinair && appliedFilterParamsRef.current
-              ? { urlParams: { native_filters: appliedFilterParamsRef.current } }
-              : {}),
+            // Seed the dashboard's state from outside the iframe. A permalink
+            // wins when one is pinned: it already carries the filters as well
+            // as the tab, so passing native_filters too would give Superset two
+            // sources of truth for the same thing. Both omitted when empty, so
+            // the dashboard falls back to its own defaults.
+            ...(permalinkKeyRef.current
+              ? { urlParams: { permalink_key: permalinkKeyRef.current } }
+              : isWinair && appliedFilterParamsRef.current
+                ? { urlParams: { native_filters: appliedFilterParamsRef.current } }
+                : {}),
           },
         });
         if (disposed) { result.unmount(); return; }
         unmount = result.unmount;
+        // From here the iframe exists, so the lazy gate above must not fire
+        // again — leaving Latest Prices and returning should not tear it down.
+        embeddedOnceRef.current = true;
+        embedStaleRef.current = false;
 
         // Give Superset a moment to render inside the iframe
         setTimeout(() => setIsLoading(false), 1500);
@@ -408,9 +763,33 @@ export default function DashboardViewerPage() {
             sx={{ ml: 2, fontWeight: 500 }}
           />
         )}
+
+        {/* WinAir edits its cap date from here rather than from the filter bar
+            below: range mode needs ~750px and the header has ~280px free with
+            the sidebar open, so the chip reports the scope and a popover owns
+            the editing. Deliberately NOT interchangeable with the chip above —
+            that one reports data freshness (report_date from /stats/freshness),
+            and the two routinely show the same date. */}
+        {isWinair && (
+          <CapDateChip
+            availableDates={availableDates}
+            value={dateFilter}
+            onChange={handleDateFilterChange}
+            loading={datesLoading}
+            // For WinAir the cap date drives the Latest Prices panel as well as
+            // the embed, so it always applies to whatever is on screen.
+            appliesToView={isWinair || activeViewMode === 'dashboard'}
+            compact={isHeaderTight}
+          />
+        )}
+
         <Box sx={{ flexGrow: 1 }} />
 
-        {/* View mode toggle — segmented control */}
+        {/* View mode toggle — segmented control. Absent where Chart view is
+            not offered, so the header reads as dashboard-only. WinAir has no
+            Chart view and navigates by its own tab bar instead, so no toggle
+            appears there at all. */}
+        {chartViewEnabled && (
         <ToggleButtonGroup
           size="small"
           exclusive
@@ -424,6 +803,9 @@ export default function DashboardViewerPage() {
               setSelectedSliceId(analyticsCharts[0].slice_id);
             }
             setViewMode(v);
+            // Dashboard view isn't about one chart, so drop the param; entering
+            // chart view stamps whichever chart is about to be shown.
+            writeChartParam(v === 'chart' ? effectiveSliceId : null);
           }}
           sx={{
             mr: 1,
@@ -463,6 +845,7 @@ export default function DashboardViewerPage() {
             Chart view
           </ToggleButton>
         </ToggleButtonGroup>
+        )}
 
         <Tooltip title="Refresh dashboard">
           <IconButton
@@ -477,37 +860,83 @@ export default function DashboardViewerPage() {
         </Tooltip>
       </Box>
 
+      {/* WinAir: one row of navigation — Latest Prices, then the dashboard's
+          own sections. Superset's tab row is hidden inside the iframe, so this
+          bar is the only way to reach four fifths of the dashboard; it is
+          rendered above the filter bar so the page reads top-down as
+          what am I looking at → how is it filtered → the thing itself. */}
+      {isWinair && (
+        <WinairTabBar
+          tabs={winairTabs}
+          value={activeTab ?? PRICES_TAB}
+          onChange={selectTab}
+          loading={tabsLoading}
+          switching={switchingTab}
+          error={tabError}
+        />
+      )}
+
+      {/* WinAir: the dashboard's native filters, lifted out of Superset's
+          left-hand panel into a global bar. Rendered ABOVE both panes, not
+          inside the dashboard pane, so Chart view gets it too — a second
+          instance is not an option, because FilterSelect emits id={filter-*}
+          with a matching htmlFor and two mounts would duplicate DOM ids.
+          The cap date is not here — it lives in the page header (CapDateChip). */}
+      {isWinair && (
+        <WinairTopFilterBar
+          filters={barFilters}
+          filtersLoading={filtersLoading}
+          filtersError={filtersError}
+          pending={barPending}
+          onPendingChange={handleBarPendingChange}
+          dirty={barDirty}
+          // Chart view's Apply is synchronous local state; the mint spinner in
+          // the chart pane is what reports progress there.
+          applying={inChartView ? false : applyingFilters}
+          onApply={handleBarApply}
+          onReset={handleBarReset}
+          scopeLabel={inChartView
+            ? analyticsCharts[Math.max(0, selectedIndex)]?.slice_name ?? 'this chart'
+            : undefined}
+          // Only on the Latest Prices tab. Duration is derived per fare by the
+          // price-points endpoint and exists on no Superset dataset, so these
+          // two can only ever act on that chart — showing them beside a
+          // Superset section would be two controls that quietly do nothing.
+          extraControls={activeTab === PRICES_TAB ? (
+            <>
+              <TimeRangeFilter
+                label="Departure Time"
+                value={depTimeRange}
+                min={DEP_TIME_MIN}
+                max={DEP_TIME_MAX}
+                onChange={setDepTimeRange}
+              />
+              <TimeRangeFilter
+                label="Duration"
+                value={durationRange}
+                min={DURATION_MIN}
+                max={DURATION_MAX}
+                onChange={setDurationRange}
+                help="Journey time from departure to final arrival. Capped at 24h: arrival is stored without a date, so a journey crossing midnight cannot be told apart from a same-day one."
+              />
+            </>
+          ) : undefined}
+        />
+      )}
+
       {/* ── Dashboard pane — kept mounted across mode toggles so the SDK
           iframe (and its guest-token / fetch lifecycle) survives a switch
           to Chart view and back without re-init.  In Chart view it is hidden
           via display:none, NOT unmounted. ──────────────────────────────── */}
       <Box sx={{
-        display: viewMode === 'dashboard' ? 'flex' : 'none',
+        // For WinAir the tab bar decides this: the embed is hidden whenever
+        // Latest Prices is the selected tab.
+        display: activeViewMode === 'dashboard' && !(isWinair && activeTab === PRICES_TAB)
+          ? 'flex' : 'none',
         flexDirection: 'column',
         flexGrow: 1,
         minHeight: 0,
       }}>
-        {/* WinAir: the dashboard's native filters, lifted out of Superset's
-            left-hand panel into a global bar. Replaces the plain date row —
-            the date toggle is folded into the bar. */}
-        {isWinair && (
-          <WinairTopFilterBar
-            filters={filterConfig}
-            filtersLoading={filtersLoading}
-            filtersError={filtersError}
-            pending={pendingFilters}
-            onPendingChange={setPendingFilters}
-            dirty={filtersDirty}
-            applying={applyingFilters}
-            onApply={() => void applyWinairFilters(pendingFilters)}
-            onReset={handleWinairReset}
-            availableDates={availableDates}
-            dateFilter={dateFilter}
-            onDateFilterChange={handleDateFilterChange}
-            datesLoading={datesLoading}
-          />
-        )}
-
         {/* Date filter bar — drives cap_date RLS on every chart in this dashboard.
             For FJL, a Currency dropdown sits to the right of the date toggle and
             is threaded into KPIRow so the tiles stay within a single currency. */}
@@ -560,14 +989,17 @@ export default function DashboardViewerPage() {
         </Box>
         )}
 
-        {/* KPI row — CPI-rendered tiles + click-to-expand detail (JY + PW + FJL).
+        {/* KPI row — CPI-rendered tiles + click-to-expand detail (JY + PW + SKY + FJL).
             These replace the Superset big-number tiles so the values and their
             drill-downs share a single source of truth and respond to the Cap
             Date picker above. The KPI set is per-airline (see KPIRow).
             cap_date: single-day uses the picked day; range uses the window's
             end (most recent) day, since the KPI queries are single-day.
-            currency: only meaningful for FJL; JY/PW ignore it server-side. */}
-        {(meta?.tenant === 'JY' || meta?.tenant === 'PW' || meta?.tenant === 'ALT' || meta?.tenant === 'WM' || meta?.tenant === 'FJL') && (
+            currency: only meaningful for FJL; JY/PW ignore it server-side.
+            WM is deliberately excluded — WinAir's page leads with the global
+            filter bar and the dashboard's own charts, with no KPI strip. The
+            /kpi endpoints still serve WM, so this is a one-line reinstate. */}
+        {(meta?.tenant === 'JY' || meta?.tenant === 'PW' || meta?.tenant === 'ALT' || meta?.tenant === 'FJL') && (
           <KPIRow
             airlineCode={meta.tenant}
             capDate={(dateFilter.mode === 'single' ? dateFilter.capDateEq : dateFilter.capDateTo) ?? ''}
@@ -635,11 +1067,39 @@ export default function DashboardViewerPage() {
         </Paper>
       </Box>
 
+      {/* ── Latest Prices pane (WinAir) — every observed fare, one dot each.
+          Kept MOUNTED once first shown, unlike the Chart view pane above:
+          it owns an ECharts instance and a fetched result set, and
+          unmounting on every toggle would dispose the canvas and re-request
+          the route. `active` tells it to re-measure, since a canvas laid out
+          while display:none comes back zero-sized. ────────────────────── */}
+      {isWinair && (
+        <Box sx={{
+          display: activeTab === PRICES_TAB ? 'flex' : 'none',
+          flexDirection: 'column',
+          flexGrow: 1,
+          minHeight: 0,
+          minWidth: 0,
+        }}>
+          <LatestPricesPanel
+            routes={pricesScope.routes}
+            capDate={(dateFilter.mode === 'single' ? dateFilter.capDateEq : dateFilter.capDateTo) ?? null}
+            stops={pricesScope.stops}
+            fltNums={pricesScope.fltNums}
+            daysLeft={pricesScope.daysLeft}
+            depTime={depTimeRange}
+            duration={durationRange}
+            routeOptions={pricesScope.routeOptions}
+            active={activeTab === PRICES_TAB}
+          />
+        </Box>
+      )}
+
       {/* ── Chart view pane — selector sidebar + isolated chart iframe.
           Conditionally rendered so the sidebar (and the flex row) do not
           exist in the DOM during Dashboard mode — the dashboard view is
           visually identical to the pre-feature state. ─────────────────── */}
-      {viewMode === 'chart' && (
+      {activeViewMode === 'chart' && (
         <Box sx={{
           flexGrow: 1,
           display: 'flex',
@@ -684,6 +1144,14 @@ export default function DashboardViewerPage() {
                 total={analyticsCharts.length}
                 onPrev={handlePrev}
                 onNext={handleNext}
+                dashboardId={id!}
+                overlayEnabled={chartFiltersEnabled}
+                dateFilter={dateFilter}
+                // This chart's OWN applied selections — not the dashboard's, and
+                // not another chart's. Apply is the commit point, which is what
+                // barDirty and the Apply button promise.
+                selections={chartApplied[effectiveSliceId] ?? {}}
+                refreshKey={refreshKey}
               />
             )}
           </Box>

@@ -41,6 +41,39 @@ export interface DashboardChartsResponse {
   charts: DashboardChart[];
 }
 
+// ── Superset dashboard tabs, surfaced outside the iframe ────
+// The dashboard's own top-level tab strip, read from its position_json. `id` is
+// the layout component id ("TAB-wmNav2"), which is what a permalink's
+// activeTabs expects. An empty list means the dashboard has no tabs.
+export interface DashboardTab {
+  id: string;
+  label: string;
+}
+
+export interface DashboardTabsResponse {
+  dashboard_id: number;
+  dashboard_app_id: string;
+  tabs: DashboardTab[];
+  /**
+   * Whether `tabs` really is the dashboard's navigation.
+   *
+   * The extractor takes the first tab strip it finds depth-first, which is
+   * only the navigation on a dashboard actually built as a tabbed dashboard.
+   * JY and SKY stack their sections directly in the grid, so what comes back
+   * for them is the FIRST section's sub-tabs (Line / Bar / Table). Offering
+   * those as extra links (the sidebar) is harmless; replacing Superset's own
+   * tab row with them is not. Older responses omit the field — treat a
+   * missing value as false rather than assuming navigation.
+   */
+  tabs_are_navigation?: boolean;
+}
+
+// A stored dashboard view (active tab + filter state). `key` is null when there
+// was nothing to pin, in which case the caller should embed without the param.
+export interface DashboardPermalinkResponse {
+  key: string | null;
+}
+
 // ── Superset native filters, surfaced outside the iframe ────
 // One entry per filter_select native filter on the dashboard, read from
 // Superset's own native_filter_configuration. `id` is the NATIVE_FILTER-*
@@ -53,6 +86,11 @@ export interface DashboardFilter {
   dataset_id: number;
   multi_select: boolean;
   values: string[];
+  /**
+   * Slice ids this filter applies to, straight from Superset's own
+   * `chartsInScope`. `null` = the dashboard records no scope for it.
+   */
+  charts_in_scope: number[] | null;
 }
 
 export interface DashboardFilterConfigResponse {
@@ -60,8 +98,41 @@ export interface DashboardFilterConfigResponse {
   filters: DashboardFilter[];
 }
 
+/**
+ * Does this filter apply to the given slice?
+ *
+ * `null` (no scope recorded) and `undefined` (an older API that predates the
+ * field) both mean "yes" — a filter must never disappear from the bar because
+ * we failed to learn its scope. A null sliceId means "not scoped to one chart",
+ * i.e. dashboard view, where everything applies.
+ */
+export function filterAppliesTo(f: DashboardFilter, sliceId: number | null): boolean {
+  if (sliceId === null) return true;
+  const scope = f.charts_in_scope;
+  return scope == null ? true : scope.includes(sliceId);
+}
+
 /** Selected values keyed by native filter id. An absent/empty entry means "All". */
 export type DashboardFilterSelections = Record<string, string[]>;
+
+// ── Chart-view filter overlay ───────────────
+// Chart view renders a standalone /explore/ iframe that no filter reaches, so
+// selections are pushed through a server-minted Superset `form_data_key`.
+export interface ChartOverlayApplied {
+  id: string;
+  label: string;
+  column: string;
+  values: string[];
+}
+
+export interface ChartFormDataKeyResponse {
+  /** null when nothing was applicable — load the plain, unfiltered URL. */
+  key: string | null;
+  cap_date: string | null;
+  applied: ChartOverlayApplied[];
+  /** Selected, but scoped away from this chart by the dashboard's own config. */
+  out_of_scope: { id: string; label: string }[];
+}
 
 // ── Query params ────────────────────────────
 export interface JobQuery {
@@ -146,6 +217,115 @@ export interface KpiDetailResponse {
 }
 
 
+// ── Price points (unaggregated fares for the Latest Prices chart) ──
+// One object per OBSERVED FARE, not per stored row: the backend unpivots
+// the reference/competitor pair so each airline's price is its own point.
+// Fields therefore carry no ref_/comp_ prefix — `role` says which side it
+// came from.
+
+export interface PricePoint {
+  airline: string;
+  role: 'reference' | 'competitor';
+  flt_num: string | null;
+
+  /**
+   * The reference market this fare was matched on, "ORG-DST". Group a
+   * multi-route chart by THIS, never by origin/destination below — a
+   * competitor row carries its own stations, which can differ from the
+   * market it was compared in.
+   */
+  market: string;
+  origin: string;
+  destination: string;
+  dep_date: string;          // YYYY-MM-DD
+  // Feed clock strings, "HH:MM" (WinAir) or "HHMM" (JY/PW). Not every row
+  // has them — WinAir carries times only where it flies the route itself.
+  dep_time: string | null;
+  arr_time: string | null;
+  // Derived server-side from dep_time/arr_time; null when either is absent.
+  duration_min: number | null;
+  stops: number | null;
+  via: string | null;
+
+  cab_code: string | null;
+  cab_name: string | null;
+  bkg_class: string | null;
+  ff_code: string | null;
+  equip_code: string | null;
+  // 9 is the ingest's stand-in for "the feed sent no seat count", not a real
+  // availability of nine. WinAir's own fares never carry one; competitors' do.
+  seats: number | null;
+
+  curr: string | null;
+  base_fare: number;
+  tax: number;
+  yq: number;
+  yr: number;
+  tot_fare: number;
+
+  cap_date: string;
+  cap_time: string | null;
+  dbd: number | null;        // days before departure at capture time
+}
+
+export interface PricePointsResponse {
+  cap_date: string | null;
+  /** The markets actually queried, as "ORG-DST", in the order requested. */
+  routes: string[];
+  currency: string | null;   // null when the selection mixes currencies
+  truncated: boolean;        // true when the per-market cap dropped points
+  /** Which markets were cut, so a warning can name them. */
+  truncated_routes: string[];
+  points: PricePoint[];
+}
+
+export interface PricePointsQuery {
+  /** Comma-separated ORG-DST pairs, e.g. "EIS-SXM,ANU-BGI". */
+  routes?: string;
+  /** Single-route form, kept for one-off and curl use. */
+  origin?: string;
+  destination?: string;
+  tenant?: string;
+  cap_date?: string;
+  airlines?: string;         // comma-separated codes
+  dep_from?: string;
+  dep_to?: string;
+  stops?: number;
+  flt_num?: string;
+  // Index signature so this is assignable to the query-param record the
+  // HTTP client takes, matching SnapshotQuery above. The named fields keep
+  // their types; origin and destination stay required.
+  [key: string]: string | number | undefined;
+}
+
+export interface PriceHistoryPoint {
+  cap_date: string;
+  cap_time: string | null;
+  tot_fare: number;
+  seats: number | null;
+  dbd: number | null;
+}
+
+export interface PriceHistoryResponse {
+  airline: string;
+  flt_num: string | null;
+  origin: string;
+  destination: string;
+  dep_date: string;
+  curr: string | null;
+  points: PriceHistoryPoint[];
+}
+
+export interface PriceHistoryQuery {
+  origin: string;
+  destination: string;
+  airline: string;
+  dep_date: string;
+  flt_num?: string;
+  tenant?: string;
+  [key: string]: string | number | undefined;
+}
+
 
 // ── Client interface ────────────────────────
 export interface CpiApiClient {
@@ -154,6 +334,10 @@ export interface CpiApiClient {
     listSnapshots(q?: SnapshotQuery, opts?: RequestOptions): Promise<Paginated<AirlineSnapshot>>;
     getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
     exportSnapshots(q?: Record<string, string>): Promise<void>;
+    // Unaggregated fares for one route on one capture date — a single
+    // bounded request, not a paged walk.
+    listPricePoints(q: PricePointsQuery, opts?: RequestOptions): Promise<PricePointsResponse>;
+    getPriceHistory(q: PriceHistoryQuery, opts?: RequestOptions): Promise<PriceHistoryResponse>;
     velocity: {
       listSnapshots(q?: SnapshotQuery, opts?: RequestOptions): Promise<Paginated<VelocitySnapshot>>;
       getFilterMetadata(tenant?: string): Promise<FilterMetadata[]>;
@@ -266,6 +450,19 @@ export interface CpiApiClient {
         dates: string[];
     }>;
     getDashboardCharts(dashboardId: string): Promise<DashboardChartsResponse>;
+    /** The dashboard's own top-level tabs, in render order. */
+    getDashboardTabs(dashboardId: string): Promise<DashboardTabsResponse>;
+    /**
+     * Store a dashboard view and get the key that reopens it. The Embedded SDK
+     * cannot set the active tab after mount, so the key is passed to Superset
+     * as the `permalink_key` URL param instead. Tab and filters go in the SAME
+     * permalink: a permalink_key next to a native_filters param would leave two
+     * sources of truth for filter state racing on mount.
+     */
+    mintDashboardPermalink(
+      dashboardId: string,
+      opts: { activeTab?: string; selections?: DashboardFilterSelections },
+    ): Promise<DashboardPermalinkResponse>;
     /** The dashboard's own native filters + their selectable values. */
     getFilterConfig(dashboardId: string): Promise<DashboardFilterConfigResponse>;
     /**
@@ -277,6 +474,17 @@ export interface CpiApiClient {
       dashboardId: string,
       selections: DashboardFilterSelections,
     ): Promise<{ native_filters: string }>;
+    /**
+     * Mint a Superset explore form_data_key carrying Chart view's cap_date and
+     * native-filter selections for ONE slice. Scoped under the dashboard so the
+     * backend can tenant-check it. Send ALL applied selections — the backend
+     * drops the ones out of scope for this chart and reports them back.
+     */
+    mintChartFormDataKey(
+      dashboardId: string,
+      sliceId: number,
+      opts: { dateFilter?: DashboardDateFilter; selections?: DashboardFilterSelections },
+    ): Promise<ChartFormDataKeyResponse>;
   };
   kpi: {
     getSummary(airlineCode: string, capDate: string, currency?: string): Promise<KpiSummaryResponse>;
