@@ -25,7 +25,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    restart: unless-stopped
+    restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-cpi}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cpi_secret}
@@ -44,7 +44,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    restart: unless-stopped
+    restart: always
     ports:
       - "6379:6379"
     healthcheck:
@@ -55,7 +55,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
-    restart: unless-stopped
+    restart: always
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -76,7 +76,7 @@ services:
     build:
       context: ./apps/api
       target: dev
-    restart: unless-stopped
+    restart: always
     ports:
       - "8000:8000"
     volumes:
@@ -128,7 +128,7 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
         VITE_TENANT_ID: ${VITE_TENANT_ID:-a0000000-0000-0000-0000-000000000001}
-    restart: unless-stopped
+    restart: always
     ports:
       - "9090:5173"
     volumes:
@@ -154,7 +154,7 @@ services:
 
   superset:
     image: apache/superset:3.1.0
-    restart: unless-stopped
+    restart: always
     ports:
       - "8088:8088"
     environment:
@@ -200,7 +200,7 @@ services:
   worker:
     image: cpi-api
     container_name: cpi-worker-1
-    restart: unless-stopped
+    restart: always
     command: ["celery", "-A", "app.worker", "worker", "--loglevel=info", "--concurrency=2"]
     environment:
       <<: *api-env
@@ -223,7 +223,7 @@ services:
   beat:
     image: cpi-api
     container_name: cpi-beat-1
-    restart: unless-stopped
+    restart: always
     command: ["celery", "-A", "app.worker", "beat", "--loglevel=info", "--scheduler", "redbeat.RedBeatScheduler"]
     environment:
       <<: *api-env
@@ -242,7 +242,7 @@ services:
   sftp-dev:
     image: atmoz/sftp:latest
     container_name: cpi-sftp-dev-1
-    restart: unless-stopped
+    restart: always
     ports:
       - "2222:22"
     volumes:
@@ -257,7 +257,7 @@ services:
   nginx:
     image: nginx:1.27-alpine
     container_name: cpi-nginx-1
-    restart: unless-stopped
+    restart: always
     ports:
       - "9444:9444"
       - "8444:8444"
