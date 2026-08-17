@@ -12,7 +12,13 @@ from app.core.cache import cached
 from app.core.deps import get_tenant_db, sanitize_filter, sanitize_date, get_user_roles, get_user_identity, is_platform_admin
 from app.models.airline import AirlineCpiSnapshot
 from app.schemas.common import PaginatedResponse, PageInfo
-from app.schemas.airline import AirlineSnapshotOut
+from app.schemas.airline import (
+    AirlineSnapshotOut,
+    PriceHistoryPointOut,
+    PriceHistoryResponse,
+    PricePointOut,
+    PricePointsResponse,
+)
 from app.schemas.velocity import VelocitySnapshotOut
 from app.schemas.filters import FilterMetadataOut
 
@@ -24,6 +30,17 @@ router = APIRouter(
 # Raised from 100 so a client can pull a page in one request instead of ten.
 # The default stays at 20 — callers that don't ask are unaffected.
 MAX_PAGE_SIZE = 1000
+
+# Tenant code → the view that tenant is allowed to read. This whitelist is
+# the injection guard: view names are interpolated into raw SQL, so they may
+# only ever come from here. The older handlers each declare an identical map
+# inline, which shadows this one harmlessly; they are left as they are.
+AIRLINE_VIEW_MAP = {
+    "JY": "vw_airline_cpi_jy_snapshot",
+    "PW": "vw_airline_cpi_pw_snapshot",
+    "ALT": "vw_airline_cpi_alt_snapshot",
+    "WM": "vw_airline_cpi_wm_snapshot",
+}
 
 # 60s is enough: with ix_air_snap_<tenant>_grid in place, `max(cap_date)` is an
 # index-only scan reading ~4 pages (0.17ms on production), so there is nothing
@@ -281,6 +298,428 @@ def export_snapshots(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
+
+# ── Price points — unaggregated fares for charting ──────────────────
+#
+# /snapshots returns stored rows: a reference fare and a competitor fare
+# paired on one row. A chart needs the opposite shape — every airline's
+# fare as its own point — so these endpoints unpivot the two halves into a
+# single stream of observations.
+#
+# Two things this deliberately does NOT do:
+#
+#   * It does not page. The grid pages and the frontend walks every page,
+#     which is what produced the July 2026 request storm; a chart wants one
+#     bounded request instead. Requiring origin+destination is what makes
+#     that safe — one route on one capture date is a few hundred points.
+#   * It does not reuse Superset's wm_all_airlines_fares dataset, which
+#     performs a similar UNION. That dataset backs the live WM dashboard,
+#     omits arrival time / cabin / booking class / seats / equipment /
+#     currency, and does not dedupe.
+#
+# Dedup matters: a reference flight is stored once per competitor it was
+# compared against, so the same WinAir fare appears four times on a
+# four-competitor route. Every ref_* column is identical across those
+# copies, so SELECT DISTINCT over the projection collapses them exactly.
+
+# One route on one capture date runs to a few hundred points; 20k is a
+# backstop against a pathological route, not an expected ceiling. Note the
+# cap is applied PER MARKET with a floor of 1000 (see list_price_points), so
+# a 20-route request can return up to ~20k rows rather than being held to
+# this number overall — the trade for never silently dropping a whole route.
+MAX_PRICE_POINTS = 20000
+
+# A chart cannot say anything useful about more markets than this, and it
+# bounds the row-constructor IN list and the worst-case response size.
+MAX_ROUTES_PER_REQUEST = 20
+
+# Bounds the history scan for tenants whose snapshot table is large. WM (the
+# only caller today) holds ~170k rows so the window is academic there, but an
+# unbounded scan on JY's millions would not be.
+_HISTORY_WINDOW_DAYS = 180
+
+
+def _resolve_airline_view(
+    user_identity: str, user_roles: list[str], tenant: str | None
+) -> tuple[str, str]:
+    """Resolve (tenant_code, view_name) under the same rules as /snapshots.
+
+    Platform admins may name a tenant; everyone else is pinned to their own
+    and the ?tenant= param is ignored. The whitelist is what keeps the view
+    name safe to interpolate. Only the new price-point endpoints use this —
+    the older handlers inline the same map and are left alone.
+    """
+    if is_platform_admin(user_identity, user_roles):
+        effective_tenant = tenant or "JY"
+    else:
+        if user_identity not in AIRLINE_VIEW_MAP:
+            raise HTTPException(status_code=403, detail="Not Authorized")
+        effective_tenant = user_identity
+
+    if effective_tenant not in AIRLINE_VIEW_MAP:
+        raise HTTPException(status_code=400, detail="Invalid tenant for airline module")
+    return effective_tenant, AIRLINE_VIEW_MAP[effective_tenant]
+
+
+def _parse_clock(value: str | None) -> int | None:
+    """Minutes past midnight from a feed clock string, or None.
+
+    Accepts both shapes in the wild: "HH:MM" (WinAir) and "HHMM" (JY/PW).
+    Anything else — blank, partial, non-numeric — is None rather than a
+    guess, because a wrong departure time is worse than a missing one.
+    """
+    if not value:
+        return None
+    raw = value.strip().replace(":", "")
+    if len(raw) != 4 or not raw.isdigit():
+        return None
+    hours, minutes = int(raw[:2]), int(raw[2:])
+    if hours > 23 or minutes > 59:
+        return None
+    return hours * 60 + minutes
+
+
+def _duration_minutes(dep: str | None, arr: str | None) -> int | None:
+    """Elapsed minutes between two feed clock strings.
+
+    No feed carries an elapsed-time column, so this is the only source of
+    flight duration. An arrival earlier than the departure is read as
+    crossing midnight and wraps by a day — which is also how a red-eye
+    legitimately looks. Connections give total journey time, since arr_time
+    is the final leg's arrival.
+    """
+    start, end = _parse_clock(dep), _parse_clock(arr)
+    if start is None or end is None:
+        return None
+    return (end - start) if end >= start else (end + 1440 - start)
+
+
+# Both halves of the union project the same columns in the same order.
+# `{side}` is 'ref' or 'comp'; origin/destination fall back to the reference
+# market when a competitor row carries no O&D of its own.
+_PRICE_POINT_SIDE_SQL = """
+    SELECT DISTINCT
+        ref_org || '-' || ref_dst                        AS market,
+        {side}_al                                        AS airline,
+        '{role}'                                         AS role,
+        NULLIF({side}_flt_num, '')                       AS flt_num,
+        COALESCE(NULLIF({side}_org, ''), ref_org)        AS origin,
+        COALESCE(NULLIF({side}_dst, ''), ref_dst)        AS destination,
+        {side}_dep_date                                  AS dep_date,
+        NULLIF({side}_dep_time, '')                      AS dep_time,
+        NULLIF({side}_arr_time, '')                      AS arr_time,
+        {side}_stops                                     AS stops,
+        NULLIF({side}_via, '')                           AS via,
+        NULLIF({side}_cab_code, '')                      AS cab_code,
+        NULLIF({side}_cab_name, '')                      AS cab_name,
+        NULLIF({side}_bkg_class, '')                     AS bkg_class,
+        NULLIF({side}_ff_code, '')                       AS ff_code,
+        NULLIF({side}_equip_code, '')                    AS equip_code,
+        {side}_seats                                     AS seats,
+        NULLIF({side}_curr, '')                          AS curr,
+        {side}_base_fare                                 AS base_fare,
+        {side}_tax                                       AS tax,
+        {side}_yq                                        AS yq,
+        {side}_yr                                        AS yr,
+        {side}_tot_fare                                  AS tot_fare,
+        cap_date,
+        cap_time
+    FROM {view}
+    WHERE {where}
+"""
+
+
+def _parse_routes(routes: str | None, origin: str | None, destination: str | None) -> list[tuple[str, str]]:
+    """Requested markets as (origin, destination) pairs.
+
+    Two accepted forms: `routes=EIS-SXM,ANU-BGI` for the multi-select case,
+    or a single `origin`/`destination` pair, which keeps one-route calls
+    readable from curl and from the history endpoint. Duplicates collapse and
+    order is preserved, so the caller's first pick stays first in the legend.
+    """
+    pairs: list[tuple[str, str]] = []
+
+    for part in (routes or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        cleaned = sanitize_filter(part, "routes")
+        # "ORG-DST". Station codes are 3-4 chars, so anything else is a
+        # malformed pair rather than something to be guessed at.
+        halves = (cleaned or "").split("-")
+        if len(halves) != 2 or not all(2 <= len(h.strip()) <= 4 for h in halves):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid route {part!r}; expected ORG-DST, e.g. EIS-SXM",
+            )
+        pairs.append((halves[0].strip().upper(), halves[1].strip().upper()))
+
+    if not pairs:
+        org = sanitize_filter(origin, "origin")
+        dst = sanitize_filter(destination, "destination")
+        if org and dst:
+            pairs.append((org.upper(), dst.upper()))
+
+    deduped: list[tuple[str, str]] = []
+    for pair in pairs:
+        if pair not in deduped:
+            deduped.append(pair)
+    return deduped
+
+
+@router.get("/price-points", response_model=PricePointsResponse)
+def list_price_points(
+    db: Session = Depends(get_tenant_db),
+    user_roles: list[str] = Depends(get_user_roles),
+    user_identity: str = Depends(get_user_identity),
+    tenant: str | None = Query(None),
+    routes: str | None = Query(
+        None, description="Comma-separated ORG-DST pairs, e.g. EIS-SXM,ANU-BGI."
+    ),
+    origin: str | None = Query(None, description="Single-route form: origin, e.g. EIS."),
+    destination: str | None = Query(None, description="Single-route form: destination, e.g. SXM."),
+    cap_date: str | None = Query(None, description="Capture date; defaults to the newest."),
+    airlines: str | None = Query(None, description="Comma-separated airline codes."),
+    dep_from: str | None = Query(None),
+    dep_to: str | None = Query(None),
+    stops: int | None = Query(None, ge=0),
+    flt_num: str | None = Query(None),
+):
+    """Every fare observed on the requested routes on one capture date, one point each."""
+    _, view_name = _resolve_airline_view(user_identity, user_roles, tenant)
+
+    market_pairs = _parse_routes(routes, origin, destination)
+    if not market_pairs:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one route is required (routes=ORG-DST or origin= and destination=)",
+        )
+    if len(market_pairs) > MAX_ROUTES_PER_REQUEST:
+        raise HTTPException(
+            status_code=400,
+            detail=f"At most {MAX_ROUTES_PER_REQUEST} routes per request",
+        )
+    cap_date = sanitize_date(cap_date, "cap_date")
+    dep_from = sanitize_date(dep_from, "dep_from")
+    dep_to = sanitize_date(dep_to, "dep_to")
+    flt_num = sanitize_filter(flt_num, "flt_num")
+    airline_list = [
+        code for code in
+        (sanitize_filter(part.strip(), "airlines") for part in (airlines or "").split(",") if part.strip())
+        if code
+    ]
+
+    # Same rule as the grid: a query without a cap_date equality scans the
+    # whole table, so pin the newest capture when the caller omits one.
+    route_labels = [f"{org}-{dst}" for org, dst in market_pairs]
+
+    if not cap_date:
+        cap_date = _latest_date(db, view_name, "cap_date")
+        if cap_date is None:
+            return PricePointsResponse(cap_date=None, routes=route_labels, points=[])
+
+    params: dict = {
+        "cap_date": cap_date,
+        # +1 so a full page tells us rows were dropped rather than guessing.
+        "limit": MAX_PRICE_POINTS + 1,
+    }
+    # A row-constructor IN list, one bound pair per requested market. Built
+    # by index rather than as a single ANY(array) so Postgres sees ordinary
+    # equality on (ref_org, ref_dst) and can still use an index on them.
+    market_terms = []
+    for i, (org, dst) in enumerate(market_pairs):
+        params[f"org{i}"] = org
+        params[f"dst{i}"] = dst
+        market_terms.append(f"(:org{i}, :dst{i})")
+    market_clause = f"(ref_org, ref_dst) IN ({', '.join(market_terms)})"
+    if airline_list:
+        params["airlines"] = airline_list
+    if dep_from:
+        params["dep_from"] = dep_from
+    if dep_to:
+        params["dep_to"] = dep_to
+    if stops is not None:
+        params["stops"] = stops
+    if flt_num:
+        params["flt_num"] = flt_num
+
+    def _side_sql(side: str, role: str) -> str:
+        # The market predicate is always the REFERENCE O&D, on both halves:
+        # a competitor row is that competitor's offer in the host's market,
+        # and the dashboard's "Route (O&D)" filter is built the same way.
+        # Filtering the competitor half on its own O&D would silently drop
+        # rows whose comp_org is blank.
+        clauses = [
+            "cap_date = :cap_date",
+            market_clause,
+            f"{side}_tot_fare > 0",
+        ]
+        if airline_list:
+            clauses.append(f"{side}_al = ANY(:airlines)")
+        if dep_from:
+            clauses.append(f"{side}_dep_date >= :dep_from")
+        if dep_to:
+            clauses.append(f"{side}_dep_date <= :dep_to")
+        if stops is not None:
+            clauses.append(f"{side}_stops = :stops")
+        if flt_num:
+            clauses.append(f"{side}_flt_num = :flt_num")
+        return _PRICE_POINT_SIDE_SQL.format(
+            side=side, role=role, view=view_name, where=" AND ".join(clauses)
+        )
+
+    # Cap PER MARKET, not across the whole result. A single global LIMIT with a
+    # market-ordered sort silently deletes whole later routes while the earlier
+    # ones look complete — on a comparison chart that reads as "this route has
+    # no fares" rather than "we stopped fetching", which is the worst possible
+    # way to be wrong. The floor of 1000 keeps a small selection generous.
+    per_route_limit = max(1000, MAX_PRICE_POINTS // len(market_pairs))
+    # +1 per market is the truncation sentinel: seeing the extra row is how we
+    # know that market had more to give.
+    params["per_route_limit"] = per_route_limit + 1
+
+    # Columns are projected explicitly rather than SELECT * so the window
+    # function's `rn` cannot leak into PricePointOut(**row).
+    projection = (
+        "market, airline, role, flt_num, origin, destination, dep_date, dep_time, "
+        "arr_time, stops, via, cab_code, cab_name, bkg_class, ff_code, equip_code, "
+        "seats, curr, base_fare, tax, yq, yr, tot_fare, cap_date, cap_time"
+    )
+    row_order = "dep_date, dep_time NULLS LAST, airline, tot_fare"
+    sql = text(
+        f"SELECT {projection} FROM ("
+        f"  SELECT p.*, ROW_NUMBER() OVER (PARTITION BY market ORDER BY {row_order}) AS rn"
+        f"  FROM ({_side_sql('ref', 'reference')} UNION ALL {_side_sql('comp', 'competitor')}) p"
+        f") q WHERE rn <= :per_route_limit "
+        f"ORDER BY market, {row_order}"
+    )
+    rows = db.execute(sql, params).mappings().all()
+
+    # Any market that produced the sentinel row had more fares than we drew.
+    per_market: dict[str, int] = {}
+    for row in rows:
+        per_market[row["market"]] = per_market.get(row["market"], 0) + 1
+    truncated_routes = sorted(m for m, n in per_market.items() if n > per_route_limit)
+    kept: dict[str, int] = {}
+    trimmed = []
+    for row in rows:
+        seen = kept.get(row["market"], 0)
+        if seen >= per_route_limit:
+            continue
+        kept[row["market"]] = seen + 1
+        trimmed.append(row)
+    rows = trimmed
+
+    points = [
+        PricePointOut(
+            **row,
+            duration_min=_duration_minutes(row["dep_time"], row["arr_time"]),
+            dbd=(row["dep_date"] - row["cap_date"]).days,
+        )
+        for row in rows
+    ]
+
+    # One currency per airline tenant in practice; None signals a mix rather
+    # than picking a winner and mislabelling the axis.
+    currencies = {p.curr for p in points if p.curr}
+    return PricePointsResponse(
+        cap_date=cap_date,
+        routes=route_labels,
+        currency=currencies.pop() if len(currencies) == 1 else None,
+        truncated=bool(truncated_routes),
+        truncated_routes=truncated_routes,
+        points=points,
+    )
+
+
+@router.get("/price-points/history", response_model=PriceHistoryResponse)
+def price_point_history(
+    db: Session = Depends(get_tenant_db),
+    user_roles: list[str] = Depends(get_user_roles),
+    user_identity: str = Depends(get_user_identity),
+    tenant: str | None = Query(None),
+    origin: str = Query(...),
+    destination: str = Query(...),
+    airline: str = Query(...),
+    dep_date: str = Query(...),
+    flt_num: str | None = Query(None),
+):
+    """How one flight's fare moved across capture dates.
+
+    Backs the sparkline on a price card. Needs more than one capture loaded
+    to draw anything — a tenant with a single capture date returns a single
+    point, which is honest rather than empty.
+    """
+    _, view_name = _resolve_airline_view(user_identity, user_roles, tenant)
+
+    origin = sanitize_filter(origin, "origin")
+    destination = sanitize_filter(destination, "destination")
+    airline = sanitize_filter(airline, "airline")
+    flt_num = sanitize_filter(flt_num, "flt_num")
+    dep_date = sanitize_date(dep_date, "dep_date")
+    if not (origin and destination and airline and dep_date):
+        raise HTTPException(
+            status_code=400,
+            detail="origin, destination, airline and dep_date are required",
+        )
+
+    params: dict = {
+        "org": origin.upper(),
+        "dst": destination.upper(),
+        "al": airline.upper(),
+        "dep_date": dep_date,
+        "window": _HISTORY_WINDOW_DAYS,
+    }
+    if flt_num:
+        params["flt_num"] = flt_num
+
+    def _side_sql(side: str) -> str:
+        clauses = [
+            "ref_org = :org",
+            "ref_dst = :dst",
+            f"{side}_al = :al",
+            f"{side}_dep_date = :dep_date",
+            f"{side}_tot_fare > 0",
+            # Keeps the scan bounded on large tenants without needing the
+            # caller to know the capture range. CAST(), not `::date` —
+            # SQLAlchemy's text() parser reads the leading colon of a `::`
+            # cast as the start of another bind parameter.
+            "cap_date >= CAST(:dep_date AS date) - CAST(:window AS integer) * INTERVAL '1 day'",
+        ]
+        if flt_num:
+            clauses.append(f"{side}_flt_num = :flt_num")
+        return (
+            f"SELECT DISTINCT cap_date, cap_time, {side}_tot_fare AS tot_fare, "
+            f"{side}_seats AS seats, NULLIF({side}_curr, '') AS curr "
+            f"FROM {view_name} WHERE {' AND '.join(clauses)}"
+        )
+
+    sql = text(
+        f"{_side_sql('ref')} UNION ALL {_side_sql('comp')} ORDER BY cap_date, cap_time"
+    )
+    rows = db.execute(sql, params).mappings().all()
+
+    dep_date_obj = datetime.strptime(dep_date, "%Y-%m-%d").date()
+    currencies = {r["curr"] for r in rows if r["curr"]}
+    return PriceHistoryResponse(
+        airline=airline.upper(),
+        flt_num=flt_num,
+        origin=origin.upper(),
+        destination=destination.upper(),
+        dep_date=dep_date_obj,
+        curr=currencies.pop() if len(currencies) == 1 else None,
+        points=[
+            PriceHistoryPointOut(
+                cap_date=r["cap_date"],
+                cap_time=r["cap_time"],
+                tot_fare=r["tot_fare"],
+                seats=r["seats"],
+                dbd=(dep_date_obj - r["cap_date"]).days,
+            )
+            for r in rows
+        ],
     )
 
 

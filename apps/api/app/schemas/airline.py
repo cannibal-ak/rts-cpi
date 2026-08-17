@@ -107,3 +107,103 @@ class AirlineSnapshotOut(BaseModel):
     loaded_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+# ── Price points — one row per OBSERVED FARE ────────────────────────────
+#
+# AirlineSnapshotOut above mirrors how the data is stored: a reference fare
+# and a competitor fare side by side on one row. That shape is right for the
+# grid, but wrong for a chart, where each airline's fare is its own plotted
+# point. PricePointOut is the unpivoted view — the ref and comp halves of a
+# stored row become two independent observations, so "one airline, one
+# flight, one price" is a single object regardless of which side it came in
+# on. Fields are named without the ref_/comp_ prefix for that reason.
+
+
+class PricePointOut(BaseModel):
+    """A single airline's fare for a single flight, as observed on one capture."""
+
+    airline: str
+    # 'reference' = the tenant's own airline, 'competitor' = someone they
+    # track. Drives which series is highlighted as "ours" in the chart.
+    role: str
+    flt_num: Optional[str] = None
+
+    # The REFERENCE market this observation was matched on, "ORG-DST". Group
+    # a multi-route chart by this, never by origin/destination below: a
+    # competitor row carries its own stations, which can differ from the
+    # market it was compared in.
+    market: str
+    origin: str
+    destination: str
+    dep_date: date
+    # Times are strings, not `time`: the feeds send "HH:MM" (WinAir) or
+    # "HHMM" (JY/PW) and neither is guaranteed present. Parsing them into a
+    # real time here would force a format decision the data does not support.
+    dep_time: Optional[str] = None
+    arr_time: Optional[str] = None
+    # Derived from dep_time/arr_time when both parse; None otherwise. No
+    # feed carries an elapsed-time column.
+    duration_min: Optional[int] = None
+    stops: Optional[int] = None
+    via: Optional[str] = None
+
+    cab_code: Optional[str] = None
+    cab_name: Optional[str] = None
+    bkg_class: Optional[str] = None
+    ff_code: Optional[str] = None
+    equip_code: Optional[str] = None
+    seats: Optional[int] = None
+
+    curr: Optional[str] = None
+    base_fare: float
+    tax: float
+    yq: float
+    yr: float
+    tot_fare: float
+
+    cap_date: date
+    cap_time: Optional[time] = None
+    # Days before departure at the moment of capture (dep_date - cap_date).
+    # Negative would mean the flight had already gone; kept as-is rather
+    # than clamped so bad data stays visible.
+    dbd: Optional[int] = None
+
+
+class PricePointsResponse(BaseModel):
+    cap_date: Optional[date] = None
+    # Echoes the routes actually queried, as "ORG-DST" strings. A list
+    # rather than a single origin/destination pair because the dashboard's
+    # Route filter is multi-select: plotting only the first selection would
+    # quietly disagree with the Superset charts beside it.
+    routes: list[str] = []
+    # The dominant currency across the returned points, or None when the
+    # selection mixes currencies (FJL does; the airline tenants do not).
+    currency: Optional[str] = None
+    # True when the per-market cap was hit on any route — the caller should
+    # say so rather than present a partial chart as complete.
+    truncated: bool = False
+    # Which markets were cut, so the warning can name them instead of leaving
+    # the reader to guess which line is incomplete.
+    truncated_routes: list[str] = []
+    points: list[PricePointOut] = []
+
+
+class PriceHistoryPointOut(BaseModel):
+    """One flight's fare as seen on one capture date."""
+
+    cap_date: date
+    cap_time: Optional[time] = None
+    tot_fare: float
+    seats: Optional[int] = None
+    dbd: Optional[int] = None
+
+
+class PriceHistoryResponse(BaseModel):
+    airline: str
+    flt_num: Optional[str] = None
+    origin: str
+    destination: str
+    dep_date: date
+    curr: Optional[str] = None
+    points: list[PriceHistoryPointOut] = []
