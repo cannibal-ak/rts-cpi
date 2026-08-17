@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Drawer,
   List,
@@ -80,8 +80,9 @@ function isChildActive(pathname: string, search: string, childPath: string): boo
 }
 
 /**
- * One entry on the icon rail. The panel lists its `items`; clicking the rail
- * icon navigates to the first of them.
+ * One entry on the icon rail. Clicking it reveals the section's items in the
+ * panel (opening the panel if it was collapsed); it does not navigate.
+ * Navigation only happens from the panel's rows.
  */
 interface RailSection {
   key: string;
@@ -92,10 +93,11 @@ interface RailSection {
 
 interface SidebarProps {
   open: boolean;
+  onOpen: () => void;
   onClose: () => void;
 }
 
-export default function Sidebar({ open, onClose }: SidebarProps) {
+export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const navigate = useNavigate();
@@ -141,15 +143,39 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
     );
   };
 
-  // The rail only highlights a genuine route match; the panel still needs
-  // something to show on routes outside the nav (profile, password change),
-  // so it falls back to the first section rather than rendering empty.
   const matchedSection = sections.find(s => s.items.some(isItemOnPath)) ?? null;
-  const panelSection = matchedSection ?? sections[0] ?? null;
+
+  // Which section the panel is browsing. Null means "follow the route"; rail
+  // clicks set it (they preview a section without navigating) and navigation
+  // clears it so the panel snaps back to tracking where the user actually is.
+  const [viewedKey, setViewedKey] = useState<string | null>(null);
+  useEffect(() => {
+    setViewedKey(null);
+  }, [location.pathname, location.search]);
+
+  const browsedSection = sections.find(s => s.key === viewedKey) ?? null;
+
+  // The panel still needs something to show on routes outside the nav
+  // (profile, security), so it falls back to the first section rather than
+  // rendering empty.
+  const panelSection = browsedSection ?? matchedSection ?? sections[0] ?? null;
+
+  // While browsing sections the rail follows the panel; collapsed, it marks
+  // where the current route lives. The panel's sections[0] display fallback
+  // deliberately does NOT feed the highlight — on routes outside the nav the
+  // rail must not claim the first section is where you are.
+  const railActiveKey = (open ? browsedSection ?? matchedSection : matchedSection)?.key;
+
+  const showSection = (s: RailSection) => {
+    setViewedKey(s.key);
+    if (!open) onOpen();
+  };
 
   const handleNav = (path: string) => {
     navigate(path);
-    onClose(); // Automatically collapse/minimize after navigation
+    // Only the mobile overlay closes itself after navigating; the desktop
+    // sidebar stays exactly as the user left it.
+    if (isMobile) onClose();
   };
 
   const drawerWidth = isMobile ? (open ? DRAWER_WIDTH : 0) : (open ? DRAWER_WIDTH : RAIL_WIDTH);
@@ -204,8 +230,8 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
           {sections.map(s => (
             <Tooltip key={s.key} title={s.title} placement="right" arrow>
               <ListItemButton
-                selected={matchedSection?.key === s.key}
-                onClick={() => handleNav(s.items[0].path)}
+                selected={railActiveKey === s.key}
+                onClick={() => showSection(s)}
                 sx={{
                   width: 44,
                   minHeight: 44,
