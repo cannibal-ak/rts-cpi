@@ -312,20 +312,28 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
         {/* Panel: the active section's contents. Collapsing hides only this. */}
         {open && panelSection && (
           <Box sx={{ flexGrow: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', py: 1 }}>
-            <Typography
-              variant="overline"
-              noWrap
-              sx={{
-                px: 2,
-                py: 0.5,
-                display: 'block',
-                color: 'text.secondary',
-                fontSize: 11,
-                fontWeight: 700,
-              }}
-            >
-              {panelSection.title}
-            </Typography>
+            {/* Single-item sections (a tenant's module, Dashboards) would just
+                repeat the row's own label, so the overline only renders when
+                it adds information — i.e. for multi-item admin categories. */}
+            {!(
+              panelSection.items.length === 1 &&
+              panelSection.title === panelSection.items[0].label
+            ) && (
+              <Typography
+                variant="overline"
+                noWrap
+                sx={{
+                  px: 2,
+                  py: 0.5,
+                  display: 'block',
+                  color: 'text.secondary',
+                  fontSize: 11,
+                  fontWeight: 700,
+                }}
+              >
+                {panelSection.title}
+              </Typography>
+            )}
             <List dense disablePadding>
               {panelSection.items.map(item => {
                 // Dashboards owns an async sub-list (the chart names) rather
