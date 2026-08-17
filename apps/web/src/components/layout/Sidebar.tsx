@@ -14,7 +14,7 @@ import {
 import {
   Home, Flight, DirectionsBoat, Dashboard,
   CloudUpload,
-  Security, Settings, Description, ViewModule,
+  Security, Settings,
   Email,
   Storage, Schedule, PlayCircleFilled, VpnKey, AssignmentTurnedIn,
   PriceChange, Speed,
@@ -25,16 +25,16 @@ import { navigationItems } from '../../mock/navigation';
 import { NavItem } from '../../types';
 import { isSuperAdmin } from '../../utils/access';
 import SidebarDashboardCharts from './SidebarDashboardCharts';
-import { subItemSx, subItemTextProps } from './sidebarSubItem';
+import { selectedRowSx, subItemSx, subItemTextProps } from './sidebarSubItem';
 
 const DRAWER_WIDTH = 260;
-const MINI_DRAWER_WIDTH = 68;
+const RAIL_WIDTH = 68;
 
 const iconMap: Record<string, React.ReactElement> = {
   Home: <Home />, Flight: <Flight />, DirectionsBoat: <DirectionsBoat />,
   Dashboard: <Dashboard />,
   CloudUpload: <CloudUpload />,
-  Security: <Security />, Settings: <Settings />, Description: <Description />,
+  Security: <Security />, Settings: <Settings />,
   Email: <Email />,
   Storage: <Storage />,
   Schedule: <Schedule />,
@@ -44,6 +44,22 @@ const iconMap: Record<string, React.ReactElement> = {
   PriceChange: <PriceChange />,
   Speed: <Speed />,
 };
+
+// Rail sections built from a whole admin category (rather than a single nav
+// item) wear the category's own icon, not the icon of whichever item happens
+// to come first.
+const categoryIconKey: Record<string, string> = {
+  Overview: 'Home',
+  Admin: 'Security',
+  Settings: 'Settings',
+  'Data Ops': 'CloudUpload',
+};
+
+// Tenant-facing categories put each item on the rail by itself: a tenant's
+// module and its Dashboards are the two destinations they switch between, and
+// each deserves its own recognizable icon. Admin categories collapse to one
+// rail icon per category, or the rail would hold eight near-identical entries.
+const PER_ITEM_CATEGORIES = new Set(['Modules', 'Analytics']);
 
 // A child path carries its own query string (e.g. '/cpi/airline/wm?tab=velocity'),
 // so matching on pathname alone would light up every sibling. Compare the path
@@ -61,6 +77,17 @@ function isChildActive(pathname: string, search: string, childPath: string): boo
     if (actual !== value) return false;
   }
   return true;
+}
+
+/**
+ * One entry on the icon rail. The panel lists its `items`; clicking the rail
+ * icon navigates to the first of them.
+ */
+interface RailSection {
+  key: string;
+  title: string;
+  iconKey: string;
+  items: NavItem[];
 }
 
 interface SidebarProps {
@@ -87,12 +114,45 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
 
   const categories = Array.from(new Set(filteredItems.map(i => i.category || 'Other')));
 
+  const sections: RailSection[] = [];
+  for (const cat of categories) {
+    const catItems = filteredItems.filter(i => (i.category || 'Other') === cat);
+    if (catItems.length === 0) continue;
+    if (PER_ITEM_CATEGORIES.has(cat)) {
+      for (const item of catItems) {
+        sections.push({ key: item.path, title: item.label, iconKey: item.icon, items: [item] });
+      }
+    } else {
+      sections.push({
+        key: cat,
+        title: cat,
+        iconKey: categoryIconKey[cat] ?? catItems[0].icon,
+        items: catItems,
+      });
+    }
+  }
+
+  const isItemOnPath = (item: NavItem): boolean => {
+    // Dashboards' own route is /dashboards/:id, hence the prefix match.
+    if (item.path === '/dashboards') return location.pathname.startsWith('/dashboards');
+    if (location.pathname === item.path) return true;
+    return (item.children ?? []).some(c =>
+      isChildActive(location.pathname, location.search, c.path),
+    );
+  };
+
+  // The rail only highlights a genuine route match; the panel still needs
+  // something to show on routes outside the nav (profile, password change),
+  // so it falls back to the first section rather than rendering empty.
+  const matchedSection = sections.find(s => s.items.some(isItemOnPath)) ?? null;
+  const panelSection = matchedSection ?? sections[0] ?? null;
+
   const handleNav = (path: string) => {
     navigate(path);
     onClose(); // Automatically collapse/minimize after navigation
   };
 
-  const drawerWidth = isMobile ? (open ? DRAWER_WIDTH : 0) : (open ? DRAWER_WIDTH : MINI_DRAWER_WIDTH);
+  const drawerWidth = isMobile ? (open ? DRAWER_WIDTH : 0) : (open ? DRAWER_WIDTH : RAIL_WIDTH);
 
   return (
     <Drawer
@@ -124,158 +184,150 @@ export default function Sidebar({ open, onClose }: SidebarProps) {
         },
       }}
     >
-      <Box sx={{ overflow: 'auto', py: 1 }}>
-        {categories.map(cat => {
-          const catItems = filteredItems.filter(i => (i.category || 'Other') === cat);
-          if (catItems.length === 0) return null;
+      <Box sx={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
+        {/* Icon rail: always visible on desktop, one distinct icon per section. */}
+        <Box
+          sx={{
+            width: RAIL_WIDTH,
+            flexShrink: 0,
+            borderRight: 1,
+            borderColor: 'divider',
+            overflowY: 'auto',
+            overflowX: 'hidden',
+            py: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: 0.5,
+          }}
+        >
+          {sections.map(s => (
+            <Tooltip key={s.key} title={s.title} placement="right" arrow>
+              <ListItemButton
+                selected={matchedSection?.key === s.key}
+                onClick={() => handleNav(s.items[0].path)}
+                sx={{
+                  width: 44,
+                  minHeight: 44,
+                  maxHeight: 44,
+                  flexGrow: 0,
+                  borderRadius: '10px',
+                  justifyContent: 'center',
+                  px: 0,
+                  '&.Mui-selected': {
+                    bgcolor: 'primary.main',
+                    color: 'primary.contrastText',
+                    '& .MuiListItemIcon-root': { color: 'primary.contrastText' },
+                    '&:hover': { bgcolor: 'primary.dark' },
+                  },
+                }}
+              >
+                <ListItemIcon sx={{ minWidth: 0, justifyContent: 'center' }}>
+                  {iconMap[s.iconKey] || <Home />}
+                </ListItemIcon>
+              </ListItemButton>
+            </Tooltip>
+          ))}
+        </Box>
 
-          // If sidebar is collapsed AND it's the 'Modules' category, consolidate into 1 icon
-          const isModules = cat === 'Modules';
-          const showConsolidated = !open && isModules;
+        {/* Panel: the active section's contents. Collapsing hides only this. */}
+        {open && panelSection && (
+          <Box sx={{ flexGrow: 1, minWidth: 0, overflowY: 'auto', overflowX: 'hidden', py: 1 }}>
+            <Typography
+              variant="overline"
+              noWrap
+              sx={{
+                px: 2,
+                py: 0.5,
+                display: 'block',
+                color: 'text.secondary',
+                fontSize: 11,
+                fontWeight: 700,
+              }}
+            >
+              {panelSection.title}
+            </Typography>
+            <List dense disablePadding>
+              {panelSection.items.map(item => {
+                // Dashboards owns an async sub-list (the chart names) rather
+                // than static children, and its own route is /dashboards/:id,
+                // so both checks below need a prefix match for it.
+                const isDashboardsRow = item.path === '/dashboards';
+                const onPath = isDashboardsRow
+                  ? location.pathname.startsWith('/dashboards')
+                  : location.pathname === item.path;
+                // Rows that own sub-items are section headers: highlighting
+                // them as well as the active child would show two accented
+                // rows at once, so they get a lighter text accent instead.
+                const hasSubItems = !!item.children?.length || isDashboardsRow;
+                const isSelected = onPath && !hasSubItems;
+                return (
+                  <React.Fragment key={item.path}>
+                    <ListItemButton
+                      selected={isSelected}
+                      onClick={() => handleNav(item.path)}
+                      sx={{
+                        mx: 1,
+                        borderRadius: 1,
+                        mb: 0.5,
+                        px: 1.5,
+                        minHeight: 40,
+                        ...(hasSubItems && onPath && {
+                          color: 'primary.main',
+                          '& .MuiListItemIcon-root': { color: 'primary.main' },
+                        }),
+                        ...selectedRowSx,
+                      }}
+                    >
+                      <ListItemIcon sx={{ minWidth: 0, mr: 1.5, justifyContent: 'center' }}>
+                        {React.cloneElement(
+                          iconMap[item.icon] || <Home />,
+                          { sx: { fontSize: 20 } },
+                        )}
+                      </ListItemIcon>
+                      <ListItemText
+                        primary={item.label}
+                        primaryTypographyProps={{
+                          fontSize: 13,
+                          fontWeight: isSelected || (hasSubItems && onPath) ? 700 : 500,
+                        }}
+                      />
+                    </ListItemButton>
 
-          return (
-            <Box key={cat} sx={{ mb: open ? 1 : 2 }}>
-              {open && (
-                <Typography
-                  variant="overline"
-                  sx={{ px: 2, py: 0.5, display: 'block', color: 'text.secondary', fontSize: 11, fontWeight: 700 }}
-                >
-                  {cat}
-                </Typography>
-              )}
-              <List dense disablePadding>
-                {showConsolidated ? (
-                  (() => {
-                    const isAnySelected = catItems.some(i => location.pathname === i.path);
-                    const firstItem = catItems[0];
-                    return (
-                      <Tooltip title="Modules" placement="right" arrow>
+                    {/* Static sub-items (WinAir's Pricing / Velocity tabs) */}
+                    {(item.children ?? []).map(child => {
+                      const childSelected = isChildActive(
+                        location.pathname, location.search, child.path,
+                      );
+                      return (
                         <ListItemButton
-                          selected={isAnySelected}
-                          onClick={() => handleNav(firstItem.path)}
-                          sx={{
-                            mx: 1.5,
-                            borderRadius: 1,
-                            mb: 0.5,
-                            justifyContent: 'center',
-                            px: 1,
-                            minHeight: 44,
-                            '&.Mui-selected': {
-                              bgcolor: 'primary.main',
-                              color: 'primary.contrastText',
-                              '& .MuiListItemIcon-root': { color: 'primary.contrastText' },
-                              '&:hover': { bgcolor: 'primary.dark' },
-                            },
-                          }}
+                          key={child.path}
+                          selected={childSelected}
+                          onClick={() => handleNav(child.path)}
+                          sx={subItemSx}
                         >
-                          <ListItemIcon sx={{ minWidth: 0, justifyContent: 'center' }}>
-                            <ViewModule />
-                          </ListItemIcon>
-                        </ListItemButton>
-                      </Tooltip>
-                    );
-                  })()
-                ) : (
-                  catItems.map(item => {
-                    // Dashboards owns an async sub-list (the chart names) rather
-                    // than static children, and its own route is /dashboards/:id,
-                    // so both checks below need a prefix match for it.
-                    const isDashboardsRow = item.path === '/dashboards';
-                    const onPath = isDashboardsRow
-                      ? location.pathname.startsWith('/dashboards')
-                      : location.pathname === item.path;
-                    // Rows that own sub-items are section headers: highlighting
-                    // them solid as well as the active child would show two
-                    // filled rows at once, so they get a lighter accent instead.
-                    const hasSubItems = open && (!!item.children?.length || isDashboardsRow);
-                    const isSelected = onPath && !hasSubItems;
-                    const subItems = open ? item.children ?? [] : [];
-                    return (
-                      <React.Fragment key={item.path}>
-                      <Tooltip title={item.label} placement="right" arrow disableHoverListener={open}>
-                        <ListItemButton
-                          selected={isSelected}
-                          onClick={() => handleNav(item.path)}
-                          sx={{
-                            mx: open ? 1 : 1.5,
-                            borderRadius: 1,
-                            mb: 0.5,
-                            justifyContent: open ? 'initial' : 'center',
-                            px: open ? 2 : 1,
-                            minHeight: 44,
-                            ...(hasSubItems && onPath && {
-                              color: 'primary.main',
-                              '& .MuiListItemIcon-root': { color: 'primary.main' },
-                            }),
-                            '&.Mui-selected': {
-                              bgcolor: 'primary.main',
-                              color: 'primary.contrastText',
-                              '& .MuiListItemIcon-root': { color: 'primary.contrastText' },
-                              '&:hover': { bgcolor: 'primary.dark' },
-                            },
-                          }}
-                        >
-                          <ListItemIcon
-                            sx={{
-                              minWidth: 0,
-                              mr: open ? 2 : 'auto',
-                              justifyContent: 'center',
-                            }}
-                          >
-                            {iconMap[item.icon] || <Home />}
+                          <ListItemIcon sx={{ minWidth: 0, mr: 1.5, justifyContent: 'center' }}>
+                            {React.cloneElement(
+                              iconMap[child.icon] || <Home />,
+                              { sx: { fontSize: 17 } },
+                            )}
                           </ListItemIcon>
                           <ListItemText
-                            primary={item.label}
-                            sx={{
-                              opacity: open ? 1 : 0,
-                              display: open ? 'block' : 'none',
-                            }}
-                            primaryTypographyProps={{
-                              fontSize: 13,
-                              fontWeight: isSelected || (hasSubItems && onPath) ? 700 : 500,
-                            }}
+                            primary={child.label}
+                            primaryTypographyProps={subItemTextProps(childSelected)}
                           />
                         </ListItemButton>
-                      </Tooltip>
+                      );
+                    })}
 
-                      {/* Static sub-items (WinAir's Pricing / Velocity tabs) */}
-                      {subItems.map(child => {
-                        const childSelected = isChildActive(
-                          location.pathname, location.search, child.path,
-                        );
-                        return (
-                          <ListItemButton
-                            key={child.path}
-                            selected={childSelected}
-                            onClick={() => handleNav(child.path)}
-                            sx={subItemSx}
-                          >
-                            <ListItemIcon sx={{ minWidth: 0, mr: 1.5, justifyContent: 'center' }}>
-                              {React.cloneElement(
-                                iconMap[child.icon] || <Home />,
-                                { sx: { fontSize: 17 } },
-                              )}
-                            </ListItemIcon>
-                            <ListItemText
-                              primary={child.label}
-                              primaryTypographyProps={subItemTextProps(childSelected)}
-                            />
-                          </ListItemButton>
-                        );
-                      })}
-
-                      {/* Chart names for this tenant's Superset dashboard */}
-                      {open && item.path === '/dashboards' && (
-                        <SidebarDashboardCharts onNavigate={handleNav} />
-                      )}
-                      </React.Fragment>
-                    );
-                  })
-                )}
-              </List>
-            </Box>
-          );
-        })}
+                    {/* Chart names for this tenant's Superset dashboard */}
+                    {isDashboardsRow && <SidebarDashboardCharts onNavigate={handleNav} />}
+                  </React.Fragment>
+                );
+              })}
+            </List>
+          </Box>
+        )}
       </Box>
     </Drawer>
   );
