@@ -132,6 +132,27 @@ DASHBOARDS = {
         "embedded_uuid": "36365808-d276-44ea-8cc7-e305e2bb9718",
         "domain": "airline",
         "tenant": "WM",
+        # Native filters WinAir does not want in the global filter bar, keyed by
+        # the column each one targets. Superset's own native_filter_configuration
+        # is never modified — dashboard 6 still defines all eleven and its
+        # in-iframe panel is unchanged; this only suppresses them on our side.
+        #
+        # Keyed by column rather than by filter id because ids are opaque strings
+        # that exist only inside Superset's metadata, so an id list could not be
+        # checked against anything in this repo. Columns appear in the tenant
+        # views and the provisioning script. An entry matching no filter is
+        # logged — see the stale-entry check in get_dashboard_filter_config.
+        #
+        # Kept: route (Route O&D), flt_num (Flight Number), days_left, stops.
+        "hidden_filter_columns": {
+            "airline",              # Airline
+            "dtd_bucket",           # Days to Departure
+            "price_status",         # Price Position
+            "recommendation",       # Pricing Action
+            "lowest_competitor",    # Cheapest Competitor
+            "eqp",                  # Aircraft
+            "legseg_type",          # Leg/Segment
+        },
     },
 }
 
@@ -336,6 +357,55 @@ class SupersetClient:
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def mint_form_data_key(
+        self, datasource_id: int, datasource_type: str, chart_id: int, form_data_json: str,
+    ) -> str:
+        """Store an explore form_data overlay in Superset and return its key.
+
+        ``POST /api/v1/explore/form_data`` is a write, so it rides _session_post's
+        admin-session + CSRF flow (JWT bearer 403s on it).
+
+        Superset only reuses a key when a ``tab_id`` is supplied. We send none, so
+        every call mints a fresh random key — two tenants can never collide on one
+        cache entry, and a stale key is never handed back out.
+        """
+        data = await self._session_post(
+            "/api/v1/explore/form_data",
+            {
+                "datasource_id": datasource_id,
+                "datasource_type": datasource_type,
+                "chart_id": chart_id,
+                "form_data": form_data_json,
+            },
+            timeout=10.0,
+        )
+        key = data.get("key")
+        if not key:
+            raise Exception(f"form_data mint returned no key: {str(data)[:200]}")
+        return key
+
+    async def mint_permalink(self, superset_id: int, state: dict) -> str:
+        """Store a dashboard view (active tab + filter state) and return its key.
+
+        The Embedded SDK has no setter for either, and Superset reads them once
+        at mount. A permalink is the one supported way in: the caller passes the
+        key back as the ``permalink_key`` URL param and Superset restores the
+        whole state from it.
+
+        A write, so it rides _session_post's admin-session + CSRF flow. Each call
+        mints a fresh key; the stored value is a state snapshot, not tenant data.
+        """
+        # The body IS the state schema - Superset loads request.json straight
+        # into DashboardPermalinkStateSchema, so wrapping it in {"state": ...}
+        # fails validation with a 400.
+        data = await self._session_post(
+            f"/api/v1/dashboard/{superset_id}/permalink", state, timeout=10.0,
+        )
+        key = data.get("key")
+        if not key:
+            raise Exception(f"permalink mint returned no key: {str(data)[:200]}")
+        return key
 
     # ── Native filter introspection (for the out-of-iframe filter bar) ──
 
@@ -609,6 +679,104 @@ def _is_kpi(viz_type: str | None) -> bool:
     return bool(viz_type and viz_type.startswith("big_number"))
 
 
+def _find_top_tabs(layout: dict, node_id: str) -> str | None:
+    """Id of the outermost TABS node, or None on a dashboard without tabs."""
+    node = layout.get(node_id) or {}
+    if node.get("type") == "TABS":
+        return node_id
+    for child_id in node.get("children", []) or []:
+        found = _find_top_tabs(layout, child_id)
+        if found:
+            return found
+    return None
+
+
+def _tabs_are_navigation(position_json_str: str | None) -> bool:
+    """Is the strip ``_extract_top_tabs`` found actually the dashboard's navigation?
+
+    ``_find_top_tabs`` takes the first TABS node depth-first, which is only the
+    navigation when the dashboard is *built* as a tabbed dashboard. Measured on
+    dev: WM (dash 6) and FJL (dash 2) wrap everything in a single TABS node —
+    that is real navigation. JY (dash 1) and SKY (dash 5) instead stack five
+    sections directly under GRID_ID, each with its own sub-tab strip, so the
+    depth-first search returns the FIRST SECTION's sub-tabs ("Line / Bar /
+    Table") as though they were the dashboard's sections. Production's WM
+    dashboard has that same flat shape.
+
+    That misread is pre-existing and harmless to the sidebar, which only offers
+    the strip as extra links. It is NOT harmless to a navigation bar that hides
+    Superset's own tab row: there the user would be left steering by three
+    labels that address one section out of five.
+
+    So this reports whether the strip is structurally the navigation — the TABS
+    node is the sole child of the grid, or hangs directly off ROOT — and callers
+    that need to trust it check this first. ``_extract_top_tabs`` is left exactly
+    as it was, so existing consumers see no change.
+    """
+    if not position_json_str:
+        return False
+    try:
+        layout = json.loads(position_json_str)
+    except Exception:
+        return False
+    root_id = next(
+        (k for k, v in layout.items() if isinstance(v, dict) and v.get("type") == "ROOT"),
+        None,
+    )
+    if not root_id:
+        return False
+    tabs_id = _find_top_tabs(layout, root_id)
+    if not tabs_id:
+        return False
+
+    root_children = (layout.get(root_id) or {}).get("children") or []
+    if tabs_id in root_children:
+        return True
+    # The usual shape: ROOT -> GRID_ID -> TABS. Sole child, or the grid is
+    # holding other content the tabs do not govern.
+    for child_id in root_children:
+        child = layout.get(child_id) or {}
+        grand = child.get("children") or []
+        if grand == [tabs_id]:
+            return True
+    return False
+
+
+def _extract_top_tabs(position_json_str: str | None) -> list[dict]:
+    """Return the dashboard's top-level tab strip as [{id, label}], in render order.
+
+    Only the OUTERMOST strip. WinAir nests a second row of tabs inside each of
+    its five sections (Line / Bar / Table ...); those are a detail of the section
+    the user is already looking at, not a navigation target, so they stay out.
+
+    The id is the layout component id (e.g. "TAB-wmNav2"), which is exactly what
+    Superset's permalink ``activeTabs`` expects.
+    """
+    if not position_json_str:
+        return []
+    try:
+        layout = json.loads(position_json_str)
+    except Exception:
+        return []
+    root_id = next(
+        (k for k, v in layout.items() if isinstance(v, dict) and v.get("type") == "ROOT"),
+        None,
+    )
+    if not root_id:
+        return []
+    tabs_id = _find_top_tabs(layout, root_id)
+    if not tabs_id:
+        return []
+    out: list[dict] = []
+    for child_id in (layout.get(tabs_id) or {}).get("children", []) or []:
+        node = layout.get(child_id) or {}
+        if node.get("type") != "TAB":
+            continue
+        label = ((node.get("meta") or {}).get("text") or "").strip()
+        out.append({"id": child_id, "label": label or child_id})
+    return out
+
+
 @router.get("/dashboards/{dashboard_id}/charts")
 async def list_dashboard_charts(
     dashboard_id: str,
@@ -704,6 +872,51 @@ async def list_dashboard_charts(
         "dashboard_app_id": dashboard_id,
         "dashboard_title": dash["title"],
         "charts": items,
+    }
+
+
+# ── Tab manifest endpoint (sidebar navigation into a tabbed dashboard) ─────
+
+async def _dashboard_position_json(superset_id: int, ctx: str) -> str:
+    """The dashboard's raw ``position_json``, via the admin session."""
+    try:
+        data = await superset_client._session_get(f"/api/v1/dashboard/{superset_id}")
+    except Exception as e:
+        _log.error(f"[{ctx}] could not read dashboard {superset_id}: {e}")
+        raise HTTPException(502, detail={
+            "message": f"Could not read the dashboard layout from Superset: {e}",
+        })
+    return (data.get("result") or {}).get("position_json") or ""
+
+
+@router.get("/dashboards/{dashboard_id}/tabs")
+async def list_dashboard_tabs(
+    dashboard_id: str,
+    user_identity: str = Depends(get_user_identity),
+    user_roles: list[str] = Depends(get_user_roles),
+):
+    """The dashboard's top-level tabs, in the order Superset renders them.
+
+    Read straight out of the dashboard's own ``position_json``, so the list
+    stays 1:1 with the dashboard when a tab is renamed, added or reordered in
+    Superset - the same principle as /filter-config reading the dashboard's own
+    native_filter_configuration rather than hardcoding a filter list.
+
+    Returns an empty list for dashboards with no tab strip, which callers should
+    treat as "this dashboard is not tab-navigable" rather than as an error.
+    """
+    dash = _require_tenant_dashboard(dashboard_id, user_identity, user_roles)
+    position_json = await _dashboard_position_json(dash["superset_id"], "tabs")
+    return {
+        "dashboard_id": int(dash["superset_id"]),
+        "dashboard_app_id": dashboard_id,
+        "tabs": _extract_top_tabs(position_json),
+        # Additive. False means the strip above is a section's own sub-tabs
+        # that the extractor could not distinguish from real navigation — see
+        # _tabs_are_navigation. Callers that merely offer the tabs as links
+        # (the sidebar) can ignore this; a caller that REPLACES Superset's tab
+        # row must not proceed without it.
+        "tabs_are_navigation": _tabs_are_navigation(position_json),
     }
 
 
@@ -828,6 +1041,173 @@ def _filter_target(f: dict) -> tuple[Optional[int], Optional[str]]:
     return t.get("datasetId"), (t.get("column") or {}).get("name")
 
 
+# ── Chart-view filter overlay (form_data_key) ───────────────────────────────
+#
+# Chart view loads /explore/?slice_id=N&standalone=1 ANONYMOUSLY against
+# Superset's Public role (infra/SUPERSET_NOTES.md), so neither the guest token's
+# cap_date RLS nor the dashboard's native filters reach it. The only channel the
+# explore SPA honours is `form_data_key`: a server-stored form_data overlay,
+# minted here and merged over the slice's saved config by Superset.
+#
+# Raw `form_data=` on the URL does NOT work — the explore SPA's URL-param
+# registry drops it silently and renders the chart unfiltered.
+
+_CHART_META_TTL_SECONDS = 60.0
+_dash_chart_meta_cache: dict[int, tuple[float, dict[int, dict]]] = {}
+
+
+async def _dashboard_chart_meta(superset_id: int) -> dict[int, dict]:
+    """{slice_id: that slice's saved form_data} for every chart on a dashboard.
+
+    One call serves three needs: the membership gate (is this slice on the
+    caller's dashboard?), the native-filter scope fallback (which slice ids exist
+    at all), and — the important one — the merge base, since the response carries
+    each slice's saved adhoc_filters / viz_type / datasource.
+
+    Short TTL on purpose, matching EXPLORE_FORM_DATA_CACHE_CONFIG's reasoning in
+    infra/superset_config.py: this is the base a filter overlay is merged onto, so
+    a chart edited in Superset must not keep producing overlays built on its old
+    definition. One mint per chart switch is not a hot path.
+    """
+    now = time.monotonic()
+    hit = _dash_chart_meta_cache.get(superset_id)
+    if hit and now - hit[0] < _CHART_META_TTL_SECONDS:
+        return hit[1]
+    data = await superset_client._session_get(f"/api/v1/dashboard/{superset_id}/charts")
+    meta: dict[int, dict] = {}
+    for ch in data.get("result") or []:
+        sid = ch.get("id")
+        if sid is not None:
+            meta[int(sid)] = ch.get("form_data") or {}
+    _dash_chart_meta_cache[superset_id] = (now, meta)
+    return meta
+
+
+def _charts_in_scope(f: dict, all_slice_ids: list[int]) -> Optional[list[int]]:
+    """Slice ids a native filter applies to, or None when unknowable.
+
+    Superset writes ``chartsInScope`` whenever a filter's scope is saved, so that
+    is the authority; dashboards saved by older versions carry only
+    ``scope.excluded``, so derive from that instead.
+
+    None means "this dashboard carries no scope information". Callers MUST read
+    that as "applies everywhere", never as "applies nowhere" — a filter must not
+    silently vanish from the bar because we failed to learn its scope.
+    """
+    raw = f.get("chartsInScope")
+    if isinstance(raw, list):
+        return [int(x) for x in raw if isinstance(x, int) and not isinstance(x, bool)]
+    excluded = (f.get("scope") or {}).get("excluded")
+    if isinstance(excluded, list):
+        ex = {int(x) for x in excluded if isinstance(x, int) and not isinstance(x, bool)}
+        return [sid for sid in all_slice_ids if sid not in ex]
+    return None
+
+
+def _adhoc_in(column: str, values: list[str], option_name: str) -> dict:
+    """A Superset SIMPLE adhoc filter expressing ``column IN (values)``.
+
+    The same three facts the dataMask path carries (col / op / val, see
+    build_dashboard_filter_params) in explore's vocabulary: subject / operator /
+    comparator. ``comparator`` is always a LIST for IN, including for
+    single-select filters — a bare string is read as a one-element IN by some
+    Superset versions and rejected by others, so one code path, no branch.
+
+    ``filterOptionName`` must be unique within the array; Superset uses it as the
+    React key for the filter pills.
+    """
+    return {
+        "expressionType": "SIMPLE",
+        "clause": "WHERE",
+        "subject": column,
+        "operator": "IN",
+        "comparator": list(values),
+        "filterOptionName": option_name,
+    }
+
+
+def _adhoc_cmp(column: str, operator: str, value: str, option_name: str) -> dict:
+    """SIMPLE adhoc filter for a scalar comparison (``==`` / ``>=`` / ``<=``)."""
+    return {
+        "expressionType": "SIMPLE",
+        "clause": "WHERE",
+        "subject": column,
+        "operator": operator,
+        "comparator": value,
+        "filterOptionName": option_name,
+    }
+
+
+def _cap_date_adhoc_filters(
+    cap_date_eq: Optional[str],
+    cap_date_from: Optional[str],
+    cap_date_to: Optional[str],
+) -> list[dict]:
+    """cap_date overlay mirroring the guest-token RLS clause exactly.
+
+    Single day -> ``cap_date == eq``; range -> ``>= from AND <= to``, inclusive at
+    both ends. Single day wins when both are supplied, the same precedence
+    fetch_guest_token uses, so Dashboard and Chart view can never disagree.
+
+    Deliberately NOT a TEMPORAL_RANGE filter: Superset parses
+    ``"2026-07-01 : 2026-07-15"`` as start-inclusive / end-EXCLUSIVE, which would
+    quietly drop the last day of every range relative to Dashboard mode — exactly
+    the class of bug this feature exists to close.
+
+    [] is a legitimate result — the overlay may carry only native selections.
+    """
+    if cap_date_eq:
+        _validate_cap_date(cap_date_eq, "cap_date_eq")
+        return [_adhoc_cmp("cap_date", "==", cap_date_eq, "cpi_capdate_eq")]
+    if cap_date_from and cap_date_to:
+        _validate_cap_date(cap_date_from, "cap_date_from")
+        _validate_cap_date(cap_date_to, "cap_date_to")
+        if cap_date_from > cap_date_to:
+            raise HTTPException(400, detail={"message": "cap_date_from must be <= cap_date_to"})
+        return [
+            _adhoc_cmp("cap_date", ">=", cap_date_from, "cpi_capdate_from"),
+            _adhoc_cmp("cap_date", "<=", cap_date_to, "cpi_capdate_to"),
+        ]
+    return []
+
+
+def _merge_adhoc_filters(saved: Any, ours: list[dict]) -> list[dict]:
+    """Append our overlay to the slice's OWN saved adhoc_filters.
+
+    This is the load-bearing part. Superset merges a form_data_key overlay with
+    ``slice_form_data.update(overlay)`` — a top-level dict update — so an overlay
+    carrying ``adhoc_filters`` REPLACES the saved list outright. Sending only our
+    filters would delete whatever the chart was saved with and render
+    plausible-looking wrong numbers with no error anywhere.
+
+    Exactly one class of saved filter is dropped: a SIMPLE filter on a column we
+    are also filtering. Keeping both ANDs them — a saved ``cap_date`` range under
+    our ``cap_date ==`` is empty — so ours wins on that column and only there.
+
+    Freeform ``expressionType: "SQL"`` entries are ALWAYS kept: we cannot tell
+    which column they touch, and dropping one changes what the chart means.
+    """
+    owned = {f["subject"] for f in ours}
+    kept: list[dict] = []
+    for f in saved if isinstance(saved, list) else []:
+        if not isinstance(f, dict):
+            continue
+        if f.get("expressionType") == "SIMPLE" and f.get("subject") in owned:
+            continue
+        kept.append(f)
+    return kept + ours
+
+
+def _hidden_filter_columns(dash: dict) -> set[str]:
+    """Target columns whose native filters this API does not surface or honour.
+
+    Lower-cased so the registry list reads naturally whatever case the filter's
+    target happens to use. Dashboards without the key get an empty set, so their
+    behaviour is unchanged.
+    """
+    return {c.lower() for c in (dash.get("hidden_filter_columns") or ())}
+
+
 async def _column_values_cached(dataset_id: int, column: str) -> list[str]:
     key = (dataset_id, column)
     hit = _filter_values_cache.get(key)
@@ -862,6 +1242,9 @@ async def get_dashboard_filter_config(
             "message": f"Could not read filter configuration from Superset: {e}",
         })
 
+    hidden = _hidden_filter_columns(dash)
+    matched: set[str] = set()
+
     selectable = []
     for f in raw_filters:
         if f.get("filterType") != "filter_select":
@@ -870,7 +1253,23 @@ async def get_dashboard_filter_config(
         if not ds_id or not column:
             _log.error(f"[filter-config] filter {f.get('id')} has no usable target; skipping")
             continue
+        if column.lower() in hidden:
+            # Dropped above the gather below, so a suppressed filter also costs
+            # no distinct-values query. That is why this lives here rather than
+            # in the frontend's filters.map().
+            matched.add(column.lower())
+            continue
         selectable.append((f, ds_id, column))
+
+    # A suppression entry that matched nothing means the dashboard moved under
+    # us — column renamed, filter deleted — and the entry is now inert. That
+    # fails OPEN: the filter reappears in the bar. Say so rather than let a user
+    # discover it.
+    for stale in sorted(hidden - matched):
+        _log.error(
+            f"[filter-config] dashboard {dashboard_id}: hidden_filter_columns entry "
+            f"'{stale}' matched no native filter on Superset dashboard {dash['superset_id']}"
+        )
 
     # One query per filter; issue them concurrently so a 10-filter dashboard
     # costs one round of latency rather than ten.
@@ -878,6 +1277,16 @@ async def get_dashboard_filter_config(
         *(_column_values_cached(ds_id, col) for _, ds_id, col in selectable),
         return_exceptions=True,
     )
+
+    # all_slice_ids is needed only for the scope.excluded fallback, so pay for
+    # that lookup lazily. Dashboards Superset saved with chartsInScope — all of
+    # ours today — cost nothing extra.
+    all_slice_ids: list[int] = []
+    if any("chartsInScope" not in f for f, _, _ in selectable):
+        try:
+            all_slice_ids = sorted((await _dashboard_chart_meta(dash["superset_id"])).keys())
+        except Exception as e:
+            _log.error(f"[filter-config] chart list failed for {dash['superset_id']}: {e}")
 
     out: list[dict] = []
     for (f, ds_id, column), values in zip(selectable, results):
@@ -895,6 +1304,10 @@ async def get_dashboard_filter_config(
             "dataset_id": ds_id,
             "multi_select": bool(control.get("multiSelect", True)),
             "values": values,
+            # Which charts this filter reaches, from Superset's own scope config.
+            # Chart view uses it to show only the filters that affect the chart
+            # on screen. null = no scope info recorded == applies everywhere.
+            "charts_in_scope": _charts_in_scope(f, all_slice_ids),
         })
 
     return {"dashboard_id": dashboard_id, "filters": out}
@@ -904,6 +1317,58 @@ class FilterParamsRequest(BaseModel):
     """Selected values per native filter id, e.g. {"NATIVE_FILTER-Route": ["ANU → SLU"]}."""
 
     selections: Dict[str, List[str]] = Field(default_factory=dict)
+
+
+def _build_data_mask(
+    dash: dict,
+    raw_filters: list[dict],
+    selections: dict | None,
+    dashboard_id: str,
+    ctx: str,
+) -> dict[str, dict]:
+    """Turn {filter_id: [values]} into Superset's dataMask shape.
+
+    Shared by /filter-params (which risons it into the ``native_filters`` URL
+    param) and /permalink (which stores it as permalink state), so both honour
+    exactly the same rules:
+
+    * Unknown filter ids are ignored rather than trusted.
+    * The column comes from the dashboard's own target definition, never from
+      the request, so a caller cannot filter on an arbitrary column.
+    * Suppressed filters are dropped on the write side too - without that a
+      stale client could narrow the dashboard by a filter the bar never
+      rendered, leaving the user no visible control to explain or clear it.
+    * An empty selection is omitted entirely, which is what "All" means.
+
+    Never interpolated into SQL - Superset parses it into its own filter state.
+    """
+    by_id = {f["id"]: f for f in raw_filters if f.get("id")}
+    hidden = _hidden_filter_columns(dash)
+
+    data_mask: dict[str, dict] = {}
+    for filter_id, values in (selections or {}).items():
+        f = by_id.get(filter_id)
+        if not f:
+            continue
+        _, column = _filter_target(f)
+        if not column:
+            continue
+        if column.lower() in hidden:
+            _log.info(
+                f"[{ctx}] dropping selection for suppressed filter "
+                f"{filter_id} ({column}) on dashboard {dashboard_id}"
+            )
+            continue
+        vals = [str(v) for v in (values or []) if v is not None and str(v) != ""]
+        if not vals:
+            continue
+        data_mask[filter_id] = {
+            "id": filter_id,
+            "extraFormData": {"filters": [{"col": column, "op": "IN", "val": vals}]},
+            "filterState": {"value": vals, "label": ", ".join(vals)},
+            "ownState": {},
+        }
+    return data_mask
 
 
 @router.post("/dashboards/{dashboard_id}/filter-params")
@@ -939,24 +1404,211 @@ async def build_dashboard_filter_params(
             "message": f"Could not read filter configuration from Superset: {e}",
         })
 
-    by_id = {f["id"]: f for f in raw_filters if f.get("id")}
+    data_mask = _build_data_mask(dash, raw_filters, body.selections, dashboard_id, "filter-params")
 
-    data_mask: dict[str, dict] = {}
+    return {"native_filters": prison.dumps(data_mask) if data_mask else ""}
+
+
+class DashboardPermalinkRequest(BaseModel):
+    """A dashboard view to store: which tab is open, and what is filtered."""
+
+    active_tab: Optional[str] = None
+    selections: Dict[str, List[str]] = Field(default_factory=dict)
+
+
+@router.post("/dashboards/{dashboard_id}/permalink")
+async def mint_dashboard_permalink(
+    dashboard_id: str,
+    body: DashboardPermalinkRequest,
+    user_identity: str = Depends(get_user_identity),
+    user_roles: list[str] = Depends(get_user_roles),
+):
+    """Store a dashboard view and return the key that reopens it.
+
+    Exists because the Embedded SDK cannot set the active tab (or the filters)
+    after mount - Superset reads both once, from the URL. So the caller mints a
+    key here and hands it to the SDK as ``permalink_key``.
+
+    The tab AND the filters go into the one permalink deliberately. Passing a
+    permalink_key alongside a ``native_filters`` param would leave two sources
+    of truth for filter state racing each other on mount; one snapshot cannot.
+
+    ``active_tab`` is validated against the dashboard's real tab strip, so a
+    caller cannot pin the view to an arbitrary layout id.
+    """
+    dash = _require_tenant_dashboard(dashboard_id, user_identity, user_roles)
+
+    state: dict = {}
+
+    if body.active_tab:
+        position_json = await _dashboard_position_json(dash["superset_id"], "permalink")
+        known = {t["id"] for t in _extract_top_tabs(position_json)}
+        if body.active_tab not in known:
+            raise HTTPException(400, detail={
+                "message": f"Unknown tab '{body.active_tab}' on dashboard {dashboard_id}",
+            })
+        # anchor scrolls the tab into view; activeTabs is what actually selects it.
+        state["activeTabs"] = [body.active_tab]
+        state["anchor"] = body.active_tab
+
+    if body.selections:
+        try:
+            raw_filters = await superset_client.get_native_filters(dash["superset_id"])
+        except Exception as e:
+            _log.error(f"[permalink] could not read filters for {dash['superset_id']}: {e}")
+            raise HTTPException(502, detail={
+                "message": f"Could not read filter configuration from Superset: {e}",
+            })
+        data_mask = _build_data_mask(
+            dash, raw_filters, body.selections, dashboard_id, "permalink",
+        )
+        if data_mask:
+            state["dataMask"] = data_mask
+
+    if not state:
+        # Nothing to pin. Say so rather than minting a key that changes nothing,
+        # so the caller can drop the URL param and embed the plain dashboard.
+        return {"key": None}
+
+    try:
+        key = await superset_client.mint_permalink(dash["superset_id"], state)
+    except Exception as e:
+        _log.error(f"[permalink] mint failed for dashboard {dashboard_id}: {e}")
+        raise HTTPException(502, detail={
+            "message": f"Could not create the dashboard permalink: {e}",
+        })
+
+    return {"key": key}
+
+
+class ChartOverlayRequest(BaseModel):
+    """What Chart view wants applied to one slice.
+
+    Same cap_date vocabulary as the guest token, same selections vocabulary as
+    /filter-params.
+    """
+
+    cap_date_eq: Optional[str] = None
+    cap_date_from: Optional[str] = None
+    cap_date_to: Optional[str] = None
+    selections: Dict[str, List[str]] = Field(default_factory=dict)
+
+
+@router.post("/dashboards/{dashboard_id}/charts/{slice_id}/form-data-key")
+async def mint_chart_form_data_key(
+    dashboard_id: str,
+    slice_id: int,
+    body: ChartOverlayRequest,
+    user_identity: str = Depends(get_user_identity),
+    user_roles: list[str] = Depends(get_user_roles),
+):
+    """Mint a Superset form_data_key applying Chart view's filters to one slice.
+
+    Routed UNDER the dashboard rather than as a bare /charts/{slice_id}/… — that
+    is the whole authorization story. A slice id carries no tenant, so a flat
+    route would let any authenticated session mint a key for any slice in the
+    deployment. Here _require_tenant_dashboard runs first (the same three checks
+    guest-token, /charts and /filter-config make), and then the slice must
+    actually belong to that dashboard.
+
+    The overlay is built entirely server-side from validated cap_date params and
+    the dashboard's OWN native filter definitions. The client sends filter ids and
+    values; the COLUMN always comes from Superset's target definition, so a caller
+    cannot filter on an arbitrary column (same rule as
+    build_dashboard_filter_params).
+    """
+    dash = _require_tenant_dashboard(dashboard_id, user_identity, user_roles)
+
+    try:
+        chart_meta = await _dashboard_chart_meta(dash["superset_id"])
+        raw_filters = await superset_client.get_native_filters(dash["superset_id"])
+    except Exception as e:
+        _log.error(f"[form-data-key] Superset read failed for dashboard {dash['superset_id']}: {e}")
+        raise HTTPException(502, detail={
+            "message": f"Could not read chart metadata from Superset: {e}",
+        })
+
+    saved_fd = chart_meta.get(slice_id)
+    if saved_fd is None:
+        # Phrased against the dashboard, not the slice: a "no such chart" message
+        # would confirm to the caller whether a foreign slice id exists.
+        raise HTTPException(404, detail={
+            "message": f"Chart {slice_id} is not on dashboard '{dashboard_id}'.",
+        })
+
+    all_slice_ids = sorted(chart_meta.keys())
+    by_id = {f["id"]: f for f in raw_filters if f.get("id")}
+    hidden = _hidden_filter_columns(dash)
+
+    ours = _cap_date_adhoc_filters(body.cap_date_eq, body.cap_date_from, body.cap_date_to)
+    applied: list[dict] = []
+    out_of_scope: list[dict] = []
+
     for filter_id, values in (body.selections or {}).items():
         f = by_id.get(filter_id)
         if not f:
-            continue                      # unknown id — ignore rather than trust
+            continue                          # unknown id — ignore rather than trust
         _, column = _filter_target(f)
         if not column:
             continue
+        if column.lower() in hidden:
+            continue                          # suppressed for this dashboard
         vals = [str(v) for v in (values or []) if v is not None and str(v) != ""]
         if not vals:
-            continue                      # nothing selected == "All"
-        data_mask[filter_id] = {
-            "id": filter_id,
-            "extraFormData": {"filters": [{"col": column, "op": "IN", "val": vals}]},
-            "filterState": {"value": vals, "label": ", ".join(vals)},
-            "ownState": {},
-        }
+            continue                          # nothing selected == "All"
+        label = f.get("name") or column
+        scope = _charts_in_scope(f, all_slice_ids)
+        if scope is not None and slice_id not in scope:
+            # Superset would not apply this filter to this chart on the dashboard
+            # either. Applying it here would make Chart view STRICTER than
+            # Dashboard view, so report it instead and let the UI say "not used
+            # by this chart" rather than quietly narrowing the data.
+            out_of_scope.append({"id": filter_id, "label": label})
+            continue
+        ours.append(_adhoc_in(column, vals, f"cpi_{re.sub(r'[^A-Za-z0-9_]', '_', filter_id)}"))
+        applied.append({"id": filter_id, "label": label, "column": column, "values": vals})
 
-    return {"native_filters": prison.dumps(data_mask) if data_mask else ""}
+    if not ours:
+        # Nothing to overlay. Say so rather than burning a Superset write and a
+        # metastore cache row on an empty form_data; the client loads the plain URL.
+        return {"key": None, "cap_date": None, "applied": [], "out_of_scope": out_of_scope}
+
+    ds = saved_fd.get("datasource") or ""      # "32__table"
+    ds_id, _, ds_type = ds.partition("__")
+    if not ds_id.isdigit() or not ds_type:
+        raise HTTPException(502, detail={
+            "message": f"Could not resolve the datasource for chart {slice_id}.",
+        })
+
+    form_data: dict = {
+        # slice_id is load-bearing, not decoration: Superset only merges the
+        # slice's saved form_data when the resolved form_data carries one.
+        "slice_id": slice_id,
+        "adhoc_filters": _merge_adhoc_filters(saved_fd.get("adhoc_filters"), ours),
+    }
+    # A viz with a second, independent query keeps its filters in
+    # adhoc_filters_b (mixed_timeseries is the only one registered in Superset
+    # 3.1.0 — WM's velocity chart is one). Keying off the SAVED form_data rather
+    # than a viz_type allow-list means a future two-query viz is covered with no
+    # code change, and the viz_type clause still catches one saved without the key.
+    if "adhoc_filters_b" in saved_fd or saved_fd.get("viz_type") == "mixed_timeseries":
+        form_data["adhoc_filters_b"] = _merge_adhoc_filters(saved_fd.get("adhoc_filters_b"), ours)
+
+    try:
+        key = await superset_client.mint_form_data_key(
+            datasource_id=int(ds_id),
+            datasource_type=ds_type,
+            chart_id=slice_id,
+            form_data_json=json.dumps(form_data),
+        )
+    except Exception as e:
+        _log.error(f"[form-data-key] mint failed for slice {slice_id}: {e}")
+        raise HTTPException(502, detail={
+            "message": f"Could not mint Superset form_data_key: {e}",
+        })
+
+    cap_date = body.cap_date_eq or (
+        f"{body.cap_date_from} → {body.cap_date_to}"
+        if body.cap_date_from and body.cap_date_to else None
+    )
+    return {"key": key, "cap_date": cap_date, "applied": applied, "out_of_scope": out_of_scope}
