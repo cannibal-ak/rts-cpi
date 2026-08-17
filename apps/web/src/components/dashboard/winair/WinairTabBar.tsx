@@ -1,7 +1,10 @@
 import { Box, Tabs, Tab, Alert, Skeleton, CircularProgress } from '@mui/material';
 import { ScatterPlot } from '@mui/icons-material';
 import type { DashboardTab } from '../../../api/client';
-import { BANNER_HEADER_BG, HAIRLINE, LABEL_INK } from '../bannerTheme';
+import {
+  BANNER_HEADER_BG, HAIRLINE, LABEL_INK, MUTED_INK,
+  FIELD_BG, FIELD_BG_ACTIVE, FIELD_LINE, FIELD_LINE_ACTIVE,
+} from '../bannerTheme';
 
 /**
  * Reserved key for the CPI-rendered Latest Prices pane.
@@ -65,10 +68,10 @@ export default function WinairTabBar({
       {loading ? (
         // Six entries: Latest Prices plus WinAir's five sections. A fixed
         // count keeps the bar from resizing when the real labels land.
-        <Box sx={{ display: 'flex', gap: 2, py: 1.25, px: 1 }}>
+        <Box sx={{ display: 'flex', gap: 1, py: 0.875, px: 1 }}>
           {Array.from({ length: 6 }, (_, i) => (
-            <Skeleton key={i} variant="text" width={i === 0 ? 90 : 130} height={20}
-                      sx={{ bgcolor: 'rgba(255,255,255,0.13)' }} />
+            <Skeleton key={i} variant="rounded" width={i === 0 ? 110 : 130} height={30}
+                      sx={{ bgcolor: 'rgba(255,255,255,0.13)', borderRadius: 999 }} />
           ))}
         </Box>
       ) : (
@@ -80,20 +83,34 @@ export default function WinairTabBar({
           allowScrollButtonsMobile
           aria-label="WinAir dashboard sections"
           sx={{
-            minHeight: 38,
-            '& .MuiTabs-indicator': { height: 2, backgroundColor: '#ffffff' },
+            minHeight: 44,
+            py: 0.75,
+            '& .MuiTabs-indicator': { display: 'none' },
             '& .MuiTabs-scrollButtons.Mui-disabled': { opacity: 0.25 },
             '& .MuiTabs-scrollButtons': { color: LABEL_INK },
+            // Pills reuse the filter fields' idle/active tokens so the whole
+            // banner keeps one idle-vs-holding-a-selection language.
             '& .MuiTab-root': {
-              minHeight: 38,
+              minHeight: 32,
+              minWidth: 'auto',
+              my: 'auto',
+              mr: 1,
               py: 0.5,
-              px: 1.5,
+              px: 1.75,
+              borderRadius: 999,
+              bgcolor: FIELD_BG,
+              border: `1px solid ${FIELD_LINE}`,
               fontSize: 12.5,
               fontWeight: 500,
               textTransform: 'none',
-              color: LABEL_INK,
+              color: MUTED_INK,
               gap: 0.75,
-              '&.Mui-selected': { color: '#ffffff', fontWeight: 600 },
+              '&.Mui-selected': {
+                color: '#ffffff',
+                fontWeight: 600,
+                bgcolor: FIELD_BG_ACTIVE,
+                borderColor: FIELD_LINE_ACTIVE,
+              },
             },
           }}
         >
