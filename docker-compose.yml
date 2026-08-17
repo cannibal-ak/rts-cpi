@@ -184,7 +184,12 @@ services:
           --email admin@rts.local \
           --password $${SUPERSET_ADMIN_PASS:-admin} 2>/dev/null || true
         superset init
-        superset run -h 0.0.0.0 -p 8088 --with-threads
+        # 2026-08-10 perf: replaced "superset run --with-threads" (Flask dev server,
+        # single process) with gunicorn. Postgres served 12 concurrent chart queries in
+        # 0.39s while the dev server took 1.86s -- the gap was one GIL-bound process.
+        # Workers kept at 4 because the Superset metadata DB is SQLite.
+        # Rollback: restore the single "superset run -h 0.0.0.0 -p 8088 --with-threads" line.
+        gunicorn --bind 0.0.0.0:8088 --workers 4 --worker-class gthread --threads 20 --timeout 120 --keep-alive 5 --limit-request-line 0 --limit-request-field_size 0 "superset.app:create_app()"
     profiles:
       - superset
 

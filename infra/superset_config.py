@@ -345,3 +345,42 @@ EXTRA_CATEGORICAL_COLOR_SCHEMES = EXTRA_CATEGORICAL_COLOR_SCHEMES + [
         ],
     },
 ]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Chart result caching  (added 2026-08-10 — dashboard load performance)
+# ═══════════════════════════════════════════════════════════════════════
+# Before this block there was NO DATA_CACHE_CONFIG at all, so every single
+# dashboard refresh re-ran all 12 WM chart queries *and* all 11 native-filter
+# dropdown queries from scratch (every chart reported is_cached=None).
+# cpi-redis was already running healthy but Superset was never wired to it.
+#
+# Redis DB choice: db1 = celery broker, db2 = in use, so db3 is used here.
+#
+# TTL is deliberately SHORT (5 min). Long TTLs would let a dashboard keep
+# serving pre-ingestion numbers after a new cap_date file lands, which
+# matters more here than the extra cache hits would be worth.
+#
+# NOTE: EXPLORE_FORM_DATA_CACHE_CONFIG above is intentionally NOT changed --
+# its 60s SupersetMetastoreCache TTL is the standalone chart-view staleness
+# fix and must keep its existing behaviour.
+#
+# Rollback: delete this block, then recreate the superset container.
+
+_CPI_CACHE_REDIS = "redis://redis:6379/3"
+
+# Generic Superset cache (metadata/datasource lookups).
+CACHE_CONFIG = {
+    "CACHE_TYPE": "RedisCache",
+    "CACHE_DEFAULT_TIMEOUT": 300,
+    "CACHE_KEY_PREFIX": "cpi_superset_cache_",
+    "CACHE_REDIS_URL": _CPI_CACHE_REDIS,
+}
+
+# Chart query results -- this is the one that drives dashboard load time.
+DATA_CACHE_CONFIG = {
+    "CACHE_TYPE": "RedisCache",
+    "CACHE_DEFAULT_TIMEOUT": 300,
+    "CACHE_KEY_PREFIX": "cpi_superset_data_",
+    "CACHE_REDIS_URL": _CPI_CACHE_REDIS,
+}
