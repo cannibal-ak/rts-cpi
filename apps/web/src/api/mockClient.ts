@@ -560,9 +560,9 @@ export const mockClient: CpiApiClient = {
       tabs: dashboardId === '5'
         ? [
             { id: 'TAB-wmNav1', label: 'Avg_Fare' },
-            { id: 'TAB-wmNav2', label: 'Pricing Recommendations' },
-            { id: 'TAB-wmNav3', label: 'Competitor Breakdown' },
             { id: 'TAB-wmNav4', label: 'Min/Max Fare' },
+            { id: 'TAB-wmNav3', label: 'Competitor Breakdown' },
+            { id: 'TAB-wmNav2', label: 'Pricing Recommendations' },
             { id: 'TAB-wmNav5', label: 'Velocity' },
           ]
         : [],
