@@ -106,6 +106,42 @@ def _business_type_for(domain: str) -> str:
     return "CRUISE_FERRY" if domain == "CFL" else "AIRLINE"
 
 
+def _seats_or_default(value: object) -> int:
+    """Seat count, falling back to 9 only when the feed omits the value.
+
+    ``airline_cpi_snapshot.{ref,comp}_seats`` is NOT NULL, so a missing
+    column needs a stand-in and 9 is the long-standing one. The previous
+    form — ``safe_int(value or 9)`` — could not tell "column absent" from
+    "genuinely zero", because 0 is falsy: every real 0 was rewritten to 9.
+    WinAir's feed sends 0, so every WM row claimed nine seats. Routing
+    through ``safe_int_nullable`` keeps a real 0 and defaults only on None
+    or blank.
+    """
+    parsed = safe_int_nullable(value)
+    return 9 if parsed is None else parsed
+
+
+# Currency of last resort, per tenant, used only when the source file has no
+# currency column at all. JY's pre-2026-05 25-column layout is the only such
+# feed still in the archive; every current feed carries RefCur/CompCur.
+# ALT is a demo clone built by direct INSERT and never ingests, but it is
+# listed so the fallback stays truthful if that ever changes.
+_TENANT_FALLBACK_CURRENCY = {"JY": "USD", "PW": "USD", "WM": "USD", "ALT": "EUR"}
+_FALLBACK_CURRENCY = "USD"
+
+
+def _currency_or_default(value: object, tenant_code: str) -> str:
+    """Currency for one side of a row: the file's value wins.
+
+    Previously this was hardcoded to ``"GBP"`` for every tenant except WM,
+    which silently overrode the source: JY and PW both send ``USD`` in
+    ``RefCur``/``CompCur`` and were stored — and displayed — as sterling.
+    ``{ref,comp}_curr`` is varchar(4), hence the slice.
+    """
+    code = "" if value is None else str(value).strip()[:4]
+    return code or _TENANT_FALLBACK_CURRENCY.get(tenant_code, _FALLBACK_CURRENCY)
+
+
 def _ensure_actor_uuid(payload: dict) -> uuid.UUID:
     sub = payload.get("sub")
     if not sub:
@@ -871,7 +907,7 @@ class IngestionService:
                 "ct": parse_time(row.get("CapTime")) or datetime.now().time(),
                 "tt": (row.get("TripType") or "RT")[:4],
                 "ra": (row.get("RefAL") or job.tenant_code)[:3],
-                "rf": (row.get("RefFltNum") or "")[:10],
+                "rf": (row.get("RefFltNum") or "")[:64],
                 "ro": (row.get("RefOrg") or "")[:4],
                 "rd": (row.get("RefDst") or "")[:4],
                 "rdd": parse_date(row.get("RefDepDate")) or cap_date,
@@ -880,10 +916,10 @@ class IngestionService:
                 "rbf": safe_float(row.get("RefBaseFare")),
                 "rtax": safe_float(row.get("RefTax")),
                 "ryq": safe_float(row.get("RefYQ")),
-                "rs": safe_int(row.get("RefSeats") or 9),
-                "rcur": ((row.get("RefCur") or "").strip()[:4] or "USD") if job.tenant_code == "WM" else "GBP",
+                "rs": _seats_or_default(row.get("RefSeats")),
+                "rcur": _currency_or_default(row.get("RefCur"), job.tenant_code),
                 "ca": (row.get("CompAL") or "")[:3],
-                "cf": (row.get("CompFltNum") or "")[:10],
+                "cf": (row.get("CompFltNum") or "")[:64],
                 "co": (row.get("CompOrg") or row.get("RefOrg") or "")[:4],
                 "cdst": (row.get("CompDst") or row.get("RefDst") or "")[:4],
                 "cdd": parse_date(row.get("CompDepDate")) or cap_date,
@@ -892,8 +928,8 @@ class IngestionService:
                 "cbf": safe_float(row.get("CompBaseFare")),
                 "ctax": safe_float(row.get("CompTax")),
                 "cyq": safe_float(row.get("CompYQ")),
-                "cs": safe_int(row.get("CompSeats") or 9),
-                "ccur": ((row.get("CompCur") or "").strip()[:4] or "USD") if job.tenant_code == "WM" else "GBP",
+                "cs": _seats_or_default(row.get("CompSeats")),
+                "ccur": _currency_or_default(row.get("CompCur"), job.tenant_code),
                 # ref_pos: post-023 nullable point-of-sale (the host carrier's
                 # POS). PW source carries POS; JY legacy source does not.
                 # The legacy POA field has no post-023 column; comp_pos is
@@ -907,62 +943,69 @@ class IngestionService:
                 "sfile": job.filename,
                 # ── Phase 2C: 47 new dictionary columns ──
                 # Reference flight — outbound additions (11)
-                "ref_dep_time": ((row.get("RefDepTime") or "").strip()[:4] or None),
-                "ref_arr_time": ((row.get("RefArrTime") or "").strip()[:4] or None),
+                "ref_dep_time": ((row.get("RefDepTime") or "").strip()[:8] or None),
+                "ref_arr_time": ((row.get("RefArrTime") or "").strip()[:8] or None),
                 "ref_stops": safe_int_nullable(row.get("RefStops")),
                 "ref_via": ((row.get("RefVia") or "").strip()[:4] or None),
                 "ref_ff_code": ((row.get("RefFFCode") or "").strip()[:20] or None),
                 "ref_cab_name": ((row.get("RefCabName") or "").strip()[:20] or None),
-                "ref_bkg_class": ((row.get("RefBkgClass") or "").strip()[:4] or None),
+                "ref_bkg_class": ((row.get("RefBkgClass") or "").strip()[:16] or None),
                 "ref_yr": safe_float(row.get("RefYR")),
                 "ref_anc_price": safe_float(row.get("RefAncPrice")),
                 "ref_anc_type": ((row.get("RefAncType") or "").strip()[:20] or None),
                 # Equipment unification: JY's RefAircraft OR PW's RefEquipCode
                 "ref_equip_code": (
                     (row.get("RefAircraft") or row.get("RefEquipCode") or "")
-                    .strip()[:32] or None
+                    .strip()[:128] or None
                 ),
                 # Reference flight — return-leg (11) — JY-only in source
-                "ref_ret_flt_num": ((row.get("RefRetFltNum") or "").strip()[:10] or None),
+                "ref_ret_flt_num": ((row.get("RefRetFltNum") or "").strip()[:64] or None),
                 "ref_ret_dep_date": parse_date(row.get("RefRetDepDate")),
-                "ref_ret_dep_time": ((row.get("RefRetDepTime") or "").strip()[:4] or None),
-                "ref_ret_arr_time": ((row.get("RefRetArrTime") or "").strip()[:4] or None),
+                "ref_ret_dep_time": ((row.get("RefRetDepTime") or "").strip()[:8] or None),
+                "ref_ret_arr_time": ((row.get("RefRetArrTime") or "").strip()[:8] or None),
                 "ref_ret_stops": safe_int_nullable(row.get("RefRetStops")),
                 "ref_ret_via": ((row.get("RefRetVia") or "").strip()[:4] or None),
                 "ref_ret_cab_name": ((row.get("RefRetCabName") or "").strip()[:20] or None),
                 "ref_ret_cab_code": ((row.get("RefRetCabCode") or "").strip()[:4] or None),
-                "ref_ret_bkg_class": ((row.get("RefRetBkgClass") or "").strip()[:4] or None),
+                "ref_ret_bkg_class": ((row.get("RefRetBkgClass") or "").strip()[:16] or None),
                 "ref_ret_seats": safe_int_nullable(row.get("RefRetSeats")),
-                "ref_ret_equip_code": ((row.get("RefRetAircraft") or "").strip()[:32] or None),
+                # Same dual-name handling as the other three equipment
+                # columns: the 76-column layout calls this RefRetEquipCode
+                # and only the older JY sheets used RefRetAircraft. Reading
+                # just the latter dropped every return equipment code.
+                "ref_ret_equip_code": (
+                    (row.get("RefRetAircraft") or row.get("RefRetEquipCode") or "")
+                    .strip()[:128] or None
+                ),
                 # Competitor — outbound additions (11)
-                "comp_dep_time": ((row.get("CompDepTime") or "").strip()[:4] or None),
-                "comp_arr_time": ((row.get("CompArrTime") or "").strip()[:4] or None),
+                "comp_dep_time": ((row.get("CompDepTime") or "").strip()[:8] or None),
+                "comp_arr_time": ((row.get("CompArrTime") or "").strip()[:8] or None),
                 "comp_stops": safe_int_nullable(row.get("CompStops")),
                 "comp_via": ((row.get("CompVia") or "").strip()[:4] or None),
                 "comp_ff_code": ((row.get("CompFFCode") or "").strip()[:20] or None),
                 "comp_cab_name": ((row.get("CompCabName") or "").strip()[:20] or None),
-                "comp_bkg_class": ((row.get("CompBkgClass") or "").strip()[:4] or None),
+                "comp_bkg_class": ((row.get("CompBkgClass") or "").strip()[:16] or None),
                 "comp_yr": safe_float(row.get("CompYR")),
                 "comp_anc_price": safe_float(row.get("CompAncPrice")),
                 "comp_anc_type": ((row.get("CompAncType") or "").strip()[:20] or None),
                 "comp_equip_code": (
                     (row.get("CompAircraft") or row.get("CompEquipCode") or "")
-                    .strip()[:32] or None
+                    .strip()[:128] or None
                 ),
                 # Competitor — return-leg (11) — JY-only in source
-                "comp_ret_flt_num": ((row.get("CompRetFltNum") or "").strip()[:10] or None),
+                "comp_ret_flt_num": ((row.get("CompRetFltNum") or "").strip()[:64] or None),
                 "comp_ret_dep_date": parse_date(row.get("CompRetDepDate")),
-                "comp_ret_dep_time": ((row.get("CompRetDepTime") or "").strip()[:4] or None),
-                "comp_ret_arr_time": ((row.get("CompRetArrTime") or "").strip()[:4] or None),
+                "comp_ret_dep_time": ((row.get("CompRetDepTime") or "").strip()[:8] or None),
+                "comp_ret_arr_time": ((row.get("CompRetArrTime") or "").strip()[:8] or None),
                 "comp_ret_stops": safe_int_nullable(row.get("CompRetStops")),
                 "comp_ret_via": ((row.get("CompRetVia") or "").strip()[:4] or None),
                 "comp_ret_cab_name": ((row.get("CompRetCabName") or "").strip()[:20] or None),
                 "comp_ret_cab_code": ((row.get("CompRetCabCode") or "").strip()[:4] or None),
-                "comp_ret_bkg_class": ((row.get("CompRetBkgClass") or "").strip()[:4] or None),
+                "comp_ret_bkg_class": ((row.get("CompRetBkgClass") or "").strip()[:16] or None),
                 "comp_ret_seats": safe_int_nullable(row.get("CompRetSeats")),
                 "comp_ret_equip_code": (
                     (row.get("CompRetAircraft") or row.get("CompRetEquipCode") or "")
-                    .strip()[:32] or None
+                    .strip()[:128] or None
                 ),
                 # Provenance (no source carries today).
                 # POD/POC dropped in migration 023 — no DB target remains.
@@ -980,7 +1023,7 @@ class IngestionService:
         #
         #   CaptureDate            → cap_date             (NOT NULL)
         #   CaptureTime            → cap_time             (NOT NULL)
-        #   DepCode                → ref_flt_num          (NOT NULL, [:10])
+        #   DepCode                → ref_flt_num          (NOT NULL, [:64])
         #   Org                    → ref_org              (NOT NULL)
         #   Dest                   → ref_dst              (NOT NULL)
         #   DepDate                → ref_dep_date         (NOT NULL)
@@ -994,7 +1037,7 @@ class IngestionService:
         #   connection_points      → ref_via              (nullable)
         #   CompCode / competitor_operating_carrier
         #                          → comp_al              (NOT NULL)
-        #   CompDepCode            → comp_flt_num         (NOT NULL, [:10])
+        #   CompDepCode            → comp_flt_num         (NOT NULL, [:64])
         #   CompDepOrg             → comp_org             (NOT NULL)
         #   CompDepDest            → comp_dst             (NOT NULL)
         #   CompDepDate            → comp_dep_date        (NOT NULL)
@@ -1077,7 +1120,9 @@ class IngestionService:
                 (row.get("CompCode") or row.get("competitor_operating_carrier") or "").strip()[:3]
                 or "XX"
             )
-            currency = (row.get("currency") or "").strip()[:4] or None
+            # Never leave this None: the column DEFAULT is 'GBP', so a blank
+            # currency in the feed would be stored as sterling by omission.
+            currency = _currency_or_default(row.get("currency"), job.tenant_code)
             pos_country = (row.get("pos_country") or "").strip()[:4] or None
             channel = (row.get("channel") or "").strip()[:20] or None
             params = {
@@ -1089,7 +1134,7 @@ class IngestionService:
                 "ct": parse_time(row.get("CaptureTime")) or datetime.now().time(),
                 "tt": "OW",
                 "ra": host_al or job.tenant_code[:3],
-                "rf": (row.get("DepCode") or "").strip()[:10],
+                "rf": (row.get("DepCode") or "").strip()[:64],
                 "ro": (row.get("Org") or "").strip()[:4],
                 "rd": (row.get("Dest") or "").strip()[:4],
                 "rdd": parse_date(row.get("DepDate")) or cap_date,
@@ -1101,7 +1146,7 @@ class IngestionService:
                 "rs": 9,
                 "rcur": currency,
                 "ca": comp_al_val,
-                "cf": (row.get("CompDepCode") or "").strip()[:10],
+                "cf": (row.get("CompDepCode") or "").strip()[:64],
                 "co": (row.get("CompDepOrg") or row.get("Org") or "").strip()[:4],
                 "cdst": (row.get("CompDepDest") or row.get("Dest") or "").strip()[:4],
                 "cdd": parse_date(row.get("CompDepDate")) or cap_date,
@@ -1110,15 +1155,15 @@ class IngestionService:
                 "cbf": safe_float(row.get("CompFare")),
                 "ctax": 0.0,
                 "cyq": 0.0,
-                "cs": safe_int(row.get("competitor_seats_left_hint") or 9),
+                "cs": _seats_or_default(row.get("competitor_seats_left_hint")),
                 "ccur": currency,
-                "ref_dep_time": ((row.get("DepTime") or "").strip()[:4] or None),
-                "ref_arr_time": ((row.get("ArrTime") or "").strip()[:4] or None),
+                "ref_dep_time": ((row.get("DepTime") or "").strip()[:8] or None),
+                "ref_arr_time": ((row.get("ArrTime") or "").strip()[:8] or None),
                 "ref_stops": _stops_from(row.get("itinerary_type") or ""),
                 "ref_via": ((row.get("connection_points") or "").strip()[:4] or None),
                 "ref_cab_name": (cabin_name[:20] or None),
-                "comp_dep_time": ((row.get("CompDepTime") or "").strip()[:4] or None),
-                "comp_arr_time": ((row.get("CompArrTime") or "").strip()[:4] or None),
+                "comp_dep_time": ((row.get("CompDepTime") or "").strip()[:8] or None),
+                "comp_arr_time": ((row.get("CompArrTime") or "").strip()[:8] or None),
                 "comp_stops": _stops_from(row.get("comp_itinerary_type") or ""),
                 "comp_via": ((row.get("comp_connection_points") or "").strip()[:4] or None),
                 "comp_cab_name": (cabin_name[:20] or None),
