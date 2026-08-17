@@ -36,11 +36,16 @@ SLICEMAP = {old: 94 + i for i, old in enumerate(WM_SLICES)}  # -> 94..102
 SLICE_DS = {43: 13, 46: 13, 48: 15, 49: 13, 50: 13,
             51: 13, 52: 13, 53: 15, 55: 13}
 
-JY_CARRIERS = {"JY", "BW", "WM", "9Q", "5L", "PY", "DO", "S6"}
-# WM host (gold) + its 5 real competitors (5L, BW, Exp, JY, S6).
-WM_COLORS = {"WM": "#C5981B", "5L": "#2B6B2B", "BW": "#D4652F",
-             "Exp": "#8B5CF6", "Expedia": "#8B5CF6", "JY": "#1A6B8A", "S6": "#E4049C"}
-WM_DOMAIN = ["#C5981B", "#2B6B2B", "#D4652F", "#8B5CF6", "#1A6B8A", "#E4049C", "#64748B", "#0070C0"]
+JY_CARRIERS = {"JY", "BW", "WM", "9Q", "5L", "PY", "DO", "S6", "7Z", "DM"}
+# WM host in WinAir brand red + competitors spaced around it (CVD-validated,
+# 2026-08-17 rebrand). MUST match KNOWN_AIRLINE_COLORS in
+# apps/web/src/components/dashboard/winair/priceChartTheme.ts — the native
+# Latest Prices chart and these Superset charts share the palette.
+WM_COLORS = {"WM": "#CD1F25", "5L": "#1BAF7A", "7Z": "#8B5CF6", "BW": "#C08A00",
+             "DM": "#0891B2", "Exp": "#A05A2C", "Expedia": "#A05A2C",
+             "JY": "#2A78D6", "S6": "#D6208F"}
+WM_DOMAIN = ["#CD1F25", "#1BAF7A", "#8B5CF6", "#C08A00", "#0891B2", "#A05A2C",
+             "#2A78D6", "#D6208F", "#64748B", "#0070C0"]
 
 # velocity-derived columns dropped from the reco dataset + reco slices
 DROP_COLS = {"load_factor", "load_bucket", "current_booking", "capacity"}
