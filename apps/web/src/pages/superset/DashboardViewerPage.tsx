@@ -677,12 +677,12 @@ export default function DashboardViewerPage() {
         const urlParams: Record<string, string> = {};
         // While a section is pinned, the teal bar is the sole navigation and
         // Superset's own top-level tab strip would repeat the same five names.
-        // uiConfig 13 = hideTitle(1) + hideNav(4) + hideChartControls(8):
-        // hideNav stops the strip from mounting at all. Section content is
-        // rendered by a separate component keyed off the permalink's
-        // activeTabs, so switching (and the nested Line/Bar/Table sub-tabs)
-        // still works. Unpinned WinAir — the "Dashboard" fallback entry —
-        // keeps the strip: it is the only navigation there.
+        // uiConfig 13 = hideTitle(1) + hideNav(4) + hideChartControls(8).
+        // NOTE: Superset 3.1.0 never consumes hideNav (verified live) — the
+        // strip is actually hidden by the WM-EMBED-HIDE-TOPTABS css block in
+        // dashboard 6's metadata (scripts/superset/wm_hide_toptabs.py).
+        // hideNav becomes functional after a Superset upgrade; keep sending it
+        // so this conditional takes over and the css block can be retired.
         if (isWinair && supersetTabRef.current) urlParams.uiConfig = '13';
         // Seed the dashboard's state from outside the iframe. A permalink
         // wins when one is pinned: it already carries the filters as well
