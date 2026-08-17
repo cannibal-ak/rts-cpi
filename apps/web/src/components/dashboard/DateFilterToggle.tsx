@@ -52,10 +52,16 @@ export interface DateFilterToggleProps {
    * across the top of the panel.
    */
   bare?: boolean;
+  /**
+   * Tenant-brand focus color (a literal color, not a theme path). The default
+   * focus ring is theme-primary navy, which clashes inside brand-accented
+   * hosts like WinAir's red cap-date popover. Omitted, nothing changes.
+   */
+  accent?: string;
 }
 
 export default function DateFilterToggle({
-  availableDates, value, onChange, disabled, bare = false,
+  availableDates, value, onChange, disabled, bare = false, accent,
 }: DateFilterToggleProps) {
   const anchor = availableDates[0] ?? fmt(new Date());
 
@@ -103,6 +109,12 @@ export default function DateFilterToggle({
     '& .MuiOutlinedInput-root': { height: 28, fontSize: 12 },
     '& .MuiOutlinedInput-input': { py: 0, fontSize: 12 },
     '& input[type="date"]': { py: 0, fontSize: 12, height: 28, boxSizing: 'border-box' as const },
+    // Both selector forms on purpose: on a bare <Select> the sx host IS the
+    // OutlinedInput root, so the descendant form alone silently misses it.
+    ...(accent && {
+      '&.MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline, & .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline':
+        { borderColor: accent },
+    }),
   };
   const inlineLabelSx = { fontSize: 12, color: 'text.secondary', whiteSpace: 'nowrap' as const };
 

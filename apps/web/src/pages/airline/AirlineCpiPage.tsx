@@ -6,6 +6,7 @@ import AirlineCpiPricingTab from './AirlineCpiPricingTab';
 import AirlineCpiVelocityTab from './AirlineCpiVelocityTab';
 import { api } from '../../api';
 import type { DataFreshness } from '../../types';
+import { brandInk } from '../../components/dashboard/bannerTheme';
 
 interface AirlineCpiPageProps {
   /** Tenant code determines which snapshot view to query (JY, PW, ALT or WM). */
@@ -40,6 +41,9 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   const velocityExportRef = useRef<() => void>(() => {});
 
   const pageTitle = TENANT_LABELS[tenantCode] || `Airline CPI – ${tenantCode}`;
+  // WinAir's page chrome follows its brand red (see bannerTheme); others keep
+  // theme primary untouched.
+  const isWm = tenantCode === 'WM';
   const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT', 'WM'];
   const showTabs = TENANTS_WITH_VELOCITY.includes(tenantCode);
 
@@ -119,7 +123,8 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
                 fontWeight: 500,
                 textTransform: 'none',
               },
-              '& .MuiTabs-indicator': { height: 2 },
+              '& .MuiTabs-indicator': { height: 2, ...(isWm && { bgcolor: brandInk }) },
+              ...(isWm && { '& .MuiTab-root.Mui-selected': { color: brandInk } }),
             }}
           >
             <Tab label="Pricing" />
@@ -140,6 +145,7 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
               py: 0.25,
               px: 1,
               mb: 0.25,
+              ...(isWm && { color: brandInk }),
             }}
           >
             Export

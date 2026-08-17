@@ -1,6 +1,7 @@
 import { Autocomplete, TextField, Checkbox, Chip, Tooltip, Box, Typography } from '@mui/material';
 import { CheckBoxOutlineBlank, CheckBox as CheckBoxIcon, KeyboardArrowDown } from '@mui/icons-material';
 import {
+  brandInk,
   BANNER_HEADER_BG,
   FIELD_BG,
   FIELD_BG_ACTIVE,
@@ -101,7 +102,14 @@ export default function FilterSelect({
                   checkedIcon={<CheckBoxIcon fontSize="small" />}
                   checked={selected}
                   size="small"
-                  sx={{ mr: 0.75, p: 0.25 }}
+                  // Brand-red check rides the onDark gate so non-banner use
+                  // stays stock. The popper follows the app theme, so the red
+                  // lightens on a dark-mode popper like the sidebar ink does.
+                  sx={{
+                    mr: 0.75,
+                    p: 0.25,
+                    ...(onDark && { '&.Mui-checked': { color: brandInk } }),
+                  }}
                 />
               )}
               {option}

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box, Typography, Button } from '@mui/material';
+import { darken } from '@mui/material/styles';
 import { Inbox } from '@mui/icons-material';
 
 interface EmptyStateProps {
@@ -8,9 +9,14 @@ interface EmptyStateProps {
   description?: string;
   actionLabel?: string;
   onAction?: () => void;
+  /**
+   * Tenant-brand fill for the action button (a literal color — it feeds
+   * darken()). Omitted, the button stays theme primary.
+   */
+  accent?: string;
 }
 
-export default function EmptyState({ icon, title, description, actionLabel, onAction }: EmptyStateProps) {
+export default function EmptyState({ icon, title, description, actionLabel, onAction, accent }: EmptyStateProps) {
   return (
     <Box
       sx={{
@@ -35,7 +41,13 @@ export default function EmptyState({ icon, title, description, actionLabel, onAc
         </Typography>
       )}
       {actionLabel && onAction && (
-        <Button variant="contained" onClick={onAction}>{actionLabel}</Button>
+        <Button
+          variant="contained"
+          onClick={onAction}
+          sx={accent ? { bgcolor: accent, '&:hover': { bgcolor: darken(accent, 0.15) } } : undefined}
+        >
+          {actionLabel}
+        </Button>
       )}
     </Box>
   );

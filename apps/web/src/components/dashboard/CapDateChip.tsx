@@ -56,8 +56,10 @@ export interface CapDateChipProps {
   compact?: boolean;
   /**
    * Tenant-brand fill (WinAir red today) replacing the theme-primary surface,
-   * so the chip matches branded chrome elsewhere on the page. Omitted, the
-   * chip stays theme primary like every other tenant.
+   * so the chip matches branded chrome elsewhere on the page. Must be a
+   * literal color (hex/rgb) — it feeds darken(), which throws on theme paths
+   * like 'primary.main'. Omitted, the chip stays theme primary like every
+   * other tenant.
    */
   accent?: string;
 }
@@ -146,6 +148,8 @@ export default function CapDateChip({
                 color: '#ffffff',
                 '& .MuiChip-icon': { color: '#ffffff' },
                 '&:hover': { bgcolor: darken(accent, 0.2) },
+                // Keyboard focus would otherwise flash the theme-primary fill.
+                '&.Mui-focusVisible': { bgcolor: darken(accent, 0.2) },
               }),
             }}
           />
@@ -190,6 +194,7 @@ export default function CapDateChip({
           onChange={onChange}
           disabled={disabled}
           bare
+          accent={accent}
         />
       </Popover>
     </>

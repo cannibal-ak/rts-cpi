@@ -30,6 +30,7 @@ import fjordlineLogo from '../../assets/logos/fjordline-logo.png';
 import skyLogoLight from '../../assets/logos/sky-airways-logo.png';
 import skyLogoDark from '../../assets/logos/sky-airways-logo-dark.png';
 import { TENANT_CONFIG, TENANT_FALLBACK } from '../../utils/tenantConfig';
+import { BANNER_BG } from '../dashboard/bannerTheme';
 
 interface AppBarProps {
   onToggleSidebar: () => void;
@@ -203,8 +204,10 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
                 sx={{
                   width: 36,
                   height: 36,
-                  bgcolor: 'primary.light',
-                  color: 'primary.dark',
+                  // WinAir's avatar wears its brand red; everyone else keeps
+                  // the app-primary pair.
+                  bgcolor: isWmTenant ? BANNER_BG : 'primary.light',
+                  color: isWmTenant ? '#ffffff' : 'primary.dark',
                   fontSize: 14,
                   fontWeight: 500,
                   transition: 'opacity 150ms ease',
@@ -244,8 +247,8 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
               sx={{
                 width: 42,
                 height: 42,
-                bgcolor: 'primary.light',
-                color: 'primary.dark',
+                bgcolor: isWmTenant ? BANNER_BG : 'primary.light',
+                color: isWmTenant ? '#ffffff' : 'primary.dark',
                 fontSize: 15,
                 fontWeight: 500,
               }}

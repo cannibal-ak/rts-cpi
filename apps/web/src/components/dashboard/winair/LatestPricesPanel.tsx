@@ -20,6 +20,7 @@ import {
   ROUTE_STYLES, ROUTE_STYLE_COUNT, DAYS_LEFT_MAX,
 } from './priceChartTheme';
 import { FULL_DEP_RANGE, FULL_DURATION_RANGE, isNarrowed, type Range } from './PriceChartFilters';
+import { brandInk } from '../bannerTheme';
 import { api } from '../../../api';
 import type { PricePoint } from '../../../api/client';
 
@@ -234,6 +235,23 @@ export default function LatestPricesPanel({
     const muted = theme.palette.text.secondary;
     const line = theme.palette.divider;
 
+    // The zoom sliders default to ECharts blue — the one stock-colored control
+    // on this pane. Brand red, lightened in dark mode like the sidebar ink.
+    const zoomAccent = brandInk(theme);
+    const zoomSliderStyle = {
+      fillerColor: 'rgba(205, 31, 37, 0.12)',
+      handleStyle: { color: zoomAccent, borderColor: zoomAccent },
+      moveHandleStyle: { color: zoomAccent },
+      emphasis: {
+        handleStyle: { color: zoomAccent, borderColor: zoomAccent },
+        moveHandleStyle: { color: zoomAccent },
+      },
+      selectedDataBackground: {
+        lineStyle: { color: zoomAccent },
+        areaStyle: { color: 'rgba(205, 31, 37, 0.2)' },
+      },
+    };
+
     const series: LineSeriesOption[] = [];
     for (const code of airlines) {
       for (const market of markets) {
@@ -322,8 +340,8 @@ export default function LatestPricesPanel({
         // scrolling away from anyone using one.
         { type: 'inside', xAxisIndex: 0, filterMode: 'none', zoomOnMouseWheel: false, moveOnMouseWheel: false },
         { type: 'inside', yAxisIndex: 0, filterMode: 'none', zoomOnMouseWheel: false, moveOnMouseWheel: false },
-        { type: 'slider', xAxisIndex: 0, bottom: 6, height: 16, filterMode: 'none' },
-        { type: 'slider', yAxisIndex: 0, left: 4, width: 14, filterMode: 'none' },
+        { type: 'slider', xAxisIndex: 0, bottom: 6, height: 16, filterMode: 'none', ...zoomSliderStyle },
+        { type: 'slider', yAxisIndex: 0, left: 4, width: 14, filterMode: 'none', ...zoomSliderStyle },
       ],
       series,
     };
@@ -468,7 +486,7 @@ export default function LatestPricesPanel({
         )}
         {hasRoutes && loading && (
           <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CircularProgress size={28} />
+            <CircularProgress size={28} sx={{ color: brandInk }} />
           </Box>
         )}
         {hasRoutes && !loading && !error && points.length === 0 && (
@@ -503,7 +521,7 @@ export default function LatestPricesPanel({
               <PriceDetailCard
                 key={pointKey(p)}
                 point={p}
-                color={colorMap[p.airline] ?? theme.palette.primary.main}
+                color={colorMap[p.airline] ?? brandInk(theme)}
                 currency={currency}
                 showMarket={multiRoute}
                 onClose={() => setPinned(prev => prev.filter(x => pointKey(x) !== pointKey(p)))}

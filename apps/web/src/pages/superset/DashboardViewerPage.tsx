@@ -24,7 +24,7 @@ import DateFilterToggle from '../../components/dashboard/DateFilterToggle';
 import SingleChartViewer from '../../components/dashboard/SingleChartViewer';
 import KPIRow from '../../components/dashboard/KPIRow';
 import CapDateChip from '../../components/dashboard/CapDateChip';
-import { BANNER_BG } from '../../components/dashboard/bannerTheme';
+import { BANNER_BG, brandInk } from '../../components/dashboard/bannerTheme';
 import WinairTopFilterBar from '../../components/dashboard/winair/WinairTopFilterBar';
 import LatestPricesPanel from '../../components/dashboard/winair/LatestPricesPanel';
 import WinairTabBar, { PRICES_TAB, DASHBOARD_TAB } from '../../components/dashboard/winair/WinairTabBar';
@@ -1060,7 +1060,7 @@ export default function DashboardViewerPage() {
               flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               bgcolor: 'background.paper', zIndex: 10,
             }}>
-              <LoadingIcon sx={{ fontSize: 56, color: 'primary.main', mb: 2, animation: `${pulse} 2s infinite ease-in-out` }} />
+              <LoadingIcon sx={{ fontSize: 56, color: isWinair ? brandInk : 'primary.main', mb: 2, animation: `${pulse} 2s infinite ease-in-out` }} />
               <Typography variant="h6" color="text.secondary">{loadingLabel}</Typography>
             </Box>
           </Fade>
