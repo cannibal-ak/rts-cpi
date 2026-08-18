@@ -2,7 +2,12 @@ import type React from 'react';
 import { Box, Button, Typography, Skeleton, Tooltip, Chip } from '@mui/material';
 import { FilterAltOff, Check, Tune } from '@mui/icons-material';
 import FilterSelect from './FilterSelect';
-import { BANNER_BG, BANNER_HEADER_BG, LABEL_INK } from '../bannerTheme';
+import {
+  BANNER_BG, BANNER_HEADER_BG,
+  FILTER_ACCENT, FILTER_BG, FILTER_BORDER, FILTER_DISABLED_BG, FILTER_DISABLED_INK,
+  FILTER_ERROR_INK, FILTER_HOVER_BG, FILTER_INK, FILTER_LABEL_INK, FILTER_MUTED_INK,
+  FILTER_SKELETON, FILTER_SKELETON_TEXT,
+} from '../bannerTheme';
 import type {
   DashboardFilter,
   DashboardFilterSelections,
@@ -90,8 +95,9 @@ export default function WinairTopFilterBar({
     <Box
       sx={{
         width: '100%', mb: 0.75, borderRadius: 1.5, overflow: 'hidden', boxShadow: 1,
-        bgcolor: BANNER_BG,
-        color: '#ffffff',
+        bgcolor: FILTER_BG,
+        border: '1px solid', borderColor: FILTER_BORDER,
+        color: FILTER_INK,
         px: 1.75, pt: 1, pb: 1.5,
       }}
     >
@@ -107,7 +113,7 @@ export default function WinairTopFilterBar({
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, minWidth: 0 }}>
-          <Tune sx={{ fontSize: 17, color: 'rgba(255,255,255,0.75)' }} />
+          <Tune sx={{ fontSize: 17, color: FILTER_MUTED_INK }} />
           <Typography sx={{ fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' }}>
             Filters
           </Typography>
@@ -116,7 +122,7 @@ export default function WinairTopFilterBar({
           {scopeLabel && (
             <Typography
               noWrap
-              sx={{ fontSize: 12, color: LABEL_INK, minWidth: 0 }}
+              sx={{ fontSize: 12, color: FILTER_LABEL_INK, minWidth: 0 }}
               title={scopeLabel}
             >
               — {scopeLabel} only
@@ -135,8 +141,8 @@ export default function WinairTopFilterBar({
                 height: 20,
                 fontSize: 11,
                 fontWeight: 500,
-                bgcolor: 'rgba(255,255,255,0.88)',
-                color: BANNER_HEADER_BG,
+                bgcolor: FILTER_ACCENT,
+                color: '#ffffff',
               }}
             />
           )}
@@ -154,13 +160,13 @@ export default function WinairTopFilterBar({
                 disabled={applying || !hasAnySelection}
                 startIcon={<FilterAltOff fontSize="small" />}
                 sx={{
-                  color: '#ffffff',
+                  color: FILTER_LABEL_INK,
                   fontSize: 12,
                   textTransform: 'none',
                   borderRadius: '8px',
                   px: 1.25,
-                  '&:hover': { bgcolor: 'rgba(255,255,255,0.10)' },
-                  '&.Mui-disabled': { color: 'rgba(255,255,255,0.4)' },
+                  '&:hover': { bgcolor: FILTER_HOVER_BG },
+                  '&.Mui-disabled': { color: FILTER_DISABLED_INK },
                 }}
               >
                 Clear all
@@ -177,16 +183,18 @@ export default function WinairTopFilterBar({
                 disabled={!dirty || applying}
                 startIcon={<Check fontSize="small" />}
                 sx={{
-                  bgcolor: '#ffffff',
-                  color: BANNER_HEADER_BG,
+                  // The one red thing left in the card, and the only control
+                  // that commits anything.
+                  bgcolor: BANNER_BG,
+                  color: '#ffffff',
                   fontSize: 12,
                   fontWeight: 700,
                   textTransform: 'none',
                   borderRadius: '8px',
                   px: 1.75,
                   boxShadow: 'none',
-                  '&:hover': { bgcolor: '#fbeaea', boxShadow: 'none' },
-                  '&.Mui-disabled': { bgcolor: 'rgba(255,255,255,0.25)', color: 'rgba(255,255,255,0.6)' },
+                  '&:hover': { bgcolor: BANNER_HEADER_BG, boxShadow: 'none' },
+                  '&.Mui-disabled': { bgcolor: FILTER_DISABLED_BG, color: FILTER_DISABLED_INK },
                 }}
               >
                 {applying ? 'Applying…' : 'Apply'}
@@ -217,25 +225,24 @@ export default function WinairTopFilterBar({
             <Skeleton
               variant="text"
               width="55%"
-              sx={{ fontSize: 11, bgcolor: 'rgba(255,255,255,0.14)' }}
+              sx={{ fontSize: 11, bgcolor: FILTER_SKELETON_TEXT }}
             />
             <Skeleton
               variant="rounded"
               height={34}
-              sx={{ bgcolor: 'rgba(255,255,255,0.18)' }}
+              sx={{ bgcolor: FILTER_SKELETON }}
             />
           </Box>
         ))}
 
         {!filtersLoading && filtersError && (
-          // Pale amber, not pink — pink disappears against the red banner.
-          <Typography sx={{ gridColumn: '1 / -1', fontSize: 12.5, color: '#FFECB3' }}>
+          <Typography sx={{ gridColumn: '1 / -1', fontSize: 12.5, color: FILTER_ERROR_INK }}>
             Filters unavailable — {filtersError}
           </Typography>
         )}
 
         {!filtersLoading && !filtersError && filters.length === 0 && (
-          <Typography sx={{ gridColumn: '1 / -1', fontSize: 12.5, color: LABEL_INK }}>
+          <Typography sx={{ gridColumn: '1 / -1', fontSize: 12.5, color: FILTER_LABEL_INK }}>
             This dashboard has no filters.
           </Typography>
         )}
@@ -249,7 +256,7 @@ export default function WinairTopFilterBar({
             options={f.values}
             value={pending[f.id] ?? []}
             multiple={f.multi_select}
-            onDark
+            onBanner
             onChange={next => onPendingChange({ ...pending, [f.id]: next })}
           />
         ))}
