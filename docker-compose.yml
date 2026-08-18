@@ -166,6 +166,23 @@ services:
       - superset_home:/app/superset_home
       # ECharts grid.right widened to prevent date/label clipping (see superset-patches/README)
       - ./superset-patches/3871.c687a6d83eaaee71a216.entry.js:/app/superset/static/assets/3871.c687a6d83eaaee71a216.entry.js:ro
+      # Zoom fix: restore-zoom falls back to full reset when zoom history is empty (see superset-patches/README)
+      - ./superset-patches/8755.b325fab1a4b5f24a84fc.entry.js:/app/superset/static/assets/8755.b325fab1a4b5f24a84fc.entry.js:ro
+      # Zoom fix: Echart wrapper preserves dataZoom across notMerge setOption (see superset-patches/README)
+      - ./superset-patches/14c3cf97fcb6a0f990f2.chunk.js:/app/superset/static/assets/14c3cf97fcb6a0f990f2.chunk.js:ro
+      - ./superset-patches/1c187a0a9fcefc88107c.chunk.js:/app/superset/static/assets/1c187a0a9fcefc88107c.chunk.js:ro
+      - ./superset-patches/1ec85bcbb6d2cf6e10ef.chunk.js:/app/superset/static/assets/1ec85bcbb6d2cf6e10ef.chunk.js:ro
+      - ./superset-patches/1fee1faa5797751fd6c9.chunk.js:/app/superset/static/assets/1fee1faa5797751fd6c9.chunk.js:ro
+      - ./superset-patches/262c25b3f6f7f27f99a2.chunk.js:/app/superset/static/assets/262c25b3f6f7f27f99a2.chunk.js:ro
+      - ./superset-patches/2804d456171bf906397e.chunk.js:/app/superset/static/assets/2804d456171bf906397e.chunk.js:ro
+      - ./superset-patches/40eaaf35ba3c1e848566.chunk.js:/app/superset/static/assets/40eaaf35ba3c1e848566.chunk.js:ro
+      - ./superset-patches/4c1599a194b3d4787f35.chunk.js:/app/superset/static/assets/4c1599a194b3d4787f35.chunk.js:ro
+      - ./superset-patches/8ba96a087056d5ea2806.chunk.js:/app/superset/static/assets/8ba96a087056d5ea2806.chunk.js:ro
+      - ./superset-patches/a348224739c48b2428cd.chunk.js:/app/superset/static/assets/a348224739c48b2428cd.chunk.js:ro
+      - ./superset-patches/ad1ee9250614e7b3704f.chunk.js:/app/superset/static/assets/ad1ee9250614e7b3704f.chunk.js:ro
+      - ./superset-patches/ba62dfe2787f02795985.chunk.js:/app/superset/static/assets/ba62dfe2787f02795985.chunk.js:ro
+      - ./superset-patches/f619b818057afb41eb4a.chunk.js:/app/superset/static/assets/f619b818057afb41eb4a.chunk.js:ro
+      - ./superset-patches/f6f6fba78b433a2dc950.chunk.js:/app/superset/static/assets/f6f6fba78b433a2dc950.chunk.js:ro
       # Airplane fly-across loading spinner replaces loading.gif (see superset-patches/README)
       - ./superset-patches/loading_airplane.gif:/app/superset/static/assets/images/loading.gif:ro
       - ./superset-patches/loading_airplane.gif:/app/superset/static/assets/loading.cff8a5da..gif:ro

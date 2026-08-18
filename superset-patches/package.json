@@ -1,0 +1,15 @@
+{
+  "name": "test",
+  "version": "1.0.0",
+  "description": "Bind-mounted patches applied to the official `apache/superset:3.1.0` image.",
+  "main": "14c3cf97fcb6a0f990f2.chunk.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "playwright-core": "^1.44.0"
+  }
+}
