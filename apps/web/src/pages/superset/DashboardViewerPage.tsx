@@ -48,6 +48,8 @@ const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline:
   '2': { title: 'PW Dashboard', tenant: 'PW', isAirline: true, freshnessDomain: 'Airline CPI \u2013 PW' },
   '3': { title: 'FJL Dashboard', tenant: 'FJL', isAirline: false, freshnessDomain: 'Cruise/Ferry CPI \u2013 FJL' },
   '4': { title: 'Sky Dashboard', tenant: 'ALT', isAirline: true, freshnessDomain: 'Airline CPI \u2013 SKY' },
+  // WinAir's header renders no title at all (see the header bar below), so this
+  // string is unread for '5' \u2014 the row is here for tenant and freshnessDomain.
   '5': { title: 'WinAir Dashboard', tenant: 'WM', isAirline: true, freshnessDomain: 'Airline CPI \u2013 WM' },
 };
 
@@ -762,14 +764,23 @@ export default function DashboardViewerPage() {
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       {/* Header bar */}
       <Box sx={{ display: 'flex', alignItems: 'center', mb: 0 }}>
-        <Tooltip title="Back to dashboards">
-          <IconButton onClick={() => navigate('/dashboards')} sx={{ mr: 1 }}>
-            <ArrowBack />
-          </IconButton>
-        </Tooltip>
-        <Typography variant="h5" component="h1" fontWeight={600}>
-          {meta?.title ?? 'Dashboard'}
-        </Typography>
+        {/* WinAir shows neither title nor back arrow. Its identity is already
+            in the app-bar logo directly above, and it navigates by the sidebar
+            and its own tab bar — /dashboards would bounce a single-dashboard
+            tenant straight back here anyway (see SupersetPage). That leaves the
+            two date chips, which is all this row needs to say. */}
+        {!isWinair && (
+          <>
+            <Tooltip title="Back to dashboards">
+              <IconButton onClick={() => navigate('/dashboards')} sx={{ mr: 1 }}>
+                <ArrowBack />
+              </IconButton>
+            </Tooltip>
+            <Typography variant="h5" component="h1" fontWeight={600}>
+              {meta?.title ?? 'Dashboard'}
+            </Typography>
+          </>
+        )}
         {formattedDate && (
           <Chip
             icon={<CalendarMonth sx={{ fontSize: 16 }} />}
@@ -778,7 +789,9 @@ export default function DashboardViewerPage() {
             variant="outlined"
             color="primary"
             sx={{
-              ml: 2,
+              // On WinAir this chip starts the row, so there is nothing to
+              // separate it from and the leading gap would read as a stray indent.
+              ml: isWinair ? 0 : 2,
               fontWeight: 500,
               // WinAir's chips follow its brand red, not the app primary.
               ...(isWinair && {
