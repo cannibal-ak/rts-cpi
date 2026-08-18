@@ -268,6 +268,22 @@ export interface PricePoint {
   dbd: number | null;        // days before departure at capture time
 }
 
+// One entry per (market, airline, departure date) on which the airline
+// offered NO purchasable fare all day. These are the days the fare lines
+// skip; the chart marks them instead of drawing a dip to zero.
+export interface NoFareDay {
+  /** Same "ORG-DST" grouping key as PricePoint.market. */
+  market: string;
+  airline: string;
+  dep_date: string;          // YYYY-MM-DD
+  // 'sold_out' — fares were observed but every one was zero (seats gone);
+  // 'not_on_sale' — the feed carried no bookable inventory for the day yet.
+  status: 'sold_out' | 'not_on_sale';
+  // Days before departure at capture time, computed server-side so the
+  // Days Left filter can reach rows that carry no fare of their own.
+  dbd: number;
+}
+
 export interface PricePointsResponse {
   cap_date: string | null;
   /** The markets actually queried, as "ORG-DST", in the order requested. */
@@ -277,6 +293,18 @@ export interface PricePointsResponse {
   /** Which markets were cut, so a warning can name them. */
   truncated_routes: string[];
   points: PricePoint[];
+  /**
+   * Days with no purchasable fare at all, for the availability markers.
+   * Present only when include_availability was requested; empty when the
+   * server suppressed them (see availability_suppressed).
+   */
+  no_fare_days?: NoFareDay[];
+  /**
+   * True when a stops/flt_num filter made the server withhold no_fare_days:
+   * a day with no fare carries no stops or flight number, so it cannot
+   * honestly satisfy either filter.
+   */
+  availability_suppressed?: boolean;
 }
 
 export interface PricePointsQuery {
@@ -292,6 +320,8 @@ export interface PricePointsQuery {
   dep_to?: string;
   stops?: number;
   flt_num?: string;
+  /** 1 asks the server to include no_fare_days; omitted = off (back-compat). */
+  include_availability?: number;
   // Index signature so this is assignable to the query-param record the
   // HTTP client takes, matching SnapshotQuery above. The named fields keep
   // their types; origin and destination stay required.

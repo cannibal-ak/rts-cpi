@@ -14,6 +14,7 @@ from app.models.airline import AirlineCpiSnapshot
 from app.schemas.common import PaginatedResponse, PageInfo
 from app.schemas.airline import (
     AirlineSnapshotOut,
+    NoFareDayOut,
     PriceHistoryPointOut,
     PriceHistoryResponse,
     PricePointOut,
@@ -431,6 +432,37 @@ _PRICE_POINT_SIDE_SQL = """
 """
 
 
+# Why a fare cell holds 0. Ingestion coerces two distinct source cases to
+# zero (the fare columns are NOT NULL): a sold-out flight arrives with its
+# fares written as 0, while a not-yet-on-sale day arrives blank. The cases
+# stay separable after the coercion — a sold-out reference row still carries
+# its stops count, a sold-out competitor row still carries a flight number,
+# and blank-block rows carry neither.
+_AVAILABILITY_STATUS_CASE = {
+    "ref": (
+        "CASE WHEN ref_tot_fare > 0 THEN 'on_sale' "
+        "WHEN ref_stops IS NULL THEN 'not_on_sale' ELSE 'sold_out' END"
+    ),
+    "comp": (
+        "CASE WHEN comp_tot_fare > 0 THEN 'on_sale' "
+        "WHEN COALESCE(comp_flt_num, '') <> '' THEN 'sold_out' ELSE 'not_on_sale' END"
+    ),
+}
+
+# Availability is a whole-day statement, so only the grouping grain is
+# projected. `market` must be built exactly as _PRICE_POINT_SIDE_SQL builds
+# it — markers join to their fare line on that string.
+_AVAILABILITY_SIDE_SQL = """
+    SELECT
+        ref_org || '-' || ref_dst                        AS market,
+        {side}_al                                        AS airline,
+        {side}_dep_date                                  AS dep_date,
+        {status_case}                                    AS status
+    FROM {view}
+    WHERE {where}
+"""
+
+
 def _parse_routes(routes: str | None, origin: str | None, destination: str | None) -> list[tuple[str, str]]:
     """Requested markets as (origin, destination) pairs.
 
@@ -486,6 +518,9 @@ def list_price_points(
     dep_to: str | None = Query(None),
     stops: int | None = Query(None, ge=0),
     flt_num: str | None = Query(None),
+    include_availability: bool = Query(
+        False, description="Set true to also classify each airline's no-fare days."
+    ),
 ):
     """Every fare observed on the requested routes on one capture date, one point each."""
     _, view_name = _resolve_airline_view(user_identity, user_roles, tenant)
@@ -621,6 +656,66 @@ def list_price_points(
         for row in rows
     ]
 
+    # ── No-fare days — whole-day availability classification ──────────────
+    # A no-fare day produces no point above, which a chart renders as a
+    # silent gap. When asked, name the gap per (market, airline, day). Zero-
+    # fare rows are the subject here, so the `{side}_tot_fare > 0` predicate
+    # is deliberately absent; the GROUP BY absorbs the per-competitor
+    # duplication of reference rows. One sold-out flight is enough to call
+    # the day sold out (bool_or), and any purchasable fare disqualifies the
+    # day entirely (HAVING). A stops or flt_num filter suppresses the
+    # markers instead of scoping them — a no-fare day carries NULL stops and
+    # a blank flight number, so it cannot honestly satisfy either filter —
+    # and the flag tells the caller why they vanished.
+    no_fare_days: list[NoFareDayOut] = []
+    availability_suppressed = False
+    if include_availability:
+        if stops is not None or flt_num:
+            availability_suppressed = True
+        else:
+
+            def _availability_sql(side: str) -> str:
+                # Same cap_date/market/airline/dep-window predicates as the
+                # points, so markers and lines describe the same selection.
+                # The comp guard drops wholly-blank competitor halves: no
+                # airline code means no line to attach a marker to.
+                clauses = ["cap_date = :cap_date", market_clause]
+                if side == "comp":
+                    clauses.append("comp_al <> ''")
+                if airline_list:
+                    clauses.append(f"{side}_al = ANY(:airlines)")
+                if dep_from:
+                    clauses.append(f"{side}_dep_date >= :dep_from")
+                if dep_to:
+                    clauses.append(f"{side}_dep_date <= :dep_to")
+                return _AVAILABILITY_SIDE_SQL.format(
+                    side=side,
+                    status_case=_AVAILABILITY_STATUS_CASE[side],
+                    view=view_name,
+                    where=" AND ".join(clauses),
+                )
+
+            avail_sql = text(
+                "SELECT market, airline, dep_date, "
+                "CASE WHEN bool_or(status = 'sold_out') THEN 'sold_out' "
+                "ELSE 'not_on_sale' END AS status "
+                f"FROM ({_availability_sql('ref')} UNION ALL {_availability_sql('comp')}) s "
+                "GROUP BY market, airline, dep_date "
+                "HAVING NOT bool_or(status = 'on_sale') "
+                "ORDER BY market, dep_date, airline"
+            )
+            # The points params minus the row caps, which this query has no
+            # binds for.
+            avail_params = {
+                k: v for k, v in params.items()
+                if k not in ("limit", "per_route_limit")
+            }
+            cap_date_obj = datetime.strptime(cap_date, "%Y-%m-%d").date()
+            no_fare_days = [
+                NoFareDayOut(**row, dbd=(row["dep_date"] - cap_date_obj).days)
+                for row in db.execute(avail_sql, avail_params).mappings().all()
+            ]
+
     # One currency per airline tenant in practice; None signals a mix rather
     # than picking a winner and mislabelling the axis.
     currencies = {p.curr for p in points if p.curr}
@@ -631,6 +726,8 @@ def list_price_points(
         truncated=bool(truncated_routes),
         truncated_routes=truncated_routes,
         points=points,
+        no_fare_days=no_fare_days,
+        availability_suppressed=availability_suppressed,
     )
 
 

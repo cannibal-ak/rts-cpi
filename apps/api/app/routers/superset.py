@@ -196,6 +196,7 @@ TENANT_CAPDATE_ONLY_TABLES = {
     ],
     "WM":  [
         "wm_all_airlines_fares",
+        "wm_all_airlines_fares_availability",
         "wm_pricing_recommendations",
         "wm_velocity_normalized",
     ],

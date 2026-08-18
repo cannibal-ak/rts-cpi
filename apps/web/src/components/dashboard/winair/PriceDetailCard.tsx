@@ -208,7 +208,16 @@ export default function PriceDetailCard({
         }}
       >
         <FlightTakeoff sx={{ fontSize: 15, color }} />
-        <Typography sx={{ fontSize: 12.5, fontWeight: 700, flexGrow: 1 }}>
+        {/* The host carrier's code wears its series colour (brand red);
+            competitor codes stay theme ink. */}
+        <Typography
+          sx={{
+            fontSize: 12.5,
+            fontWeight: 700,
+            flexGrow: 1,
+            ...(point.role === 'reference' && { color }),
+          }}
+        >
           {point.airline}
           {point.role === 'reference' && (
             <Box component="span" sx={{ ml: 0.5, fontSize: 10, fontWeight: 500, color: 'text.secondary' }}>
