@@ -2,7 +2,7 @@
  * HTTP-based API client — talks to the real FastAPI backend.
  * Uses JWT Bearer tokens for authentication (Phase 2).
  */
-import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, DashboardDateFilter, KpiKey, KpiSummaryResponse, KpiDetailResponse } from './client';
+import type { CpiApiClient, SnapshotQuery, JobQuery, ChartFormDataKeyResponse, DashboardChartsResponse, DashboardDateFilter, DashboardFilterConfigResponse, DashboardFilterSelections, DashboardPermalinkResponse, DashboardTabsResponse, KpiKey, KpiSummaryResponse, KpiDetailResponse, PriceHistoryQuery, PriceHistoryResponse, PricePointsQuery, PricePointsResponse } from './client';
 import type {
   Paginated, AirlineSnapshot, VelocitySnapshot, CflSnapshot, FilterMetadata,
   AlertRule, AlertEvent,
@@ -380,6 +380,10 @@ export const httpClient: CpiApiClient = {
       get<FilterMetadata[]>('/api/v1/airline/filter-metadata', tenant ? { tenant } : undefined),
     exportSnapshots: (q?: Record<string, string>) =>
       download('/api/v1/airline/export', q),
+    listPricePoints: (q: PricePointsQuery, opts?: RequestOptions) =>
+      get<PricePointsResponse>('/api/v1/airline/price-points', q as Record<string, string | number | undefined>, opts),
+    getPriceHistory: (q: PriceHistoryQuery, opts?: RequestOptions) =>
+      get<PriceHistoryResponse>('/api/v1/airline/price-points/history', q as Record<string, string | number | undefined>, opts),
     velocity: {
       listSnapshots: (q?: SnapshotQuery, opts?: RequestOptions) =>
         get<Paginated<VelocitySnapshot>>('/api/v1/airline/velocity/snapshots', q as Record<string, string | number | undefined>, opts),
@@ -514,15 +518,19 @@ export const httpClient: CpiApiClient = {
           new_password: newPassword,
           force_change_on_login: forceChangeOnLogin,
         }),
+      // No request body; 204 No Content (handleResponse short-circuits it).
       deactivateUser: (userId: string) =>
         post<void>(`/api/v1/admin/password-management/users/${userId}/deactivate`, {}),
-      resetMfa: (userId: string) =>
-        post<{ user_id: string; email: string; mfa_reset: boolean }>(`/api/v1/admin/password-management/users/${userId}/reset-mfa`, {}),
       reactivateUser: (userId: string) =>
         post<void>(`/api/v1/admin/password-management/users/${userId}/reactivate`, {}),
       // DELETE -> 204 No Content; handleResponse resolves void.
       deleteUser: (userId: string) =>
         del<void>(`/api/v1/admin/password-management/users/${userId}`),
+      // Clears the user's enrolled authenticator + recovery codes (idempotent);
+      // they re-enroll at next sign-in. Returns a small JSON body.
+      resetMfa: (userId: string) =>
+        post<{ user_id: string; email: string; mfa_reset: boolean }>(
+          `/api/v1/admin/password-management/users/${userId}/reset-mfa`, {}),
     },
     dashboard: {
       getHealth: () => get<PlatformHealthResponse>('/api/v1/admin/dashboard/health'),
@@ -581,10 +589,10 @@ export const httpClient: CpiApiClient = {
       get<DashboardChartsResponse>(
         `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/charts`,
       ),
-    // Mint a Superset explore form_data_key carrying the active cap_date filter
-    // for the standalone Chart-view iframe. The backend builds the form_data
-    // server-side from these params (same cap_date semantics as the guest token);
-    // the returned key goes into /explore/?slice_id=ID&form_data_key=KEY.
+    // PROD chart-view overlay: mint a Superset explore form_data_key carrying
+    // the active cap_date filter for the standalone Chart-view iframe. Kept
+    // alongside the dashboard-scoped mintChartFormDataKey below (different
+    // endpoint). The returned key goes into /explore/?slice_id=ID&form_data_key=KEY.
     getChartFormDataKey: (sliceId: number, dateFilter?: DashboardDateFilter) => {
       const params: Record<string, string | number | undefined> = {};
       if (dateFilter?.mode === 'single' && dateFilter.capDateEq) {
@@ -596,6 +604,46 @@ export const httpClient: CpiApiClient = {
       return get<{ key: string }>(
         `/api/v1/superset/charts/${encodeURIComponent(sliceId)}/form-data-key`,
         params,
+      );
+    },
+    getDashboardTabs: (dashboardId: string) =>
+      get<DashboardTabsResponse>(
+        `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/tabs`,
+      ),
+    mintDashboardPermalink: (
+      dashboardId: string,
+      { activeTab, selections }: { activeTab?: string; selections?: DashboardFilterSelections },
+    ) =>
+      post<DashboardPermalinkResponse>(
+        `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/permalink`,
+        { active_tab: activeTab ?? null, selections: selections ?? {} },
+      ),
+    getFilterConfig: (dashboardId: string) =>
+      get<DashboardFilterConfigResponse>(
+        `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/filter-config`,
+      ),
+    buildFilterParams: (dashboardId: string, selections: DashboardFilterSelections) =>
+      post<{ native_filters: string }>(
+        `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/filter-params`,
+        { selections },
+      ),
+    mintChartFormDataKey: (
+      dashboardId: string,
+      sliceId: number,
+      { dateFilter, selections }: {
+        dateFilter?: DashboardDateFilter; selections?: DashboardFilterSelections;
+      },
+    ) => {
+      const payload: Record<string, unknown> = { selections: selections ?? {} };
+      if (dateFilter?.mode === 'single' && dateFilter.capDateEq) {
+        payload.cap_date_eq = dateFilter.capDateEq;
+      } else if (dateFilter?.mode === 'range' && dateFilter.capDateFrom && dateFilter.capDateTo) {
+        payload.cap_date_from = dateFilter.capDateFrom;
+        payload.cap_date_to = dateFilter.capDateTo;
+      }
+      return post<ChartFormDataKeyResponse>(
+        `/api/v1/superset/dashboards/${encodeURIComponent(dashboardId)}/charts/${sliceId}/form-data-key`,
+        payload,
       );
     },
   },

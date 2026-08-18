@@ -43,10 +43,25 @@ export interface DateFilterToggleProps {
   value: DashboardDateFilter;
   onChange: (next: DashboardDateFilter) => void;
   disabled?: boolean;
+  /**
+   * Drop the wrapper's own padding and top rule.
+   *
+   * The default wrapper is sized to sit directly under a page header, where
+   * that rule separates it from the content above. Inside a popover the
+   * surrounding Paper already owns both, and the rule just draws a stray line
+   * across the top of the panel.
+   */
+  bare?: boolean;
+  /**
+   * Tenant-brand focus color (a literal color, not a theme path). The default
+   * focus ring is theme-primary navy, which clashes inside brand-accented
+   * hosts like WinAir's red cap-date popover. Omitted, nothing changes.
+   */
+  accent?: string;
 }
 
 export default function DateFilterToggle({
-  availableDates, value, onChange, disabled,
+  availableDates, value, onChange, disabled, bare = false, accent,
 }: DateFilterToggleProps) {
   const anchor = availableDates[0] ?? fmt(new Date());
 
@@ -94,12 +109,27 @@ export default function DateFilterToggle({
     '& .MuiOutlinedInput-root': { height: 28, fontSize: 12 },
     '& .MuiOutlinedInput-input': { py: 0, fontSize: 12 },
     '& input[type="date"]': { py: 0, fontSize: 12, height: 28, boxSizing: 'border-box' as const },
+    // Both selector forms on purpose: on a bare <Select> the sx host IS the
+    // OutlinedInput root, so the descendant form alone silently misses it.
+    ...(accent && {
+      '&.MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline, & .MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline':
+        { borderColor: accent },
+    }),
   };
   const inlineLabelSx = { fontSize: 12, color: 'text.secondary', whiteSpace: 'nowrap' as const };
 
+  const toggleGroupSx = {
+    '& .MuiToggleButton-root': {
+      py: '4px', px: '12px',
+      fontSize: 12,
+      lineHeight: 1.2,
+      textTransform: 'none',
+    },
+  };
+
   return (
     <Box
-      sx={{
+      sx={bare ? undefined : {
         px: '12px', py: '4px',
         borderTop: '0.5px solid',
         borderColor: 'divider',
@@ -117,14 +147,7 @@ export default function DateFilterToggle({
           onChange={handleMode}
           disabled={disabled}
           aria-label="Date filter mode"
-          sx={{
-            '& .MuiToggleButton-root': {
-              py: '4px', px: '12px',
-              fontSize: 12,
-              lineHeight: 1.2,
-              textTransform: 'none',
-            },
-          }}
+          sx={toggleGroupSx}
         >
           <ToggleButton value="single" aria-label="Single day">
             <CalendarToday sx={{ fontSize: 14, mr: 0.5 }} />

@@ -13,6 +13,7 @@ import { api } from '../../api';
 import { fetchAllPages } from '../../api/fetchAllPages';
 import { isAbortError } from '../../api/httpClient';
 import type { AirlineSnapshot, FilterMetadata } from '../../types';
+import { BANNER_BG, brandInk } from '../../components/dashboard/bannerTheme';
 
 interface AirlineCpiPricingTabProps {
   tenantCode: 'JY' | 'PW' | 'ALT' | 'WM';
@@ -82,6 +83,10 @@ interface SummaryColumn {
   align?: 'left' | 'right';
   width: number;
   render: (row: AirlineSnapshot) => ReactNode;
+  /** Plain-text value for the cell's native tooltip. Set it on any column
+   *  whose content can outrun its fixed width — connection itineraries
+   *  concatenate a flight number per leg, so they routinely do. */
+  title?: (row: AirlineSnapshot) => string;
 }
 
 const SUMMARY_COLUMNS: SummaryColumn[] = [
@@ -92,14 +97,16 @@ const SUMMARY_COLUMNS: SummaryColumn[] = [
               sx={{ height: 16, fontSize: 10, '& .MuiChip-label': { px: 0.5 } }} />
       : DASH },
   { label: 'AL',        align: 'left',  width: 36, render: r => fmtText(r.ref_al) },
-  { label: 'Flt',       align: 'left',  width: 60, render: r => fmtText(r.ref_flt_num) },
+  { label: 'Flt',       align: 'left',  width: 110, render: r => fmtText(r.ref_flt_num),
+    title: r => fmtText(r.ref_flt_num) },
   { label: 'Dep',       align: 'left',  width: 84, render: r => fmtDate(r.ref_dep_date) },
   { label: 'Cab',       align: 'left',  width: 40, render: r => fmtText(r.ref_cab_code) },
   { label: 'Ref fare',  align: 'right', width: 76, render: r => (
       <Box component="span" sx={{ fontFamily: 'monospace', fontSize: 11 }}>{fmtCurrency(r.ref_tot_fare)}</Box>
   )},
   { label: 'Comp',      align: 'left',  width: 40, render: r => fmtText(r.comp_al) },
-  { label: 'C.Flt',     align: 'left',  width: 60, render: r => fmtText(r.comp_flt_num) },
+  { label: 'C.Flt',     align: 'left',  width: 110, render: r => fmtText(r.comp_flt_num),
+    title: r => fmtText(r.comp_flt_num) },
   { label: 'C.Dep',     align: 'left',  width: 84, render: r => fmtDate(r.comp_dep_date) },
   { label: 'C.Cab',     align: 'left',  width: 40, render: r => fmtText(r.comp_cab_code) },
   { label: 'Comp fare', align: 'right', width: 76, render: r => (
@@ -382,6 +389,8 @@ function downloadBlob(blob: Blob, filename: string) {
 
 // ────────────────────────────────────────────────────────────────────────
 export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersChange, exportRef }: AirlineCpiPricingTabProps) {
+  // WinAir accents follow the brand red; other tenants keep theme primary.
+  const isWm = tenantCode === 'WM';
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [allData, setAllData] = useState<AirlineSnapshot[]>([]);
@@ -626,7 +635,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
           startIcon={<RestartAlt sx={{ fontSize: 13 }} />}
           onClick={handleResetClientFilters}
           disabled={!hasClientFilters}
-          sx={{ fontSize: 11, textTransform: 'none', minHeight: 26, py: 0.25, px: 0.75 }}
+          sx={{ fontSize: 11, textTransform: 'none', minHeight: 26, py: 0.25, px: 0.75, ...(isWm && { color: brandInk }) }}
         >
           Reset
         </Button>
@@ -636,7 +645,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {loading && allData.length === 0 ? (
           <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <CircularProgress size={28} />
+            <CircularProgress size={28} sx={isWm ? { color: brandInk } : undefined} />
           </Box>
         ) : allData.length === 0 ? (
           <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -646,6 +655,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
               description={`Pick a file date to load ${tenantCode} airline CPI snapshots.`}
               actionLabel="Load All"
               onAction={() => fetchData(filters.file_date ? { file_date: filters.file_date } : {})}
+              accent={isWm ? BANNER_BG : undefined}
             />
           </Box>
         ) : (
@@ -687,6 +697,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
                       row={row}
                       expanded={expandedId === row.id}
                       onToggle={() => handleRowToggle(row.id)}
+                      isWm={isWm}
                     />
                   ))}
                 </TableBody>
@@ -747,9 +758,11 @@ interface PricingRowProps {
   row: AirlineSnapshot;
   expanded: boolean;
   onToggle: () => void;
+  /** WinAir rows accent in brand red instead of theme primary. */
+  isWm?: boolean;
 }
 
-function PricingRow({ row, expanded, onToggle }: PricingRowProps) {
+function PricingRow({ row, expanded, onToggle, isWm = false }: PricingRowProps) {
   const isRT = row.trip_type === 'RT';
   return (
     <>
@@ -784,7 +797,7 @@ function PricingRow({ row, expanded, onToggle }: PricingRowProps) {
           </IconButton>
         </TableCell>
         {SUMMARY_COLUMNS.map(col => (
-          <TableCell key={col.label} align={col.align ?? 'left'}>
+          <TableCell key={col.label} align={col.align ?? 'left'} title={col.title?.(row)}>
             {col.render(row)}
           </TableCell>
         ))}
@@ -796,7 +809,7 @@ function PricingRow({ row, expanded, onToggle }: PricingRowProps) {
               bgcolor: 'action.hover',
               p: 1,
               borderLeft: 3,
-              borderColor: 'primary.main',
+              borderColor: isWm ? brandInk : 'primary.main',
               maxHeight: 150,
               overflowY: 'auto',
             }}>

@@ -1,7 +1,7 @@
 /**
  * In-memory mock API client — for offline demos without a backend.
  */
-import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, KpiKey, KpiSummaryResponse, KpiDetailResponse } from './client';
+import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, DashboardFilterConfigResponse, DashboardFilterSelections, DashboardPermalinkResponse, DashboardTabsResponse, KpiKey, KpiSummaryResponse, KpiDetailResponse, PriceHistoryQuery, PricePointsQuery } from './client';
 import type {
   Paginated,
   AlertRule,
@@ -21,6 +21,7 @@ import type {
   IngestedFile,
   IngestionRunListQuery,
   IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionDeleteDataResult, IngestionAuditLog, IngestionPreview,
+  AdminUserListItem,
 } from '../types';
 import {
   mockAirlineSnapshots, mockCflSnapshots,
@@ -50,12 +51,54 @@ function delay<T>(val: T, ms = 120): Promise<T> {
   return new Promise(r => setTimeout(() => r(val), ms));
 }
 
+// Offline demo seed so deactivate/reactivate have state to flip in place.
+const mockPwUsers: AdminUserListItem[] = [
+  { id: 'mock-user-rts', email: 'admin@rts.com', tenant_name: 'RTS', tenant_slug: 'rts',
+    role: 'TENANT_ADMIN', is_active: true, is_locked: false, force_password_change: false,
+    last_login: null, created_at: '2026-01-01T00:00:00Z' },
+  { id: 'mock-user-jy', email: 'jy@airline.com', tenant_name: 'JY Airways', tenant_slug: 'jy',
+    role: 'TENANT_ADMIN', is_active: true, is_locked: false, force_password_change: false,
+    last_login: null, created_at: '2026-01-01T00:00:00Z' },
+  { id: 'mock-user-hist', email: 'analyst@airline.com', tenant_name: 'Skybound - PW', tenant_slug: 'pw',
+    role: 'TENANT_ADMIN', is_active: true, is_locked: false, force_password_change: false,
+    last_login: null, created_at: '2026-01-01T00:00:00Z' },
+  { id: 'mock-user-del', email: 'temp@airline.com', tenant_name: 'Skybound - PW', tenant_slug: 'pw',
+    role: 'TENANT_ADMIN', is_active: true, is_locked: false, force_password_change: false,
+    last_login: null, created_at: '2026-01-01T00:00:00Z' },
+];
+
 export const mockClient: CpiApiClient = {
   airline: {
     listSnapshots: (q?: SnapshotQuery) =>
       delay(paginate(mockAirlineSnapshots, q?.page as number, q?.page_size as number)),
     getFilterMetadata: (_tenant?: string) => delay(mockFilterMetadata.airline),
     exportSnapshots: (_q?: Record<string, string>) => delay(undefined),
+    // No fixture: the Latest Prices chart is WinAir-only and the mock
+    // client has no WM session. An empty result renders the panel's
+    // "pick a route" state rather than a broken chart.
+    //
+    // Note for anyone testing offline: the WinAir tab bar cannot be
+    // exercised here either — mockClient's mintDashboardPermalink returns
+    // {key: null} unconditionally, so no Superset section can be selected.
+    listPricePoints: (q: PricePointsQuery) =>
+      delay({
+        cap_date: null,
+        routes: (q.routes ?? '').split(',').filter(Boolean),
+        currency: null,
+        truncated: false,
+        truncated_routes: [],
+        points: [],
+      }),
+    getPriceHistory: (q: PriceHistoryQuery) =>
+      delay({
+        airline: q.airline,
+        flt_num: q.flt_num ?? null,
+        origin: q.origin,
+        destination: q.destination,
+        dep_date: q.dep_date,
+        curr: null,
+        points: [],
+      }),
     velocity: {
       listSnapshots: (q?: SnapshotQuery) =>
         delay(paginate([], q?.page as number, q?.page_size as number)),
@@ -388,7 +431,7 @@ export const mockClient: CpiApiClient = {
     },
     // Password management isn't exercised offline; stubs keep the interface satisfied.
     passwordManagement: {
-      listUsers: () => delay({ users: [], total: 0 }),
+      listUsers: () => delay({ users: mockPwUsers.map(u => ({ ...u })), total: mockPwUsers.length }),
       listTenants: () => delay([]),
       inviteUser: (_body: { email: string; display_name: string; tenant_id: string; role?: string }) =>
         delay({ user_id: '00000000-0000-0000-0000-000000000000', email: _body.email, invite_sent: false }),
@@ -398,10 +441,45 @@ export const mockClient: CpiApiClient = {
         delay({ sent: false, message: 'Not available in mock mode' }),
       forceReset: (_email: string, _newPassword: string, _forceChangeOnLogin: boolean) =>
         delay({ success: false, message: 'Not available in mock mode' }),
-      deactivateUser: (_userId: string) => delay(undefined as unknown as void),
-      resetMfa: (userId: string) => delay({ user_id: userId, email: '', mfa_reset: true }),
-      reactivateUser: (_userId: string) => delay(undefined as unknown as void),
-      deleteUser: (_userId: string) => delay(undefined as unknown as void),
+      deactivateUser: (userId: string) => {
+        if (userId === 'mock-user-jy') {
+          return Promise.reject(Object.assign(
+            new Error('jy@airline.com is the only active admin for Skywave - JY; add or reactivate another admin first.'),
+            { status: 409, errorCode: 'last_active_admin', details: { tenant: 'Skywave - JY' } },
+          ));
+        }
+        const u = mockPwUsers.find(x => x.id === userId);
+        if (u) u.is_active = false;
+        return delay(undefined as unknown as void);
+      },
+      reactivateUser: (userId: string) => {
+        const u = mockPwUsers.find(x => x.id === userId);
+        if (u) u.is_active = true;
+        return delay(undefined as unknown as void);
+      },
+      // Offline sims of the backend 409 refusals for a couple of seed users.
+      deleteUser: (userId: string) => {
+        if (userId === 'mock-user-hist') {
+          return Promise.reject(Object.assign(
+            new Error('analyst@airline.com has activity history (audit / ingestion records) and cannot be deleted. Deactivate the account instead.'),
+            { status: 409, errorCode: 'has_history', details: {} },
+          ));
+        }
+        if (userId === 'mock-user-jy') {
+          return Promise.reject(Object.assign(
+            new Error('jy@airline.com is the only active admin for Skywave - JY; add or reactivate another admin first.'),
+            { status: 409, errorCode: 'last_active_admin', details: { tenant: 'Skywave - JY' } },
+          ));
+        }
+        const i = mockPwUsers.findIndex(x => x.id === userId);
+        if (i >= 0) mockPwUsers.splice(i, 1);
+        return delay(undefined as unknown as void);
+      },
+      // Offline sim: echo the looked-up email; the real endpoint is idempotent.
+      resetMfa: (userId: string) => {
+        const u = mockPwUsers.find(x => x.id === userId);
+        return delay({ user_id: userId, email: u ? u.email : '', mfa_reset: true });
+      },
     },
     // SMTP settings aren't exercised offline; stubs keep the interface satisfied.
     settings: {
@@ -476,6 +554,48 @@ export const mockClient: CpiApiClient = {
         { slice_id: 3, slice_name: 'Breakdown by Type', viz_type: 'pie',                     description: null, is_kpi: false },
       ],
     }),
+    getDashboardTabs: (dashboardId: string): Promise<DashboardTabsResponse> => delay({
+      dashboard_id: Number(dashboardId),
+      dashboard_app_id: dashboardId,
+      // Only the WinAir dashboard is tabbed; everything else reports no tabs,
+      // which callers read as "not tab-navigable".
+      tabs: dashboardId === '5'
+        ? [
+            { id: 'TAB-wmNav1', label: 'Avg_Fare' },
+            { id: 'TAB-wmNav4', label: 'Min/Max_Fare' },
+            { id: 'TAB-wmNav3', label: 'Competitor Breakdown' },
+            { id: 'TAB-wmNav2', label: 'Pricing Recommendations' },
+            { id: 'TAB-wmNav5', label: 'Velocity' },
+          ]
+        : [],
+    }),
+    // No Superset to store state in offline, so no key — the caller then embeds
+    // without the param, same as the buildFilterParams '' contract below.
+    mintDashboardPermalink: (
+      _dashboardId: string,
+      _opts: { activeTab?: string; selections?: DashboardFilterSelections },
+    ): Promise<DashboardPermalinkResponse> => delay({ key: null }),
+    getFilterConfig: (dashboardId: string): Promise<DashboardFilterConfigResponse> => delay({
+      dashboard_id: dashboardId,
+      filters: [
+        // Scopes differ on purpose so chart view's per-chart filtering is
+        // exercisable offline: Route reaches both charts, Days Left only one.
+        { id: 'NATIVE_FILTER-Route',    field: 'route',     label: 'Route (O&D)', description: 'Origin → Destination',
+          dataset_id: 32, multi_select: true, values: ['ANU → BGI', 'ANU → SLU', 'EIS → SXM'],
+          charts_in_scope: [1, 2, 3] },
+        { id: 'NATIVE_FILTER-DaysLeft', field: 'days_left', label: 'Days Left',   description: 'Days to departure',
+          dataset_id: 34, multi_select: true, values: ['0', '7', '14', '30'],
+          charts_in_scope: [3] },
+      ],
+    }),
+    // The real endpoint rison-encodes a Superset dataMask. Mock mode has no
+    // Superset to feed, so return '' — the caller then omits the URL param.
+    buildFilterParams: (_dashboardId: string, _selections: DashboardFilterSelections) =>
+      delay({ native_filters: '' }),
+    // No Superset to mint against offline. A null key is the "nothing to
+    // overlay" contract, so chart view falls back to the plain explore URL.
+    mintChartFormDataKey: (_dashboardId: string, _sliceId: number) =>
+      delay({ key: null, cap_date: null, applied: [], out_of_scope: [] }),
   },
   kpi: {
     getSummary: (airlineCode: string, capDate: string, currency?: string): Promise<KpiSummaryResponse> => delay({

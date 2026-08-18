@@ -6,7 +6,6 @@
   <link rel="icon" type="image/png" href="/favicon.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Competitor Pricing Intelligence</title>
-
   <!-- PWA: installable on Android / iPad / desktop -->
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#1a5276" />
@@ -17,7 +16,16 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Altitude AI" />
 
-  <script src="https://unpkg.com/@superset-ui/embedded-sdk"></script>
+  <!--
+    Superset Embedded SDK. PINNED: this was previously unversioned, so every
+    page load silently took whatever npm's "latest" happened to be. The WinAir
+    filter bar depends on dashboardUiConfig.urlParams to seed native filters,
+    so the SDK version needs to be a known quantity. 0.4.0 is the version that
+    was already being served, verified to pass urlParams through to the iframe.
+    (The @superset-ui/embedded-sdk entry in package.json is never imported —
+    it is a local reference copy for types only.)
+  -->
+  <script src="https://unpkg.com/@superset-ui/embedded-sdk@0.4.0/bundle/index.js"></script>
 </head>
 
 <body>

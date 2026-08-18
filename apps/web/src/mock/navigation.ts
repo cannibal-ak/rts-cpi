@@ -39,13 +39,19 @@ export const navigationItems: NavItem[] = [
     hideForSuperAdmin: true,
   },
   {
-    label: 'Airline CPI \u2013 WinAir',
+    label: 'Airline CPI Data',
     path: '/cpi/airline/wm',
     icon: 'Flight',
     requiredModules: ['airline_wm'],
     requiredRoles: ['TENANT_ADMIN', 'TENANT_USER'],
     category: 'Modules',
     hideForSuperAdmin: true,
+    // The page's two tabs, surfaced in the menu. Children inherit the parent's
+    // gating: they only render if the parent survived the access filter.
+    children: [
+      { label: 'Pricing', path: '/cpi/airline/wm?tab=pricing', icon: 'PriceChange' },
+      { label: 'Velocity', path: '/cpi/airline/wm?tab=velocity', icon: 'Speed' },
+    ],
   },
   {
     label: 'Cruise/Ferry CPI \u2013 FJL',

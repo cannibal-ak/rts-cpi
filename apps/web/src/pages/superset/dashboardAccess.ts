@@ -18,6 +18,16 @@ export function canAccessDashboard(
   return session.enabled_modules.includes(moduleCode);
 }
 
+// Dashboards that do NOT offer the standalone Chart view. Their charts are
+// only ever read inside the embedded dashboard, so nothing should link to a
+// single slice - not the in-page selector, not the sidebar. '5' is WinAir,
+// whose charts are driven by its own top filter bar instead.
+const NO_CHART_VIEW_DASHBOARDS = ['5'];
+
+export function hasChartView(dashboardId: string | undefined | null): boolean {
+  return !!dashboardId && !NO_CHART_VIEW_DASHBOARDS.includes(dashboardId);
+}
+
 // Reverse-lookup: returns the dashboard ID for a tenant with exactly one
 // accessible dashboard. Returns null for admins (multiple matches),
 // users with no enabled modules, or modules with no mapping.

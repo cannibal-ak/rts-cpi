@@ -19,10 +19,12 @@
  * renders the chart's saved (unfiltered) config. It DOES honor `form_data_key`.
  */
 import React from 'react';
-import { Box, IconButton, Typography, Tooltip, CircularProgress } from '@mui/material';
-import { ChevronLeft, ChevronRight, InfoOutlined } from '@mui/icons-material';
+import { Box, CircularProgress, IconButton, Typography, Tooltip } from '@mui/material';
+import { ChevronLeft, ChevronRight, InfoOutlined, WarningAmber } from '@mui/icons-material';
 import { api } from '../../api';
-import type { DashboardDateFilter } from '../../api/client';
+import type {
+  ChartFormDataKeyResponse, DashboardDateFilter, DashboardFilterSelections,
+} from '../../api/client';
 
 interface Props {
   sliceId: number;
@@ -32,76 +34,104 @@ interface Props {
   total: number;
   onPrev: () => void;
   onNext: () => void;
-  // ── Date-filter wiring (Chart view honors the dashboard's cap_date filter) ──
-  dateFilter: DashboardDateFilter;
-  capDateFilterEnabled: boolean; // dashboard is in the cap_date chart-view allowlist
-  refreshKey: number;            // bumped on date-change / refresh → re-mints the key + reloads
+  /** App dashboard id — the mint endpoint is scoped to it (tenant gate). */
+  dashboardId: string;
+  /** This dashboard is allow-listed for the chart-view filter overlay. */
+  overlayEnabled?: boolean;
+  dateFilter?: DashboardDateFilter;
+  /** APPLIED selections, not pending. The backend drops out-of-scope entries. */
+  selections?: DashboardFilterSelections;
+  /** Bumped by Apply / Refresh / date change → re-mint and reload. */
+  refreshKey?: number;
 }
 
-// True once the active date filter carries usable values (so a key is mintable).
-function dateFilterHasValues(df: DashboardDateFilter): boolean {
-  if (df.mode === 'single') return !!df.capDateEq;
-  return !!(df.capDateFrom && df.capDateTo);
-}
+type Overlay =
+  | { status: 'off' }
+  | { status: 'minting' }
+  | { status: 'ready'; res: ChartFormDataKeyResponse }
+  | { status: 'failed' };
 
 export default function SingleChartViewer({
   sliceId, sliceName, supersetBaseUrl, currentIndex, total, onPrev, onNext,
-  dateFilter, capDateFilterEnabled, refreshKey,
+  dashboardId, overlayEnabled = false, dateFilter, selections, refreshKey = 0,
 }: Props) {
   // Standalone explore mode strips Superset chrome (nav, menus) from the page.
   // The legacy `/superset/explore/` redirects (302) to this canonical path.
   const baseSrc = `${supersetBaseUrl}/explore/?slice_id=${sliceId}&standalone=1`;
 
-  // Apply the dashboard's active cap_date filter ONLY on allowlisted dashboards,
-  // and only once the filter carries date values.
-  const wantFilter = capDateFilterEnabled && dateFilterHasValues(dateFilter);
+  // ── Filter overlay ───────────────────────────────────────────────────────
+  // This iframe loads anonymously, so neither the guest token's cap_date RLS nor
+  // the dashboard's native filters reach it. The one channel the explore SPA
+  // honours is a server-minted form_data_key, which the backend merges over the
+  // slice's own saved config.
+  const hasDate = dateFilter?.mode === 'single'
+    ? !!dateFilter.capDateEq
+    : !!(dateFilter?.capDateFrom && dateFilter?.capDateTo);
+  const dateSig = dateFilter?.mode === 'single'
+    ? `s:${dateFilter.capDateEq ?? ''}`
+    : `r:${dateFilter?.capDateFrom ?? ''}:${dateFilter?.capDateTo ?? ''}`;
+  // Order- and identity-independent, so a parent re-render that rebuilds the
+  // object does not re-mint: {a:[2,1]} and {a:[1,2]} produce the same string.
+  const selectionSig = React.useMemo(() => JSON.stringify(
+    Object.entries(selections ?? {})
+      .filter(([, v]) => v && v.length > 0)
+      .map(([k, v]) => [k, [...v].sort()] as [string, string[]])
+      .sort((a, b) => a[0].localeCompare(b[0])),
+  ), [selections]);
 
-  // Stable signature of the active date filter — drives the re-mint effect and
-  // the iframe key without depending on the dateFilter object's identity.
-  const dateSig = wantFilter
-    ? (dateFilter.mode === 'single'
-        ? `s:${dateFilter.capDateEq}`
-        : `r:${dateFilter.capDateFrom}:${dateFilter.capDateTo}`)
-    : 'none';
-
-  // form_data_key minted by our backend for (sliceId, dateFilter). Re-minted
-  // whenever the slice, the date filter, OR refreshKey changes (refreshKey keeps
-  // the Refresh button honest — a fresh, non-expired key each time).
-  const [formDataKey, setFormDataKey] = React.useState<string | null>(null);
-  const [minting, setMinting] = React.useState(false);
-  const [mintError, setMintError] = React.useState(false);
+  const wantOverlay = overlayEnabled && (hasDate || selectionSig !== '[]');
+  const [overlay, setOverlay] = React.useState<Overlay>({ status: 'off' });
 
   React.useEffect(() => {
-    if (!wantFilter) {
-      setFormDataKey(null);
-      setMinting(false);
-      setMintError(false);
-      return;
-    }
+    if (!wantOverlay) { setOverlay({ status: 'off' }); return; }
     let cancelled = false;
-    setMinting(true);
-    setFormDataKey(null);
-    setMintError(false);
-    api.superset.getChartFormDataKey(sliceId, dateFilter)
-      .then((res) => { if (!cancelled) setFormDataKey(res.key); })
-      .catch(() => { if (!cancelled) setMintError(true); }) // fall back to plain (unfiltered) URL + notice
-      .finally(() => { if (!cancelled) setMinting(false); });
+    setOverlay({ status: 'minting' });
+    api.superset.mintChartFormDataKey(dashboardId, sliceId, { dateFilter, selections })
+      .then(res => { if (!cancelled) setOverlay({ status: 'ready', res }); })
+      .catch(err => {
+        if (cancelled) return;
+        console.error('[ChartView] form-data-key mint failed:', err);
+        setOverlay({ status: 'failed' });     // → plain URL + an explicit banner
+      });
     return () => { cancelled = true; };
-    // dateSig captures the date values; dateFilter is read inside but intentionally
-    // excluded from deps (its object identity changes on every parent render).
-  }, [sliceId, dateSig, refreshKey, wantFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+    // dateFilter / selections are read from the closure ON PURPOSE. Their object
+    // identity changes on every parent render, while dateSig / selectionSig
+    // change only when the VALUES do. Depending on the objects would re-mint on
+    // every render — a Superset write and an iframe teardown per frame.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dashboardId, sliceId, dateSig, selectionSig, refreshKey, wantOverlay]);
 
-  // While minting, show a brief loading state instead of flashing the unfiltered
-  // chart. On mint error (formDataKey stays null after minting) we fall back to
-  // the plain URL so the chart still renders.
-  const showLoading = wantFilter && minting;
-  const src = (wantFilter && formDataKey)
+  const formDataKey = overlay.status === 'ready' ? overlay.res.key : null;
+  const src = formDataKey
     ? `${baseSrc}&form_data_key=${encodeURIComponent(formDataKey)}`
     : baseSrc;
 
-  // Reload the iframe when the slice, the refresh counter, the date filter, or
-  // the resolved key changes (so the filtered URL takes effect once minted).
-  const iframeKey = `${sliceId}-${refreshKey}-${dateSig}-${formDataKey ?? 'plain'}`;
+  // The old banner said "Dashboard filters don't apply in chart view". On an
+  // overlay-enabled dashboard that is now a lie, and a silent fallback is worse
+  // than a wrong banner — so derive it from what the SERVER actually put in the
+  // key, never from what this component hoped for.
+  const banner: { tone: 'info' | 'warning'; text: string } | null = (() => {
+    if (!overlayEnabled) {
+      return { tone: 'info', text: "Dashboard filters don't apply in chart view" };
+    }
+    if (overlay.status === 'failed') {
+      return { tone: 'warning', text: 'Showing all data — filters could not be applied to this chart' };
+    }
+    if (overlay.status !== 'ready') return null;
+    const { cap_date, applied, out_of_scope } = overlay.res;
+    const parts = [
+      ...(cap_date ? [`Cap date ${cap_date}`] : []),
+      ...applied.map(a => `${a.label}: ${a.values.join(', ')}`),
+    ];
+    if (parts.length === 0 && out_of_scope.length === 0) return null;
+    const skipped = out_of_scope.length
+      ? `${parts.length ? ' · ' : ''}Not used by this chart: ${out_of_scope.map(f => f.label).join(', ')}`
+      : '';
+    return {
+      tone: 'info',
+      text: `${parts.length ? `Filtered — ${parts.join(' · ')}` : ''}${skipped}`,
+    };
+  })();
 
   const navBtnSx = {
     width: 28,
@@ -178,12 +208,9 @@ export default function SingleChartViewer({
         </Box>
       </Box>
 
-      {/* Compact info banner (replaces MUI Alert).
-          Only shown where the cap_date filter is NOT wired in (non-allowlisted
-          dashboards) — there the dashboard's date filter genuinely doesn't reach
-          chart view. On allowlisted dashboards the filter IS applied, so the
-          banner is hidden to avoid lying to the user. */}
-      {!capDateFilterEnabled && (
+      {/* Compact status banner (replaces MUI Alert) — reports what the server
+          actually applied, so it can never claim more than the chart shows. */}
+      {banner && (
         <Box sx={(theme) => ({
           display: 'flex',
           alignItems: 'center',
@@ -197,30 +224,10 @@ export default function SingleChartViewer({
           borderColor: 'divider',
           flexShrink: 0,
         })}>
-          <InfoOutlined sx={{ fontSize: 14, color: 'info.main', flexShrink: 0 }} />
-          <Box component="span">Dashboard filters don't apply in chart view</Box>
-        </Box>
-      )}
-
-      {/* Allowlisted dashboard, but the form_data_key mint failed → the iframe
-          falls back to the unfiltered (all-dates) URL. Surface that explicitly so
-          the fallback is never silent. The normal filtered case stays banner-free. */}
-      {capDateFilterEnabled && mintError && (
-        <Box sx={(theme) => ({
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-          px: 2,
-          py: '4px',
-          fontSize: 12,
-          color: 'text.secondary',
-          bgcolor: theme.palette.mode === 'dark' ? 'action.hover' : theme.palette.grey[50],
-          borderBottom: '1px solid',
-          borderColor: 'divider',
-          flexShrink: 0,
-        })}>
-          <InfoOutlined sx={{ fontSize: 14, color: 'warning.main', flexShrink: 0 }} />
-          <Box component="span">Showing all dates — date filter unavailable</Box>
+          {banner.tone === 'warning'
+            ? <WarningAmber sx={{ fontSize: 14, color: 'warning.main', flexShrink: 0 }} />
+            : <InfoOutlined sx={{ fontSize: 14, color: 'info.main', flexShrink: 0 }} />}
+          <Box component="span">{banner.text}</Box>
         </Box>
       )}
 
@@ -231,17 +238,23 @@ export default function SingleChartViewer({
           While the form_data_key is being minted we show a brief spinner instead
           of loading the unfiltered URL first (avoids a flash of all-data). */}
       <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', overflow: 'hidden' }}>
-        {showLoading ? (
-          <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CircularProgress size={28} />
+        {overlay.status === 'minting' ? (
+          // Deliberately NOT the unfiltered URL first: that flashes all-data on
+          // every Apply, which is worse than a brief spinner.
+          <Box sx={{
+            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1.5,
+          }}>
+            <CircularProgress size={20} />
+            <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
+              Applying filters…
+            </Typography>
           </Box>
         ) : (
           <iframe
-            // Key on sliceId + refresh + date signature + resolved key so React
-            // tears down the old iframe (instead of just updating src) on a chart
-            // switch, a date-filter change, or once the key is minted — avoids
-            // Superset state bleed and forces a reload with the new cap_date scope.
-            key={iframeKey}
+            // Key includes the resolved form_data_key so React tears the iframe
+            // down rather than swapping src — no Superset state bleed between
+            // chart switches or filter changes.
+            key={`${sliceId}-${refreshKey}-${formDataKey ?? overlay.status}`}
             title={sliceName}
             src={src}
             style={{

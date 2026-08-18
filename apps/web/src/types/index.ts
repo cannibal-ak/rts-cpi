@@ -568,7 +568,8 @@ export type IngestionStatus =
   | 'COMMITTED'
   | 'REJECTED'
   | 'REPLACED'
-  | 'FAILED';
+  | 'FAILED'
+  | 'DELETED';
 
 export type IngestionDomain = 'AIRLINE' | 'VELOCITY' | 'CFL';
 export type IngestionMode = 'STRICT' | 'LENIENT';

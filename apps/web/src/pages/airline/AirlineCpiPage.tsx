@@ -1,10 +1,12 @@
 import { useState, useEffect, useRef, type MutableRefObject } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Box, Tabs, Tab, Breadcrumbs, Link, Typography, Tooltip, Button } from '@mui/material';
 import { NavigateNext, FileDownload } from '@mui/icons-material';
 import AirlineCpiPricingTab from './AirlineCpiPricingTab';
 import AirlineCpiVelocityTab from './AirlineCpiVelocityTab';
 import { api } from '../../api';
 import type { DataFreshness } from '../../types';
+import { brandInk } from '../../components/dashboard/bannerTheme';
 
 interface AirlineCpiPageProps {
   /** Tenant code determines which snapshot view to query (JY, PW, ALT or WM). */
@@ -15,7 +17,7 @@ const TENANT_LABELS: Record<string, string> = {
   JY: 'Airline CPI – JY',
   PW: 'Airline CPI – PW',
   ALT: 'Airline CPI – SKY',
-  WM: 'Airline CPI – WinAir',
+  WM: 'Airline CPI Data',
 };
 
 export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
@@ -23,7 +25,12 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   // when the user switches tabs.
   const [pricingFilters, setPricingFilters] = useState<Record<string, string>>({});
   const [velocityFilters, setVelocityFilters] = useState<Record<string, string>>({});
-  const [tab, setTab] = useState<0 | 1>(0); // 0 = Pricing, 1 = Velocity
+
+  // The active tab lives in the URL (?tab=pricing|velocity) so the sidebar can
+  // link straight to it and a refresh/bookmark keeps you where you were.
+  // Anything other than 'velocity' — including no param at all — means Pricing,
+  // so a bare /cpi/airline/<tenant> behaves exactly as before.
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [freshness, setFreshness] = useState<DataFreshness | null>(null);
 
@@ -34,13 +41,21 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   const velocityExportRef = useRef<() => void>(() => {});
 
   const pageTitle = TENANT_LABELS[tenantCode] || `Airline CPI – ${tenantCode}`;
+  // WinAir's page chrome follows its brand red (see bannerTheme); others keep
+  // theme primary untouched.
+  const isWm = tenantCode === 'WM';
   const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT', 'WM'];
   const showTabs = TENANTS_WITH_VELOCITY.includes(tenantCode);
 
+  const tab: 0 | 1 = showTabs && searchParams.get('tab') === 'velocity' ? 1 : 0;
+  const setTab = (next: 0 | 1) =>
+    setSearchParams({ tab: next === 1 ? 'velocity' : 'pricing' }, { replace: true });
+
+  // Switching module is a fresh route with no ?tab, so the tab resets to
+  // Pricing on its own — only the per-tab filters need clearing here.
   useEffect(() => {
     setPricingFilters({});
     setVelocityFilters({});
-    setTab(0);
   }, [tenantCode]);
 
   useEffect(() => {
@@ -108,7 +123,8 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
                 fontWeight: 500,
                 textTransform: 'none',
               },
-              '& .MuiTabs-indicator': { height: 2 },
+              '& .MuiTabs-indicator': { height: 2, ...(isWm && { bgcolor: brandInk }) },
+              ...(isWm && { '& .MuiTab-root.Mui-selected': { color: brandInk } }),
             }}
           >
             <Tab label="Pricing" />
@@ -129,6 +145,7 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
               py: 0.25,
               px: 1,
               mb: 0.25,
+              ...(isWm && { color: brandInk }),
             }}
           >
             Export

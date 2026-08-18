@@ -25,7 +25,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
-    restart: unless-stopped
+    restart: always
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-cpi}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cpi_secret}
@@ -44,7 +44,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    restart: unless-stopped
+    restart: always
     ports:
       - "6379:6379"
     healthcheck:
@@ -55,7 +55,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
-    restart: unless-stopped
+    restart: always
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -76,7 +76,7 @@ services:
     build:
       context: ./apps/api
       target: dev
-    restart: unless-stopped
+    restart: always
     ports:
       - "8000:8000"
     volumes:
@@ -95,6 +95,7 @@ services:
       SUPERSET_URL: ${SUPERSET_URL:-http://superset:8088}
       SUPERSET_ADMIN_USER: ${SUPERSET_ADMIN_USER:-admin}
       SUPERSET_ADMIN_PASS: ${SUPERSET_ADMIN_PASS:-admin}
+      MFA_ENFORCED: ${MFA_ENFORCED:-false}  # Phase 5A DEV cutover (default false; prod compose unaffected)
     depends_on:
       postgres:
         condition: service_healthy
@@ -127,7 +128,7 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
         VITE_TENANT_ID: ${VITE_TENANT_ID:-a0000000-0000-0000-0000-000000000001}
-    restart: unless-stopped
+    restart: always
     ports:
       - "9090:5173"
     volumes:
@@ -153,7 +154,7 @@ services:
 
   superset:
     image: apache/superset:3.1.0
-    restart: unless-stopped
+    restart: always
     ports:
       - "8088:8088"
     environment:
@@ -165,6 +166,26 @@ services:
       - superset_home:/app/superset_home
       # ECharts grid.right widened to prevent date/label clipping (see superset-patches/README)
       - ./superset-patches/3871.c687a6d83eaaee71a216.entry.js:/app/superset/static/assets/3871.c687a6d83eaaee71a216.entry.js:ro
+      # Zoom fix: restore-zoom falls back to full reset when zoom history is empty (see superset-patches/README)
+      - ./superset-patches/8755.b325fab1a4b5f24a84fc.entry.js:/app/superset/static/assets/8755.b325fab1a4b5f24a84fc.entry.js:ro
+      # Zoom fix: Echart wrapper preserves dataZoom across notMerge setOption (see superset-patches/README)
+      - ./superset-patches/14c3cf97fcb6a0f990f2.chunk.js:/app/superset/static/assets/14c3cf97fcb6a0f990f2.chunk.js:ro
+      - ./superset-patches/1c187a0a9fcefc88107c.chunk.js:/app/superset/static/assets/1c187a0a9fcefc88107c.chunk.js:ro
+      - ./superset-patches/1ec85bcbb6d2cf6e10ef.chunk.js:/app/superset/static/assets/1ec85bcbb6d2cf6e10ef.chunk.js:ro
+      - ./superset-patches/1fee1faa5797751fd6c9.chunk.js:/app/superset/static/assets/1fee1faa5797751fd6c9.chunk.js:ro
+      - ./superset-patches/262c25b3f6f7f27f99a2.chunk.js:/app/superset/static/assets/262c25b3f6f7f27f99a2.chunk.js:ro
+      - ./superset-patches/2804d456171bf906397e.chunk.js:/app/superset/static/assets/2804d456171bf906397e.chunk.js:ro
+      - ./superset-patches/40eaaf35ba3c1e848566.chunk.js:/app/superset/static/assets/40eaaf35ba3c1e848566.chunk.js:ro
+      - ./superset-patches/4c1599a194b3d4787f35.chunk.js:/app/superset/static/assets/4c1599a194b3d4787f35.chunk.js:ro
+      - ./superset-patches/8ba96a087056d5ea2806.chunk.js:/app/superset/static/assets/8ba96a087056d5ea2806.chunk.js:ro
+      - ./superset-patches/a348224739c48b2428cd.chunk.js:/app/superset/static/assets/a348224739c48b2428cd.chunk.js:ro
+      - ./superset-patches/ad1ee9250614e7b3704f.chunk.js:/app/superset/static/assets/ad1ee9250614e7b3704f.chunk.js:ro
+      - ./superset-patches/ba62dfe2787f02795985.chunk.js:/app/superset/static/assets/ba62dfe2787f02795985.chunk.js:ro
+      - ./superset-patches/f619b818057afb41eb4a.chunk.js:/app/superset/static/assets/f619b818057afb41eb4a.chunk.js:ro
+      - ./superset-patches/f6f6fba78b433a2dc950.chunk.js:/app/superset/static/assets/f6f6fba78b433a2dc950.chunk.js:ro
+      # Airplane fly-across loading spinner replaces loading.gif (see superset-patches/README)
+      - ./superset-patches/loading_airplane.gif:/app/superset/static/assets/images/loading.gif:ro
+      - ./superset-patches/loading_airplane.gif:/app/superset/static/assets/loading.cff8a5da..gif:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -180,7 +201,12 @@ services:
           --email admin@rts.local \
           --password $${SUPERSET_ADMIN_PASS:-admin} 2>/dev/null || true
         superset init
-        superset run -h 0.0.0.0 -p 8088 --with-threads
+        # 2026-08-10 perf: replaced "superset run --with-threads" (Flask dev server,
+        # single process) with gunicorn. Postgres served 12 concurrent chart queries in
+        # 0.39s while the dev server took 1.86s -- the gap was one GIL-bound process.
+        # Workers kept at 4 because the Superset metadata DB is SQLite.
+        # Rollback: restore the single "superset run -h 0.0.0.0 -p 8088 --with-threads" line.
+        gunicorn --bind 0.0.0.0:8088 --workers 4 --worker-class gthread --threads 20 --timeout 120 --keep-alive 5 --limit-request-line 0 --limit-request-field_size 0 "superset.app:create_app()"
     profiles:
       - superset
 
@@ -191,7 +217,7 @@ services:
   worker:
     image: cpi-api
     container_name: cpi-worker-1
-    restart: unless-stopped
+    restart: always
     command: ["celery", "-A", "app.worker", "worker", "--loglevel=info", "--concurrency=2"]
     environment:
       <<: *api-env
@@ -214,7 +240,7 @@ services:
   beat:
     image: cpi-api
     container_name: cpi-beat-1
-    restart: unless-stopped
+    restart: always
     command: ["celery", "-A", "app.worker", "beat", "--loglevel=info", "--scheduler", "redbeat.RedBeatScheduler"]
     environment:
       <<: *api-env
@@ -233,7 +259,7 @@ services:
   sftp-dev:
     image: atmoz/sftp:latest
     container_name: cpi-sftp-dev-1
-    restart: unless-stopped
+    restart: always
     ports:
       - "2222:22"
     volumes:
@@ -248,7 +274,7 @@ services:
   nginx:
     image: nginx:1.27-alpine
     container_name: cpi-nginx-1
-    restart: unless-stopped
+    restart: always
     ports:
       - "9444:9444"
       - "8444:8444"
