@@ -24,6 +24,7 @@ import { useSession } from '../../context/SessionContext';
 import { useThemeMode } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import interCaribbeanLogo from '../../assets/logos/jy-logo-banner.png';
+import winairLogo from '../../assets/logos/winair-logo.png';
 import precisionAirLogo from '../../assets/logos/precisionair-logo.png';
 import fjordlineLogo from '../../assets/logos/fjordline-logo.png';
 import skyLogoLight from '../../assets/logos/sky-airways-logo.png';
@@ -48,18 +49,23 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
       ? (session.enabled_modules[0] === 'airline_jy' ? 'jy'
         : session.enabled_modules[0] === 'airline_pw' ? 'pw'
         : session.enabled_modules[0] === 'airline_alt' ? 'alt'
+        : session.enabled_modules[0] === 'airline_wm' ? 'wm'
         : session.enabled_modules[0] === 'cfl_fjl' ? 'fjl'
         : 'rts')
       : 'rts';
 
   const isJyTenant = tenantKey === 'jy';
+  const isWmTenant = tenantKey === 'wm';
   const isPwTenant = tenantKey === 'pw';
   const isFjlTenant = tenantKey === 'fjl';
   const isAltTenant = tenantKey === 'alt';
   const tenant = TENANT_CONFIG[tenantKey] ?? TENANT_FALLBACK;
 
-  // Strip TENANT_ prefix and title-case so TENANT_ADMIN → "Admin".
-  const roleLabel = (session.user.roles[0] ?? 'user')
+  // Explicit chip-label overrides win; otherwise strip the TENANT_ prefix
+  // and title-case (TENANT_ADMIN → "Admin", TENANT_USER → "Subtenant").
+  const ROLE_CHIP_LABEL_OVERRIDES: Record<string, string> = { TENANT_USER: 'Subtenant' };
+  const rawRole = session.user.roles[0] ?? 'user';
+  const roleLabel = ROLE_CHIP_LABEL_OVERRIDES[rawRole] ?? rawRole
     .toLowerCase()
     .replace(/^tenant_/, '')
     .replace(/_/g, ' ')
@@ -73,6 +79,7 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
 
   const handleMyAccount = () => {
     setAnchorEl(null);
+    navigate('/security');
   };
 
   return (
@@ -136,6 +143,13 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
               objectFit: 'contain',
               mr: 1.5,
             }}
+          />
+        ) : isWmTenant ? (
+          <Box
+            component="img"
+            src={winairLogo}
+            alt="WinAir"
+            sx={{ height: 48, mr: 1.5 }}
           />
         ) : (
           /* RTS Logo — tries PNG first, falls back to SVG. Dark-mode
@@ -328,7 +342,7 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
               }}
             >
               <PersonOutlined sx={{ fontSize: 16 }} />
-              <Typography sx={{ fontSize: 13 }}>My account</Typography>
+              <Typography sx={{ fontSize: 13 }}>Security</Typography>
             </Box>
 
             <Box

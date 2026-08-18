@@ -27,15 +27,18 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session, joinedload
 
+from app.core.database import get_db
 from app.core.deps import (
     RequirePlatformAdmin,
     get_current_user,
     get_tenant_db,
 )
+from app.ingestion.exceptions import IngestionError
+from app.ingestion.service import IngestionService
 from app.models.sftp import (
     IngestedFile,
     IngestionRun,
@@ -48,6 +51,7 @@ from app.schemas.sftp import (
     IngestionRunRead,
 )
 from app.services import audit
+from app.tasks.sftp_pull import reingest_ingested_file
 
 
 logger = logging.getLogger("uvicorn.error")
@@ -312,3 +316,121 @@ def cancel_run(
     )
     db.commit()
     return response
+
+
+# -- per-file data operations (delete / re-ingest) --------------------
+#
+# These act on a single ingested file (one tenant+domain+day). Delete
+# uses the OWNER db session (``get_db``) — NOT ``get_tenant_db`` — because
+# the fact-row DELETE must cross RLS to remove another tenant's day
+# (rts-admin deleting jy/pw/fjl data). Re-ingest hands off to a celery
+# task that re-pulls the file from SFTP and re-commits with replace
+# forced.
+
+
+def _http_error_from_ingestion(exc: IngestionError) -> HTTPException:
+    """Map an IngestionError to a structured HTTPException, mirroring the
+    v1 ingestion router's error shape."""
+    return HTTPException(
+        status_code=exc.http_status,
+        detail={
+            "error_code": exc.error_code,
+            "message": str(exc),
+            "details": None,
+        },
+    )
+
+
+@router.delete("/files/{ingested_file_id}/data")
+def delete_file_data(
+    ingested_file_id: UUID,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete the fact rows a single ingested file loaded, and free it
+    for re-pull.
+
+    Resolves the file's committed ``ingestion_job_id`` and hands off to
+    ``IngestionService.delete_committed_file``. Runs on the owner DB
+    session so the cross-tenant DELETE is not filtered by RLS. Only files
+    that produced a COMMITTED job can be deleted (409 otherwise).
+    """
+    ing_file = db.get(IngestedFile, ingested_file_id)
+    if ing_file is None:
+        raise HTTPException(status_code=404, detail="ingested file not found")
+    # Capture the job id while ing_file is still live. delete_committed_file
+    # commits and DELETEs this ingested_file row, which expires the ORM
+    # object — any later ing_file.* read would fire a reload of a now-gone
+    # row and raise. Use this local for the rest of the handler.
+    job_id = ing_file.ingestion_job_id
+    if job_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "this file did not commit any data (no ingestion job); "
+                "nothing to delete"
+            ),
+        )
+
+    actor_ip = request.client.host if request.client else None
+    try:
+        result = IngestionService(db).delete_committed_file(
+            job_id,
+            user_payload=current_user,
+            actor_ip=actor_ip,
+        )
+    except IngestionError as exc:
+        raise _http_error_from_ingestion(exc)
+
+    audit.record(
+        db,
+        tenant_id=UUID(current_user["tenant_id"]),
+        actor=current_user["sub"],
+        action="DELETE",
+        target_type="ingestion_data",
+        target_id=str(job_id),
+    )
+    db.commit()
+    return result
+
+
+@router.post(
+    "/files/{ingested_file_id}/reingest",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def reingest_file(
+    ingested_file_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Queue a single-file re-pull from SFTP, replacing that day's data.
+
+    The worker re-downloads the file and re-commits with replace forced,
+    so an updated file (new content) overwrites the committed day. The
+    run materialises asynchronously — poll the runs list to observe it.
+    """
+    ing_file = db.get(IngestedFile, ingested_file_id)
+    if ing_file is None:
+        raise HTTPException(status_code=404, detail="ingested file not found")
+    if ing_file.schedule_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "source schedule was deleted; cannot re-pull this file "
+                "from SFTP"
+            ),
+        )
+
+    result = reingest_ingested_file.delay(str(ingested_file_id))
+
+    audit.record(
+        db,
+        tenant_id=UUID(current_user["tenant_id"]),
+        actor=current_user["sub"],
+        action="REINGEST",
+        target_type="ingested_file",
+        target_id=str(ingested_file_id),
+    )
+    db.commit()
+    return {"task_id": result.id, "run_id": None}

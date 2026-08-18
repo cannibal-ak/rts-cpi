@@ -31,6 +31,7 @@ const CURRENCY_KEYS = new Set<KpiKey>(['jy_avg_fare', 'pw_avg_fare', 'competitor
 // "kr" convention is symbol-then-space-then-number (kr 1,054.41) — so we
 // bake the trailing space into the map value.
 const CURRENCY_SYMBOL: Record<string, string> = {
+  USD: '$',
   EUR: '€',
   NOK: 'kr ',
   DKK: 'kr ',

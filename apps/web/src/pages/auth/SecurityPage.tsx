@@ -23,6 +23,7 @@ export default function SecurityPage() {
     const [error, setError] = useState('');
 
     const [disableOpen, setDisableOpen] = useState(false);
+    const [disableIntent, setDisableIntent] = useState<'disable' | 'replace'>('disable');
     const [password, setPassword] = useState('');
     const [code, setCode] = useState('');
     const [disabling, setDisabling] = useState(false);
@@ -49,6 +50,10 @@ export default function SecurityPage() {
             await mfaDisable(accessToken, password, code.trim());
             setDisableOpen(false);
             setPassword(''); setCode('');
+            if (disableIntent === 'replace') {
+                navigate('/setup-mfa');
+                return;
+            }
             await load();
         } catch (e: any) {
             setDisableError(e instanceof MfaApiError ? e.message : 'Could not disable.');
@@ -91,9 +96,17 @@ export default function SecurityPage() {
                         <Divider sx={{ my: 2 }} />
 
                         {status.enabled ? (
-                            <Button variant="outlined" color="error" onClick={() => setDisableOpen(true)}>
-                                Disable two-step verification
-                            </Button>
+                            <Stack spacing={1} alignItems="flex-start">
+                                <Button variant="contained" onClick={() => { setDisableIntent('replace'); setDisableError(''); setDisableOpen(true); }}>
+                                    Replace authenticator
+                                </Button>
+                                <Typography variant="caption" color="text.secondary">
+                                    Confirm with your current code, then set up a new authenticator and get fresh recovery codes.
+                                </Typography>
+                                <Button variant="outlined" color="error" onClick={() => { setDisableIntent('disable'); setDisableError(''); setDisableOpen(true); }}>
+                                    Disable two-step verification
+                                </Button>
+                            </Stack>
                         ) : (
                             <Button variant="contained" onClick={() => navigate('/setup-mfa')}>
                                 Set up two-step verification
@@ -104,10 +117,12 @@ export default function SecurityPage() {
             </Paper>
 
             <Dialog open={disableOpen} onClose={() => !disabling && setDisableOpen(false)} fullWidth maxWidth="xs">
-                <DialogTitle>Disable two-step verification</DialogTitle>
+                <DialogTitle>{disableIntent === 'replace' ? 'Replace authenticator' : 'Disable two-step verification'}</DialogTitle>
                 <DialogContent>
                     <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                        Confirm your password and a current authenticator code to turn off two-step verification.
+                        {disableIntent === 'replace'
+                            ? 'Confirm your password and a current authenticator code, then set up a new authenticator on the next screen.'
+                            : 'Confirm your password and a current authenticator code to turn off two-step verification.'}
                     </Typography>
                     {disableError && <Alert severity="error" sx={{ mb: 2 }}>{disableError}</Alert>}
                     <TextField label="Password" type="password" fullWidth value={password}
@@ -118,8 +133,8 @@ export default function SecurityPage() {
                 </DialogContent>
                 <DialogActions>
                     <Button onClick={() => setDisableOpen(false)} disabled={disabling}>Cancel</Button>
-                    <Button onClick={handleDisable} color="error" variant="contained" disabled={disabling || !password || code.length !== 6}>
-                        {disabling ? 'Disabling...' : 'Disable'}
+                    <Button onClick={handleDisable} color={disableIntent === 'replace' ? 'primary' : 'error'} variant="contained" disabled={disabling || !password || code.length !== 6}>
+                        {disabling ? 'Working...' : (disableIntent === 'replace' ? 'Continue' : 'Disable')}
                     </Button>
                 </DialogActions>
             </Dialog>

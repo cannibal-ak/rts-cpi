@@ -202,6 +202,7 @@ def _create_run(
     schedule_id: str,
     *,
     celery_task_id: Optional[str] = None,
+    triggered_by: str = "SCHEDULED",
 ) -> str:
     """Insert a new RUNNING ingestion_run row.
 
@@ -211,22 +212,39 @@ def _create_run(
     rows against ``inspect.active/reserved/scheduled`` and distinguish
     a truly-orphaned row from one that's still being processed (or
     has been redelivered after a worker crash).
+
+    ``triggered_by`` labels the run's origin ('SCHEDULED' for cron /
+    run-now pulls, 'REINGEST' for a single-file re-pull).
     """
     run_id = str(uuid.uuid4())
     db.execute(
         text(
             "INSERT INTO ingestion_run "
             "(id, schedule_id, triggered_by, status, celery_task_id) "
-            "VALUES (:id, :sched, 'SCHEDULED', 'RUNNING', :task_id)"
+            "VALUES (:id, :sched, :trig, 'RUNNING', :task_id)"
         ),
         {
             "id": run_id,
             "sched": schedule_id,
+            "trig": triggered_by,
             "task_id": celery_task_id,
         },
     )
     db.commit()
     return run_id
+
+
+def _load_ingested_file(db: Session, ingested_file_id: str) -> dict:
+    row = db.execute(
+        text(
+            "SELECT id, schedule_id, remote_filename "
+            "FROM ingested_file WHERE id = :id"
+        ),
+        {"id": ingested_file_id},
+    ).mappings().first()
+    if not row:
+        raise RuntimeError(f"ingested_file {ingested_file_id} not found")
+    return dict(row)
 
 
 def _is_cancelling(db: Session, run_id: str) -> bool:
@@ -695,6 +713,226 @@ def sftp_pull_for_schedule(
             schedule_id,
             celery_task_id=self.request.id,
             scope=scope,
+        )
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+# ── single-file re-ingest ───────────────────────────────────────────
+
+
+def run_reingest(
+    db: Session,
+    ingested_file_id: str,
+    *,
+    staging_root: Optional[Path] = None,
+    celery_task_id: Optional[str] = None,
+) -> dict:
+    """Re-pull ONE previously-seen file from SFTP and replace its day.
+
+    Resolves the file's schedule + remote_filename from the
+    ``ingested_file`` row, re-downloads that single file, and runs it
+    through the upload → validate → commit pipeline with
+    ``replace_existing`` FORCED to True so an updated file overwrites the
+    committed day regardless of the schedule's own flag. Records a new
+    ``ingestion_run`` (triggered_by='REINGEST') for auditability,
+    mirroring ``run_pull``'s bookkeeping.
+
+    If the file's content is unchanged AND its dedup marker still exists
+    (i.e. the day was not deleted first), ``_process_one_file`` returns
+    DUPLICATE and nothing is re-loaded — an unchanged file has nothing to
+    update. Delete-then-reingest clears the marker and forces a fresh load.
+
+    Returns ``{run_id, files_seen, files_pulled, jobs_committed, status}``.
+    """
+    ing_file = _load_ingested_file(db, ingested_file_id)
+    if ing_file["schedule_id"] is None:
+        raise RuntimeError(
+            f"ingested_file {ingested_file_id} has no schedule "
+            "(source schedule deleted); cannot re-pull"
+        )
+    schedule_id = str(ing_file["schedule_id"])
+    target_filename = ing_file["remote_filename"]
+
+    run_id: Optional[str] = None
+    files_seen = files_pulled = jobs_created = jobs_committed = 0
+    jobs_skipped = files_errored = jobs_conflict = jobs_rejected = 0
+    detail_log: list[dict] = []
+    try:
+        schedule = _load_schedule(db, schedule_id)
+        connection = _load_connection(db, schedule["sftp_connection_id"])
+        system_payload = _system_user_payload(db)
+
+        run_id = _create_run(
+            db, schedule_id,
+            celery_task_id=celery_task_id,
+            triggered_by="REINGEST",
+        )
+        # Force replace so an updated file overwrites the committed day.
+        schedule = {**schedule, "replace_existing": True}
+
+        client = _build_sftp_client(connection)
+        entries = client.list_matching(
+            connection["remote_base_path"], schedule["filename_regex"]
+        )
+        match = next(
+            (e for e in entries if e["filename"] == target_filename), None
+        )
+        detail_log = [
+            {
+                "event": "REINGEST",
+                "ingested_file_id": ingested_file_id,
+                "target_filename": target_filename,
+                "found_on_remote": match is not None,
+                "replace_existing": True,
+            }
+        ]
+
+        if match is None:
+            # The file is no longer on the SFTP source (removed / renamed).
+            detail_log.append({
+                "filename": target_filename,
+                "outcome": "ERROR",
+                "error": "file not found on SFTP source",
+            })
+            _finalize_run(
+                db, run_id, "FAILED",
+                files_seen=0, files_pulled=0,
+                jobs_created=0, jobs_committed=0,
+                error_summary=f"{target_filename} not found on SFTP source",
+                detail_log=detail_log,
+            )
+            return {
+                "run_id": run_id, "files_seen": 0, "files_pulled": 0,
+                "jobs_committed": 0, "status": "FAILED",
+            }
+
+        files_seen = 1
+        svc = IngestionService(db, staging_root=staging_root)
+        try:
+            result = _process_one_file(
+                db, svc, client, connection, schedule,
+                run_id, match, system_payload,
+            )
+        except Exception as exc:
+            db.rollback()
+            err = str(exc)[:2000]
+            logger.exception(
+                "reingest: file %s failed (run_id=%s)",
+                target_filename, run_id,
+            )
+            detail_log.append(
+                {"filename": target_filename, "outcome": "ERROR", "error": err}
+            )
+            _finalize_run(
+                db, run_id, "FAILED",
+                files_seen=1, files_pulled=1,
+                jobs_created=0, jobs_committed=0,
+                error_summary=err, detail_log=detail_log,
+            )
+            return {
+                "run_id": run_id, "files_seen": 1, "files_pulled": 1,
+                "jobs_committed": 0, "status": "FAILED",
+            }
+
+        detail_log.append(result)
+        outcome = result["outcome"]
+        if outcome == "DUPLICATE":
+            files_pulled = 0
+        elif outcome == "COMMITTED":
+            files_pulled = jobs_created = jobs_committed = 1
+        elif outcome == "SKIPPED":
+            files_pulled = jobs_skipped = 1
+        elif outcome == "ERROR":
+            files_pulled = files_errored = 1
+        elif outcome == "CONFLICT":
+            files_pulled = jobs_created = jobs_conflict = 1
+        elif outcome == "REJECTED":
+            files_pulled = jobs_created = jobs_rejected = 1
+
+        problems = files_errored + jobs_skipped + jobs_rejected
+        final_status = "SUCCESS" if problems == 0 else "PARTIAL"
+
+        detail_log.append({
+            "event": "RUN_SUMMARY",
+            "files_seen": files_seen,
+            "files_pulled": files_pulled,
+            "jobs_created": jobs_created,
+            "jobs_committed": jobs_committed,
+            "jobs_conflict": jobs_conflict,
+            "jobs_rejected": jobs_rejected,
+            "jobs_skipped": jobs_skipped,
+            "files_errored": files_errored,
+            "status": final_status,
+        })
+        _finalize_run(
+            db, run_id, final_status,
+            files_seen=files_seen,
+            files_pulled=files_pulled,
+            jobs_created=jobs_created,
+            jobs_committed=jobs_committed,
+            detail_log=detail_log,
+        )
+        db.execute(
+            text(
+                "UPDATE ingestion_schedule SET last_run_at = now() "
+                "WHERE id = :id"
+            ),
+            {"id": schedule_id},
+        )
+        db.commit()
+        return {
+            "run_id": run_id,
+            "files_seen": files_seen,
+            "files_pulled": files_pulled,
+            "jobs_committed": jobs_committed,
+            "status": final_status,
+        }
+    except Exception as exc:
+        if run_id is not None:
+            try:
+                db.rollback()
+                detail_log.append({
+                    "event": "RUN_ABORTED",
+                    "error": str(exc)[:1000],
+                })
+                _finalize_run(
+                    db, run_id, "FAILED",
+                    files_seen=files_seen,
+                    files_pulled=files_pulled,
+                    jobs_created=jobs_created,
+                    jobs_committed=jobs_committed,
+                    error_summary=str(exc)[:1000],
+                    detail_log=detail_log,
+                )
+            except Exception:
+                logger.exception(
+                    "failed to finalise reingest run %s after error", run_id
+                )
+        raise
+
+
+@celery_app.task(
+    bind=True,
+    name="app.tasks.sftp_pull.reingest_ingested_file",
+    autoretry_for=(SFTPClientError, OperationalError),
+    retry_backoff=True,
+    retry_backoff_max=600,
+    retry_jitter=True,
+    max_retries=3,
+    acks_late=True,
+)
+def reingest_ingested_file(self, ingested_file_id: str) -> dict:
+    """Celery wrapper around ``run_reingest`` (single-file re-pull)."""
+    db = SessionLocal()
+    try:
+        return run_reingest(
+            db,
+            ingested_file_id,
+            celery_task_id=self.request.id,
         )
     finally:
         try:

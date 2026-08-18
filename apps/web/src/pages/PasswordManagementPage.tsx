@@ -8,12 +8,12 @@ import {
   Chip, IconButton, Button, Stack, CircularProgress, Tooltip,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
   TextField, InputAdornment, Checkbox, FormControlLabel,
-  Select, MenuItem, FormControl, InputLabel,
+  Select, MenuItem, FormControl, InputLabel, FormHelperText,
   Snackbar, Alert,
 } from '@mui/material';
 import {
   ContentCopy, Visibility, VisibilityOff, VpnKey, LockReset, Refresh, CheckCircle,
-  PersonAdd, Email as EmailIcon,
+  PersonAdd, Email as EmailIcon, Block, HowToReg, DeleteOutline, KeyOff,
 } from '@mui/icons-material';
 import PageHeader from '../components/common/PageHeader';
 import { api } from '../api';
@@ -45,7 +45,27 @@ const ROLE_LABEL_OVERRIDES: Record<string, string> = {
 };
 
 function displayRole(user: AdminUserListItem): string {
-  return ROLE_LABEL_OVERRIDES[user.email.toLowerCase()] ?? (user.role || '—');
+  const override = ROLE_LABEL_OVERRIDES[user.email.toLowerCase()];
+  if (override) return override;
+  if (user.role === 'TENANT_USER') return 'Subtenant';
+  return user.role || '—';
+}
+
+// Subtenant chips use the info color to read as a distinct, lower-privilege
+// role; email-overridden chips and TENANT_ADMIN keep the neutral chip.
+function roleChipColor(user: AdminUserListItem): 'info' | 'default' {
+  if (ROLE_LABEL_OVERRIDES[user.email.toLowerCase()]) return 'default';
+  return user.role === 'TENANT_USER' ? 'info' : 'default';
+}
+
+// Mirrors the backend privilege guard: an account that is itself an RTS
+// platform admin (RTS tenant + TENANT_ADMIN) can never be deactivated or
+// deleted, so the platform can't be locked out of itself.
+function isPlatformAdmin(user: AdminUserListItem): boolean {
+  return (
+    user.tenant_slug.toLowerCase() === PLATFORM_TENANT_SLUG &&
+    user.role === 'TENANT_ADMIN'
+  );
 }
 
 const REFRESH_INTERVAL_MS = 30_000;
@@ -186,7 +206,7 @@ export default function PasswordManagementPage() {
   const [sendingResetEmail, setSendingResetEmail] = useState<string | null>(null);
 
   const [inviteDialog, setInviteDialog] = useState<InviteDialogState>({
-    open: false, email: '', displayName: '', tenantId: '', role: 'TENANT_ADMIN',
+    open: false, email: '', displayName: '', tenantId: '', role: 'TENANT_USER',
     submitting: false, error: '',
   });
   const [resetDialog, setResetDialog] = useState<ForceResetDialogState>({
@@ -196,6 +216,25 @@ export default function PasswordManagementPage() {
   const [selfConfirm, setSelfConfirm] = useState<SelfConfirmState>({
     open: false, action: null, user: null,
   });
+  // Deactivate is a destructive-ish toggle, so it gets a confirm dialog;
+  // reactivate does not. togglingStatusId disables a row's toggle in flight.
+  const [deactivateConfirm, setDeactivateConfirm] =
+    useState<{ open: boolean; user: AdminUserListItem | null }>({ open: false, user: null });
+  const [deleteConfirm, setDeleteConfirm] =
+    useState<{ open: boolean; user: AdminUserListItem | null }>({ open: false, user: null });
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Reset MFA: destructive confirm, mirrors the deactivate/delete pattern.
+  const [mfaResetConfirm, setMfaResetConfirm] =
+    useState<{ open: boolean; user: AdminUserListItem | null }>({ open: false, user: null });
+  const [resettingMfaId, setResettingMfaId] = useState<string | null>(null);
+  // Blocked dialog driven by a 409 reason from delete OR deactivate.
+  const [blockedDialog, setBlockedDialog] = useState<{
+    open: boolean;
+    user: AdminUserListItem | null;
+    reason: 'has_history' | 'last_active_admin' | null;
+    message: string;
+  }>({ open: false, user: null, reason: null, message: '' });
+  const [togglingStatusId, setTogglingStatusId] = useState<string | null>(null);
   const [snackbar, setSnackbar] = useState<SnackbarState>({ open: false, message: '', severity: 'info' });
 
   const showToast = (message: string, severity: SnackbarState['severity'] = 'info') => {
@@ -273,7 +312,7 @@ export default function PasswordManagementPage() {
 
   const openInviteDialog = () => {
     setInviteDialog({
-      open: true, email: '', displayName: '', tenantId: '', role: 'TENANT_ADMIN',
+      open: true, email: '', displayName: '', tenantId: '', role: 'TENANT_USER',
       submitting: false, error: '',
     });
   };
@@ -361,6 +400,104 @@ export default function PasswordManagementPage() {
     }
   };
 
+  // ── Deactivate / reactivate flow ────────────
+
+  const requestDeactivate = (user: AdminUserListItem) => {
+    setDeactivateConfirm({ open: true, user });
+  };
+  const cancelDeactivateConfirm = () => {
+    setDeactivateConfirm({ open: false, user: null });
+  };
+  const confirmDeactivate = async () => {
+    const user = deactivateConfirm.user;
+    setDeactivateConfirm({ open: false, user: null });
+    if (!user) return;
+    setTogglingStatusId(user.id);
+    try {
+      await api.admin.passwordManagement.deactivateUser(user.id);
+      showToast(`${user.email} has been deactivated`, 'success');
+      await fetchUsers(); // refresh row status + header tally from the server
+    } catch (err: unknown) {
+      const e = err as Error & ApiErrorShape;
+      if (e.status === 409 && e.errorCode === 'last_active_admin') {
+        setBlockedDialog({ open: true, user, reason: 'last_active_admin', message: e.message || '' });
+      } else {
+        showToast(e.message || 'Failed to deactivate user.', 'error');
+      }
+    } finally {
+      setTogglingStatusId(null);
+    }
+  };
+
+  // ── Delete flow ─────────────────────────────
+
+  const requestDelete = (user: AdminUserListItem) => setDeleteConfirm({ open: true, user });
+  const cancelDeleteConfirm = () => setDeleteConfirm({ open: false, user: null });
+  const closeBlockedDialog = () =>
+    setBlockedDialog({ open: false, user: null, reason: null, message: '' });
+  const confirmDelete = async () => {
+    const user = deleteConfirm.user;
+    setDeleteConfirm({ open: false, user: null });
+    if (!user) return;
+    setDeletingId(user.id);
+    try {
+      await api.admin.passwordManagement.deleteUser(user.id);
+      showToast(`${user.email} has been deleted`, 'success');
+      await fetchUsers(); // refresh rows + header tally from the server
+    } catch (err: unknown) {
+      const e = err as Error & ApiErrorShape;
+      if (e.status === 409 && (e.errorCode === 'has_history' || e.errorCode === 'last_active_admin')) {
+        setBlockedDialog({
+          open: true,
+          user,
+          reason: e.errorCode as 'has_history' | 'last_active_admin',
+          message: e.message || '',
+        });
+      } else {
+        showToast(e.message || 'Failed to delete user.', 'error');
+      }
+    } finally {
+      setDeletingId(null);
+    }
+  };
+  // ── Reset MFA flow ──────────────────
+  const requestResetMfa = (user: AdminUserListItem) => setMfaResetConfirm({ open: true, user });
+  const cancelResetMfaConfirm = () => setMfaResetConfirm({ open: false, user: null });
+  const confirmResetMfa = async () => {
+    const user = mfaResetConfirm.user;
+    setMfaResetConfirm({ open: false, user: null });
+    if (!user) return;
+    setResettingMfaId(user.id);
+    try {
+      await api.admin.passwordManagement.resetMfa(user.id);
+      showToast(`MFA reset for ${user.email}. They'll set up a new authenticator at next sign-in.`, 'success');
+      await fetchUsers(); // refresh rows + header tally from the server
+    } catch (err: unknown) {
+      const e = err as Error & ApiErrorShape;
+      showToast(e.message || 'Failed to reset MFA.', 'error');
+    } finally {
+      setResettingMfaId(null);
+    }
+  };
+
+  const handleReactivate = async (user: AdminUserListItem) => {
+    setTogglingStatusId(user.id);
+    try {
+      await api.admin.passwordManagement.reactivateUser(user.id);
+      showToast(`${user.email} has been reactivated`, 'success');
+      await fetchUsers(); // refresh row status + header tally from the server
+    } catch (err: unknown) {
+      const e = err as Error & ApiErrorShape;
+      showToast(e.message || 'Failed to reactivate user.', 'error');
+    } finally {
+      setTogglingStatusId(null);
+    }
+  };
+
+  // Active/inactive tally for the card header, derived from the live list.
+  const activeCount = users.filter(u => u.is_active).length;
+  const inactiveCount = users.length - activeCount;
+
   // ── Render ──────────────────────────────────────
 
   return (
@@ -373,7 +510,14 @@ export default function PasswordManagementPage() {
       {/* ── Section 1: User Accounts ── */}
       <Paper sx={{ p: 2.5, mb: 3, border: 1, borderColor: 'divider' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1.5 }}>
-          <Typography variant="h6">User Accounts</Typography>
+          <Stack direction="row" spacing={1.5} alignItems="baseline">
+            <Typography variant="h6">User Accounts</Typography>
+            {!usersLoading && users.length > 0 && (
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                {activeCount} active · {inactiveCount} inactive
+              </Typography>
+            )}
+          </Stack>
           <Stack direction="row" spacing={1} alignItems="center">
             <Button size="small" variant="contained" startIcon={<PersonAdd fontSize="small" />} onClick={openInviteDialog}>
               Invite user
@@ -417,7 +561,7 @@ export default function PasswordManagementPage() {
                     <TableCell sx={{ fontFamily: 'inherit' }}>{user.email}</TableCell>
                     <TableCell>{formatTenantCell(user)}</TableCell>
                     <TableCell>
-                      <Chip size="small" label={displayRole(user)} variant="outlined" />
+                      <Chip size="small" label={displayRole(user)} variant="outlined" color={roleChipColor(user)} />
                     </TableCell>
                     <TableCell>{userStatusChip(user)}</TableCell>
                     <TableCell sx={{ color: 'text.secondary', fontSize: 13 }}>
@@ -443,6 +587,88 @@ export default function PasswordManagementPage() {
                         >
                           Reset Password
                         </Button>
+                        {(() => {
+                          const isOwn = user.email.toLowerCase() === adminEmail;
+                          const isAdmin = isPlatformAdmin(user);
+                          const blocked = isOwn || isAdmin;
+                          const reason = isOwn
+                            ? 'You cannot reset MFA on your own account.'
+                            : isAdmin
+                              ? 'Protected RTS platform admin accounts cannot be modified.'
+                              : 'Clear the authenticator so this user re-enrolls at next sign-in';
+                          const btn = (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="error"
+                              startIcon={<KeyOff fontSize="small" />}
+                              onClick={() => requestResetMfa(user)}
+                              disabled={blocked || resettingMfaId === user.id}
+                            >
+                              {resettingMfaId === user.id ? 'Working…' : 'Reset MFA'}
+                            </Button>
+                          );
+                          return <Tooltip title={reason}><span>{btn}</span></Tooltip>;
+                        })()}
+                        {user.is_active ? (() => {
+                          const isOwn = user.email.toLowerCase() === adminEmail;
+                          const isAdmin = isPlatformAdmin(user);
+                          const blocked = isOwn || isAdmin;
+                          const reason = isOwn
+                            ? 'You cannot deactivate your own account.'
+                            : 'Protected RTS platform admin accounts cannot be deactivated.';
+                          const btn = (
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color="error"
+                              startIcon={<Block fontSize="small" />}
+                              onClick={() => requestDeactivate(user)}
+                              disabled={blocked || togglingStatusId === user.id}
+                            >
+                              {togglingStatusId === user.id ? 'Working…' : 'Deactivate'}
+                            </Button>
+                          );
+                          return blocked
+                            ? <Tooltip title={reason}><span>{btn}</span></Tooltip>
+                            : btn;
+                        })() : (
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="success"
+                            startIcon={<HowToReg fontSize="small" />}
+                            onClick={() => handleReactivate(user)}
+                            disabled={togglingStatusId === user.id}
+                          >
+                            {togglingStatusId === user.id ? 'Working…' : 'Reactivate'}
+                          </Button>
+                        )}
+                        {(() => {
+                          const isOwn = user.email.toLowerCase() === adminEmail;
+                          const isAdmin = isPlatformAdmin(user);
+                          const blocked = isOwn || isAdmin;
+                          const reason = isOwn
+                            ? 'You cannot delete your own account.'
+                            : isAdmin
+                              ? 'Protected RTS platform admin accounts cannot be deleted.'
+                              : 'Permanently delete this user';
+                          return (
+                            <Tooltip title={reason}>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  color="error"
+                                  aria-label="Delete user"
+                                  onClick={() => requestDelete(user)}
+                                  disabled={blocked || deletingId === user.id}
+                                >
+                                  <DeleteOutline fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          );
+                        })()}
                       </Stack>
                     </TableCell>
                   </TableRow>
@@ -489,8 +715,12 @@ export default function PasswordManagementPage() {
             <InputLabel id="invite-role-label">Role</InputLabel>
             <Select labelId="invite-role-label" label="Role" value={inviteDialog.role}
               onChange={(e) => setInviteDialog(s => ({ ...s, role: e.target.value as string }))}>
+              <MenuItem value="TENANT_USER">Subtenant</MenuItem>
               <MenuItem value="TENANT_ADMIN">TENANT_ADMIN</MenuItem>
             </Select>
+            <FormHelperText>
+              Subtenant: read-only access to this tenant's dashboards. TENANT_ADMIN: full tenant administration (invite/lifecycle).
+            </FormHelperText>
           </FormControl>
         </DialogContent>
         <DialogActions>
@@ -648,6 +878,90 @@ export default function PasswordManagementPage() {
           >
             {selfConfirm.action === 'reset' ? 'Reset My Password' : 'Generate Code'}
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Deactivate confirmation dialog ── */}
+      <Dialog open={deactivateConfirm.open} onClose={cancelDeactivateConfirm} maxWidth="xs" fullWidth>
+        <DialogTitle>Deactivate user?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This immediately blocks{' '}
+            <strong>{deactivateConfirm.user?.email}</strong>{' '}
+            from logging in; they can be reactivated later. Existing password-reset
+            actions remain available for this account.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cancelDeactivateConfirm}>Cancel</Button>
+          <Button onClick={confirmDeactivate} variant="contained" color="error" startIcon={<Block />}>
+            Deactivate
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={mfaResetConfirm.open} onClose={cancelResetMfaConfirm} maxWidth="xs" fullWidth>
+        <DialogTitle>Reset MFA for {mfaResetConfirm.user?.email}?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This deletes their current authenticator and all recovery codes. They'll be required to set up a new authenticator the next time they sign in. Their password is not changed.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cancelResetMfaConfirm}>Cancel</Button>
+          <Button onClick={confirmResetMfa} variant="contained" color="error" startIcon={<KeyOff />}>
+            Reset MFA
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Delete confirmation dialog (irreversible) ── */}
+      <Dialog open={deleteConfirm.open} onClose={cancelDeleteConfirm} maxWidth="xs" fullWidth>
+        <DialogTitle>Permanently delete user?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Permanently delete <strong>{deleteConfirm.user?.email}</strong>? This
+            removes their login, MFA and reset data and{' '}
+            <strong>cannot be undone</strong>.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={cancelDeleteConfirm}>Cancel</Button>
+          <Button onClick={confirmDelete} variant="contained" color="error" startIcon={<DeleteOutline />}>
+            Delete permanently
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* ── Blocked dialog: 409 has_history / last_active_admin ── */}
+      <Dialog open={blockedDialog.open} onClose={closeBlockedDialog} maxWidth="xs" fullWidth>
+        <DialogTitle>
+          {blockedDialog.reason === 'has_history' ? 'This user has history' : 'Last active admin'}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {blockedDialog.message ||
+              (blockedDialog.reason === 'has_history'
+                ? 'This user has activity history and cannot be deleted. Deactivate the account instead.'
+                : 'This is the only active admin for the tenant; add or reactivate another admin first.')}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeBlockedDialog}>Close</Button>
+          {blockedDialog.reason === 'has_history' && (
+            <Button
+              variant="contained"
+              color="error"
+              startIcon={<Block />}
+              onClick={() => {
+                const u = blockedDialog.user;
+                closeBlockedDialog();
+                if (u) requestDeactivate(u);
+              }}
+            >
+              Deactivate instead
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 

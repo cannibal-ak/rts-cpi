@@ -277,6 +277,7 @@ class IngestionService:
         total = 0
         valid = 0
         rejected = 0
+        date_mismatch = 0
         rejection_reasons: list[dict[str, str]] = []
 
         date_field = self._date_field_for(job.domain)
@@ -312,7 +313,26 @@ class IngestionService:
                         }
                     )
                 continue
+            # Non-blocking observability: the recorded capture date will be
+            # taken from the filename (job.file_date) at commit; note when the
+            # in-file capture date disagrees so a mis-generating upstream feed
+            # can be flagged. VELOCITY's DepDate legitimately differs — skip it.
+            if job.domain != "VELOCITY" and parsed_dt != job.file_date:
+                date_mismatch += 1
             valid += 1
+
+        if date_mismatch:
+            logging.getLogger("uvicorn.error").warning(
+                "ingestion: %s (%s) — %d of %d rows carry an in-file %s "
+                "different from the filename date %s; the filename date is "
+                "recorded",
+                job.filename,
+                job.domain,
+                date_mismatch,
+                total,
+                date_field,
+                job.file_date.isoformat(),
+            )
 
         summary = {
             "total": total,
@@ -568,31 +588,11 @@ class IngestionService:
     ) -> None:
         # Delete prior fact rows so the new commit can re-load cleanly.
         # ``DELETE`` keeps the audit trail (the prior IngestionJob row
-        # itself stays, just flipped to status=REPLACED).
-        if prior.domain == "AIRLINE":
-            self.db.execute(
-                text(
-                    "DELETE FROM airline_cpi_snapshot "
-                    "WHERE tenant_code = :tc AND report_date = :rd"
-                ),
-                {"tc": prior.tenant_code, "rd": prior.file_date},
-            )
-        elif prior.domain == "VELOCITY":
-            self.db.execute(
-                text(
-                    "DELETE FROM velocity_snapshot "
-                    "WHERE tenant_code = :tc AND report_date = :rd"
-                ),
-                {"tc": prior.tenant_code, "rd": prior.file_date},
-            )
-        elif prior.domain == "CFL":
-            self.db.execute(
-                text(
-                    "DELETE FROM cfl_cpi_snapshot "
-                    "WHERE tenant_code = :tc AND report_date = :rd"
-                ),
-                {"tc": prior.tenant_code, "rd": prior.file_date},
-            )
+        # itself stays, just flipped to status=REPLACED). No source_file
+        # scope here: replace-on-commit replaces the whole day.
+        self._delete_facts_for_day(
+            prior.domain, prior.tenant_code, prior.file_date,
+        )
 
         prior.status = "REPLACED"
         prior.replaced_by_job_id = new_job.id
@@ -607,6 +607,163 @@ class IngestionService:
                 "new_filename": new_job.filename,
             },
         )
+
+    # Map domain → the fact table its rows land in. Fixed allow-map so
+    # the table name can be interpolated into DELETE SQL safely (never
+    # from user input).
+    _FACT_TABLE_BY_DOMAIN = {
+        "AIRLINE": "airline_cpi_snapshot",
+        "VELOCITY": "velocity_snapshot",
+        "CFL": "cfl_cpi_snapshot",
+    }
+
+    def _delete_facts_for_day(
+        self,
+        domain: str,
+        tenant_code: str,
+        report_date: date,
+        source_file: Optional[str] = None,
+    ) -> int:
+        """DELETE fact rows for one ingested day. Returns rows deleted.
+
+        Scopes to ``(tenant_code, report_date)`` — the same key the
+        replace-on-commit path (``_archive_prior_job``) uses. When
+        ``source_file`` is given the delete is narrowed to that single
+        file's rows, so a co-day file in the same domain is untouched
+        (the explicit per-file delete passes it; the archive path passes
+        None to replace the whole day, preserving prior behaviour).
+        """
+        table = self._FACT_TABLE_BY_DOMAIN.get(domain)
+        if table is None:
+            raise IngestionConfigError(f"Unknown domain: {domain}")
+        sql = (
+            f"DELETE FROM {table} "  # table from fixed allow-map above
+            "WHERE tenant_code = :tc AND report_date = :rd"
+        )
+        params: dict[str, Any] = {"tc": tenant_code, "rd": report_date}
+        if source_file is not None:
+            sql += " AND source_file = :sf"
+            params["sf"] = source_file
+        result = self.db.execute(text(sql), params)
+        return result.rowcount or 0
+
+    def delete_committed_file(
+        self,
+        job_id: uuid.UUID | str,
+        user_payload: dict,
+        actor_ip: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Delete one committed file's fact rows and free it for re-pull.
+
+        Removes exactly the rows this file loaded (``tenant_code`` +
+        ``report_date`` + ``source_file``), neutralises the SFTP dedup
+        marker(s) so the same or an updated file can be pulled again, and
+        flips the owning job + (once no committed files remain) its run to
+        ``DELETED`` — all in a single transaction.
+
+        Only ``COMMITTED`` jobs are deletable; any other status raises
+        ``IngestionStateError``.
+        """
+        actor_id = self._require_admin(user_payload)
+        job = self._get_job(job_id)
+
+        if job.status != "COMMITTED":
+            raise IngestionStateError(
+                f"job {job.id} status is {job.status}; only COMMITTED "
+                "files can have their data deleted"
+            )
+
+        try:
+            rows_deleted = self._delete_facts_for_day(
+                job.domain,
+                job.tenant_code,
+                job.file_date,
+                source_file=job.filename,
+            )
+
+            # Keep the ingested_file marker(s) as a history record but
+            # neutralise them:
+            #   * flip outcome to 'DELETED' so the run's Files list shows
+            #     the file was purged (and the delete button self-disables);
+            #   * tombstone sha256 so a later re-pull of the SAME file is
+            #     not blocked by the (sha256, remote_filename) dedup gate —
+            #     a tombstone can never equal a real 64-hex digest, so the
+            #     re-pull proceeds and inserts a fresh marker. The Re-ingest
+            #     button stays usable because the row (schedule_id +
+            #     remote_filename) survives.
+            marker_rows = self.db.execute(
+                text(
+                    "SELECT id, run_id FROM ingested_file "
+                    "WHERE ingestion_job_id = :jid"
+                ),
+                {"jid": job.id},
+            ).mappings().all()
+            affected_runs: set[uuid.UUID] = set()
+            for m in marker_rows:
+                self.db.execute(
+                    text(
+                        "UPDATE ingested_file "
+                        "SET outcome = 'DELETED', sha256 = :sha "
+                        "WHERE id = :id"
+                    ),
+                    {"sha": f"deleted-{m['id']}"[:64], "id": m["id"]},
+                )
+                if m["run_id"] is not None:
+                    affected_runs.add(m["run_id"])
+
+            # Refresh each affected run: recompute its committed-file count;
+            # once none remain COMMITTED, mark the whole run DELETED so the
+            # Ingestion Runs list reflects that its data is gone.
+            for rid in affected_runs:
+                committed = self.db.execute(
+                    text(
+                        "SELECT count(*) FROM ingested_file "
+                        "WHERE run_id = :rid AND outcome = 'COMMITTED'"
+                    ),
+                    {"rid": rid},
+                ).scalar() or 0
+                if committed == 0:
+                    self.db.execute(
+                        text(
+                            "UPDATE ingestion_run "
+                            "SET status = 'DELETED', jobs_committed = 0 "
+                            "WHERE id = :rid"
+                        ),
+                        {"rid": rid},
+                    )
+                else:
+                    self.db.execute(
+                        text(
+                            "UPDATE ingestion_run SET jobs_committed = :c "
+                            "WHERE id = :rid"
+                        ),
+                        {"c": committed, "rid": rid},
+                    )
+
+            job.status = "DELETED"
+            job.error_message = None
+
+            details: dict[str, Any] = {
+                "rows_deleted": rows_deleted,
+                "tenant_code": job.tenant_code,
+                "domain": job.domain,
+                "file_date": job.file_date.isoformat(),
+                "source_file": job.filename,
+            }
+            self._audit(
+                job_id=job.id,
+                actor_user_id=actor_id,
+                action="DELETED",
+                actor_ip=actor_ip,
+                details=details,
+            )
+
+            self.db.commit()
+            self.db.refresh(job)
+            return {"job_id": str(job.id), **details}
+        except Exception:
+            self.db.rollback()
+            raise
 
     def _insert_facts(self, job: IngestionJob) -> int:
         staged_file = self._staging_path(job)
@@ -648,10 +805,10 @@ class IngestionService:
                 id, tenant_id, cap_date, cap_time, trip_type,
                 ref_al, ref_flt_num, ref_org, ref_dst, ref_dep_date,
                 ref_cab_code, ref_tot_fare, ref_base_fare, ref_tax,
-                ref_yq, ref_seats,
+                ref_yq, ref_seats, ref_curr,
                 comp_al, comp_flt_num, comp_org, comp_dst, comp_dep_date,
                 comp_cab_code, comp_tot_fare, comp_base_fare, comp_tax,
-                comp_yq, comp_seats,
+                comp_yq, comp_seats, comp_curr,
                 ref_pos, comp_pos, data_owner, tenant_code, business_type,
                 report_date, source_file, loaded_at,
                 -- Phase 2C: 47 new dictionary columns (migration 022)
@@ -674,10 +831,10 @@ class IngestionService:
                 :id, :tid, :cd, :ct, :tt,
                 :ra, :rf, :ro, :rd, :rdd,
                 :rcc, :rtf, :rbf, :rtax,
-                :ryq, :rs,
+                :ryq, :rs, :rcur,
                 :ca, :cf, :co, :cdst, :cdd,
                 :ccc, :ctf, :cbf, :ctax,
-                :cyq, :cs,
+                :cyq, :cs, :ccur,
                 :ref_pos, :comp_pos, :owner, :tcode, :btype,
                 :rdate, :sfile, now(),
                 :ref_dep_time, :ref_arr_time, :ref_stops, :ref_via,
@@ -706,7 +863,11 @@ class IngestionService:
             params = {
                 "id": uuid.uuid4(),
                 "tid": job.tenant_id,
-                "cd": cap_date,
+                # cap_date recorded from the FILENAME (job.file_date),
+                # never the in-file CapDate column, so a mis-stamped
+                # source file cannot misfile rows under the wrong date.
+                # (cap_date is still parsed above only to skip empty rows.)
+                "cd": job.file_date,
                 "ct": parse_time(row.get("CapTime")) or datetime.now().time(),
                 "tt": (row.get("TripType") or "RT")[:4],
                 "ra": (row.get("RefAL") or job.tenant_code)[:3],
@@ -720,6 +881,7 @@ class IngestionService:
                 "rtax": safe_float(row.get("RefTax")),
                 "ryq": safe_float(row.get("RefYQ")),
                 "rs": safe_int(row.get("RefSeats") or 9),
+                "rcur": ((row.get("RefCur") or "").strip()[:4] or "USD") if job.tenant_code == "WM" else "GBP",
                 "ca": (row.get("CompAL") or "")[:3],
                 "cf": (row.get("CompFltNum") or "")[:10],
                 "co": (row.get("CompOrg") or row.get("RefOrg") or "")[:4],
@@ -731,6 +893,7 @@ class IngestionService:
                 "ctax": safe_float(row.get("CompTax")),
                 "cyq": safe_float(row.get("CompYQ")),
                 "cs": safe_int(row.get("CompSeats") or 9),
+                "ccur": ((row.get("CompCur") or "").strip()[:4] or "USD") if job.tenant_code == "WM" else "GBP",
                 # ref_pos: post-023 nullable point-of-sale (the host carrier's
                 # POS). PW source carries POS; JY legacy source does not.
                 # The legacy POA field has no post-023 column; comp_pos is
@@ -920,7 +1083,9 @@ class IngestionService:
             params = {
                 "id": uuid.uuid4(),
                 "tid": job.tenant_id,
-                "cd": cap_date,
+                # cap_date recorded from the FILENAME (job.file_date),
+                # never the in-file CaptureDate column — see legacy insert.
+                "cd": job.file_date,
                 "ct": parse_time(row.get("CaptureTime")) or datetime.now().time(),
                 "tt": "OW",
                 "ra": host_al or job.tenant_code[:3],
@@ -1096,7 +1261,9 @@ class IngestionService:
                 "id": uuid.uuid4(),
                 "tid": job.tenant_id,
                 "owner": job.tenant_code,
-                "cd": cap_date,
+                # cap_date recorded from the FILENAME (job.file_date),
+                # never the in-file CapDate column — see legacy insert.
+                "cd": job.file_date,
                 "ct": parse_time(row.get("CapTime")) or datetime.now().time(),
                 "tt": (row.get("TripType") or "ONE_WAY")[:16],
                 "src": (row.get("Source") or job.tenant_code)[:64],

@@ -7,14 +7,15 @@ import { api } from '../../api';
 import type { DataFreshness } from '../../types';
 
 interface AirlineCpiPageProps {
-  /** Tenant code determines which snapshot view to query (JY, PW or ALT). */
-  tenantCode: 'JY' | 'PW' | 'ALT';
+  /** Tenant code determines which snapshot view to query (JY, PW, ALT or WM). */
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM';
 }
 
 const TENANT_LABELS: Record<string, string> = {
   JY: 'Airline CPI – JY',
   PW: 'Airline CPI – PW',
   ALT: 'Airline CPI – SKY',
+  WM: 'Airline CPI – WinAir',
 };
 
 export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
@@ -33,7 +34,7 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   const velocityExportRef = useRef<() => void>(() => {});
 
   const pageTitle = TENANT_LABELS[tenantCode] || `Airline CPI – ${tenantCode}`;
-  const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT'];
+  const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT', 'WM'];
   const showTabs = TENANTS_WITH_VELOCITY.includes(tenantCode);
 
   useEffect(() => {

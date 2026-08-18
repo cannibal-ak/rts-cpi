@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useCallback, useMemo, ReactNode } from 'react';
+import React, { createContext, useContext, useCallback, useMemo, ReactNode } from 'react';
 import { TenantSession, UserRole, ModuleCode, Capability } from '../types';
-import { mockSession, mockRolePresets } from '../mock/session';
+import { mockSession } from '../mock/session';
+import { RTS_SLUG, TENANT_MODULE_MAP, TENANT_NAME_MAP } from '../config/tenantConfig';
 import { useAuth } from './AuthContext';
 
 interface SessionContextType {
@@ -9,8 +10,6 @@ interface SessionContextType {
   hasModule: (modules: ModuleCode[]) => boolean;
   hasCapability: (capabilities: Capability[]) => boolean;
   hasAccess: (opts: { roles?: UserRole[]; modules?: ModuleCode[]; capabilities?: Capability[] }) => boolean;
-  updateFeatures: (modules: string[], capabilities: string[]) => void;
-  updateRoles: (roles: UserRole[]) => void;
   isSyncing: boolean;
 }
 
@@ -18,56 +17,38 @@ const SessionContext = createContext<SessionContextType | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [session, setSession] = useState<TenantSession>(mockSession);
 
-  // Derive sync state: session is stale if emails don't match the current authenticated user
-  const isSyncing = useMemo(() => {
-    if (!user) return false;
-    const userEmail = user.email.toLowerCase();
-    const sessionEmail = session.user.email.toLowerCase();
-    
-    // If user exists but session belongs to a different email, we are syncing
-    const matchingPreset = Object.values(mockRolePresets).find(p => p.user.email.toLowerCase() === userEmail);
-    return !!matchingPreset && sessionEmail !== userEmail;
-  }, [user, session.user.email]);
-
-  // Sync session when auth user changes
-  React.useEffect(() => {
-    if (!user) {
-      // Reset to default/Admin session on logout to prevent state leakage
-      if (session.user.email !== mockSession.user.email) {
-        setSession(mockSession);
-      }
-      return;
-    }
-    
-    // Find matching preset by email
-    const presetKey = Object.keys(mockRolePresets).find(key => 
-      mockRolePresets[key].user.email.toLowerCase() === user.email.toLowerCase()
-    );
-
-    if (presetKey && mockRolePresets[presetKey].user.email.toLowerCase() !== session.user.email.toLowerCase()) {
-      setSession(mockRolePresets[presetKey]);
-    }
-  }, [user, session.user.email]);
-
-  const updateFeatures = useCallback((modules: string[], capabilities: string[]) => {
-    setSession(prev => ({
-      ...prev,
-      enabled_modules: modules as ModuleCode[],
-      enabled_capabilities: capabilities as Capability[],
-    }));
-  }, []);
-
-  const updateRoles = useCallback((roles: UserRole[]) => {
-    setSession(prev => ({
-      ...prev,
+  // Session is DERIVED synchronously from the authenticated (JWT-backed) user:
+  // roles + tenantSlug come from AuthContext (/login + /me). No email->preset
+  // matching, no async sync gap.
+  //
+  // CRITICAL: an authenticated user whose slug is unknown/unmapped resolves to
+  // is_super_admin:false with NO modules — it must NEVER fall back to the
+  // super-admin mockSession. mockSession is used ONLY for the pre-login
+  // (unauthenticated) state.
+  const session: TenantSession = useMemo(() => {
+    if (!user) return mockSession;
+    const slug = (user.tenantSlug || '').toLowerCase();
+    const roles = user.roles as UserRole[];
+    const moduleCode = TENANT_MODULE_MAP[slug];
+    return {
+      tenant_id: user.tenantId,
+      tenant_name: TENANT_NAME_MAP[slug] ?? user.tenantSlug,
+      enabled_modules: moduleCode ? [moduleCode] : [],
+      enabled_capabilities: mockSession.enabled_capabilities,
+      is_super_admin: slug === RTS_SLUG.toLowerCase() && roles.includes('TENANT_ADMIN'),
       user: {
-        ...prev.user,
-        roles
-      }
-    }));
-  }, []);
+        id: user.id,
+        email: user.email,
+        name: user.display_name,
+        roles,
+      },
+    };
+  }, [user]);
+
+  // Derivation is synchronous, so the session is never stale relative to the
+  // authenticated user — there is no syncing window to wait on.
+  const isSyncing = false;
 
   const hasRole = useCallback((roles: UserRole[]) => {
     return roles.some(r => session.user.roles.includes(r));
@@ -89,8 +70,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [hasRole, hasModule, hasCapability]);
 
   const value = useMemo(() => ({
-    session, hasRole, hasModule, hasCapability, hasAccess, updateFeatures, updateRoles, isSyncing
-  }), [session, hasRole, hasModule, hasCapability, hasAccess, updateFeatures, updateRoles, isSyncing]);
+    session, hasRole, hasModule, hasCapability, hasAccess, isSyncing
+  }), [session, hasRole, hasModule, hasCapability, hasAccess, isSyncing]);
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

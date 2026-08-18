@@ -10,17 +10,21 @@ source of truth; same goes for password hashing and strength validation.
 
 import logging
 from datetime import datetime, timedelta, timezone
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 import secrets
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import RequirePlatformAdmin
+from app.core.deps import RequirePlatformAdmin, VALID_ROLES, get_current_user, is_platform_admin
 from app.core.security import hash_token
 from app.models.user import AppUser, RoleBinding
+from app.models.user_mfa import UserMfa
+from app.models.mfa_recovery_code import MfaRecoveryCode
 from app.models.tenant import Tenant
 from app.models.password_reset_token import PasswordResetToken
 from app.routers.password_reset import (
@@ -41,7 +45,7 @@ from app.schemas.admin_password import (
     AdminSendResetEmailResponse,
     AdminTenantOption,
 )
-from app.services import smtp_service
+from app.services import smtp_service, audit
 from app.services.smtp_service import send_invite_email
 from app.services.auth_service import hash_password, validate_password_strength
 
@@ -177,7 +181,7 @@ def invite_user(body: AdminInviteUserRequest, db: Session = Depends(get_db)):
     email = body.email.lower()
 
     role = body.role.upper().strip()
-    if role not in {"TENANT_ADMIN"}:
+    if role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail=f"Unsupported role '{body.role}'.")
 
     # Global uniqueness (migration 017) + per-tenant uniqueness.
@@ -318,3 +322,286 @@ def force_reset(body: AdminForceResetRequest, db: Session = Depends(get_db)):
             else "Password reset successfully."
         ),
     )
+
+
+# ── User deactivate / reactivate ──────────────────
+#
+# Reversible account disable. A deactivated user is blocked at /login (403
+# "account disabled", enforced in app.routers.auth) and at token refresh, and
+# fails get_current_user on any existing access token. No hard delete — the
+# row and all its FK anchors are preserved and the action is fully reversible.
+
+# Protected accounts are identified by PRIVILEGE, not a hardcoded email: any
+# account that is itself an RTS platform admin (RTS tenant + TENANT_ADMIN) can
+# never be deactivated or deleted, so the platform can never be locked out of
+# itself. Mirrors core.deps.is_platform_admin, evaluated for the TARGET row.
+
+
+def _target_roles(db: Session, user_id: UUID) -> list[str]:
+    return [
+        r
+        for (r,) in db.query(RoleBinding.role)
+        .filter(RoleBinding.user_id == user_id)
+        .all()
+    ]
+
+
+def _is_protected_platform_admin(db: Session, user: AppUser) -> bool:
+    """True if the target is itself an RTS platform admin (protected)."""
+    tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+    identity = (tenant.slug if tenant else "").upper()
+    return is_platform_admin(identity, _target_roles(db, user.id))
+
+
+def _active_admin_count(db: Session, tenant_id: UUID) -> int:
+    """Number of currently-active TENANT_ADMIN users in a tenant."""
+    return (
+        db.query(AppUser.id)
+        .join(RoleBinding, RoleBinding.user_id == AppUser.id)
+        .filter(
+            AppUser.tenant_id == tenant_id,
+            AppUser.is_active == True,  # noqa: E712
+            RoleBinding.role == "TENANT_ADMIN",
+        )
+        .distinct()
+        .count()
+    )
+
+
+def _is_sole_active_admin(db: Session, user: AppUser) -> bool:
+    """True if disabling/removing ``user`` would leave its tenant with no active
+    admin (user is active, is an admin, and is the only active admin)."""
+    if not user.is_active:
+        return False
+    if "TENANT_ADMIN" not in _target_roles(db, user.id):
+        return False
+    return _active_admin_count(db, user.tenant_id) <= 1
+
+
+def _tenant_name(db: Session, tenant_id: UUID) -> str:
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    return tenant.display_name if tenant else str(tenant_id)
+
+
+def _last_active_admin_409(db: Session, user: AppUser) -> HTTPException:
+    name = _tenant_name(db, user.tenant_id)
+    return HTTPException(
+        status_code=409,
+        detail={
+            "message": (
+                f"{user.email} is the only active admin for {name}; "
+                "add or reactivate another admin first."
+            ),
+            "code": "last_active_admin",
+            "details": {"tenant": name},
+        },
+    )
+
+
+# Set-(B) activity/audit references (see D0): presence means the user has real
+# history and must be deactivated, not hard-deleted. The first four are
+# RESTRICT-style FKs (a raw delete would 500); audit_event.actor has no FK but
+# records audited admin actions the user performed.
+def _has_activity_history(db: Session, user_id: UUID) -> bool:
+    found = db.execute(
+        text(
+            "SELECT "
+            "  EXISTS(SELECT 1 FROM ingestion_audit_log WHERE actor_user_id = CAST(:uid AS uuid)) "
+            "  OR EXISTS(SELECT 1 FROM ingestion_jobs WHERE uploaded_by_user_id = CAST(:uid AS uuid)) "
+            "  OR EXISTS(SELECT 1 FROM ingestion_schedule WHERE created_by_user_id = CAST(:uid AS uuid)) "
+            "  OR EXISTS(SELECT 1 FROM sftp_connection WHERE created_by_user_id = CAST(:uid AS uuid)) "
+            "  OR EXISTS(SELECT 1 FROM audit_event WHERE actor = :uid)"
+        ),
+        {"uid": str(user_id)},
+    ).scalar()
+    return bool(found)
+
+
+def _load_target_guarded(db: Session, user_id: UUID, current_user: dict) -> AppUser:
+    """Fetch the target and run the guards shared by deactivate/reactivate/delete:
+    missing user (404), self-action (400), protected platform admin (400).
+    Returns 4xx (never 500)."""
+    user = db.query(AppUser).filter(AppUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+    if str(user.id) == current_user["sub"]:
+        raise HTTPException(
+            status_code=400,
+            detail="You cannot deactivate or delete your own account.",
+        )
+    if _is_protected_platform_admin(db, user):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This is a protected RTS platform super-admin account and "
+                "cannot be modified or deleted."
+            ),
+        )
+    return user
+
+
+@router.post("/users/{user_id}/deactivate", status_code=204)
+def deactivate_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Disable a user account (reversible). Blocks login + refresh immediately."""
+    user = _load_target_guarded(db, user_id, current_user)
+
+    if _is_sole_active_admin(db, user):
+        raise _last_active_admin_409(db, user)
+
+    user.is_active = False
+    audit.record(
+        db,
+        tenant_id=UUID(current_user["tenant_id"]),
+        actor=current_user["sub"],
+        action="user.deactivated",
+        target_type="app_user",
+        target_id=str(user.id),
+    )
+    db.commit()
+    logger.info("Admin %s deactivated user %s", current_user["sub"], user.email)
+    return Response(status_code=204)
+
+
+@router.post("/users/{user_id}/reactivate", status_code=204)
+def reactivate_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Re-enable a previously deactivated user account."""
+    user = _load_target_guarded(db, user_id, current_user)
+
+    user.is_active = True
+    audit.record(
+        db,
+        tenant_id=UUID(current_user["tenant_id"]),
+        actor=current_user["sub"],
+        action="user.reactivated",
+        target_type="app_user",
+        target_id=str(user.id),
+    )
+    db.commit()
+    logger.info("Admin %s reactivated user %s", current_user["sub"], user.email)
+    return Response(status_code=204)
+
+
+@router.delete("/users/{user_id}", status_code=204)
+def delete_user(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Hard-delete a user account.
+
+    Guarded so the platform can never 500 or lock itself out. Guard order:
+      404 missing -> 400 self -> 400 protected platform admin
+      -> 409 last_active_admin (target still active & its tenant's sole admin)
+      -> 409 has_history (referenced by any set-(B) activity/audit table)
+      -> 204 clean delete: audit FIRST, then the user-owned auth rows and the
+         app_user row are removed in a single transaction.
+    """
+    user = _load_target_guarded(db, user_id, current_user)
+
+    if _is_sole_active_admin(db, user):
+        raise _last_active_admin_409(db, user)
+
+    if _has_activity_history(db, user_id):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": (
+                    f"{user.email} has activity history (audit / ingestion "
+                    "records) and cannot be deleted. Deactivate the account "
+                    "instead."
+                ),
+                "code": "has_history",
+            },
+        )
+
+    # audit_event has no free-text detail column, so the email + tenant slug are
+    # encoded into target_id (varchar(128)) BEFORE the row disappears.
+    deleted_email = user.email
+    tenant_slug = (
+        db.query(Tenant.slug).filter(Tenant.id == user.tenant_id).scalar() or ""
+    )
+    audit.record(
+        db,
+        tenant_id=UUID(current_user["tenant_id"]),
+        actor=current_user["sub"],
+        action="user.deleted",
+        target_type="app_user",
+        target_id=f"{user.id} {deleted_email} [{tenant_slug}]"[:128],
+    )
+
+    # Cascade the set-(A) user-owned auth artifacts, then the user, atomically.
+    db.query(RoleBinding).filter(RoleBinding.user_id == user.id).delete(
+        synchronize_session=False
+    )
+    db.query(UserMfa).filter(UserMfa.user_id == user.id).delete(
+        synchronize_session=False
+    )
+    db.query(MfaRecoveryCode).filter(MfaRecoveryCode.user_id == user.id).delete(
+        synchronize_session=False
+    )
+    db.query(PasswordResetToken).filter(
+        PasswordResetToken.user_id == user.id
+    ).delete(synchronize_session=False)
+    db.delete(user)
+    db.commit()
+
+    logger.info("Admin %s deleted user %s", current_user["sub"], deleted_email)
+    return Response(status_code=204)
+
+
+# ── POST /users/{user_id}/reset-mfa ───────────────
+#
+# Admin-driven MFA reset (lost-device recovery). Clears the target's enrolled
+# authenticator + recovery codes so the require_mfa_satisfied gate forces a
+# fresh enrollment on the user's next login. Reuses the same privilege guards
+# as deactivate/delete (self / protected-platform-admin) via
+# _load_target_guarded, and is idempotent: returns 200 even when the user had
+# no MFA rows. Mirrors the user_mfa / mfa_recovery_code delete pattern in
+# delete_user and that endpoint's audit.record style (audit_event has no
+# free-text column, so email + tenant slug are encoded into target_id).
+
+
+@router.post("/users/{user_id}/reset-mfa")
+def reset_mfa(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """Clear a user's enrolled MFA so they re-enroll on next login.
+
+    Guard order (reused, never 500): 404 missing -> 400 self -> 400 protected
+    platform admin. Then delete the recovery codes and the user_mfa row in one
+    transaction; the require_mfa_satisfied gate re-prompts enrollment.
+    """
+    user = _load_target_guarded(db, user_id, current_user)
+
+    tenant_slug = (
+        db.query(Tenant.slug).filter(Tenant.id == user.tenant_id).scalar() or ""
+    )
+    audit.record(
+        db,
+        tenant_id=UUID(current_user["tenant_id"]),
+        actor=current_user["sub"],
+        action="mfa.admin_reset",
+        target_type="user_mfa",
+        target_id=f"{user.id} {user.email} [{tenant_slug}]"[:128],
+    )
+
+    db.query(MfaRecoveryCode).filter(MfaRecoveryCode.user_id == user.id).delete(
+        synchronize_session=False
+    )
+    db.query(UserMfa).filter(UserMfa.user_id == user.id).delete(
+        synchronize_session=False
+    )
+    db.commit()
+
+    logger.info("Admin %s reset MFA for user %s", current_user["sub"], user.email)
+    return {"user_id": str(user.id), "email": user.email, "mfa_reset": True}

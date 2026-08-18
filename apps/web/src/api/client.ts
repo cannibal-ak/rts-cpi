@@ -14,6 +14,8 @@ import type {
   AdminUserListResponse, AdminResetTokenListResponse,
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
   PlatformHealthResponse, TenantSummaryResponse,
+  IngestionJob, IngestionUploadResponse, IngestionValidationResult,
+  IngestionCommitResult, IngestionDeleteDataResult, IngestionAuditLog, IngestionPreview,
 } from '../types';
 import type {
   SmtpConfigRead, SmtpConfigUpdate, SmtpTestRequest, SmtpTestResponse,
@@ -177,6 +179,8 @@ export interface CpiApiClient {
       list(query?: IngestionRunListQuery): Promise<Paginated<IngestionRun>>;
       get(id: string): Promise<IngestionRunDetail>;
       cancel(id: string): Promise<IngestionRun>;
+      deleteFileData(ingestedFileId: string): Promise<{ rows_deleted: number }>;
+      reingestFile(ingestedFileId: string): Promise<RunNowResult>;
     };
 
     // ── Password Management ──
@@ -256,6 +260,7 @@ export interface CpiApiClient {
     validate(id: string): Promise<IngestionValidationResult>;
     commit(id: string, replaceExisting: boolean): Promise<IngestionCommitResult>;
     cancel(id: string): Promise<IngestionJob>;
+    deleteData(id: string): Promise<IngestionDeleteDataResult>;
     getAudit(id: string): Promise<IngestionAuditLog>;
     getPreview(id: string): Promise<IngestionPreview>;
   };

@@ -130,6 +130,14 @@ DASHBOARDS = {
         "domain": "airline",
         "tenant": "ALT",
     },
+    "5": {
+        "title": "Airline CPI WM Dashboard",
+        "superset_id": 6,                                          # Superset ID=6
+        "uuid": "c1fccfa8-9755-453c-a5ed-140e04590891",
+        "embedded_uuid": "a2a2f211-d861-4c6b-869b-aa20602ef6c7",
+        "domain": "airline",
+        "tenant": "WM",
+    },
 }
 
 # Tenant -> per-tenant Superset dataset view names (for RLS filtering).
@@ -141,6 +149,7 @@ TENANT_TABLES = {
     "PW":  ["vw_airline_cpi_pw_snapshot"],
     "FJL": ["vw_cfl_cpi_fjl_snapshot"],
     "ALT": ["vw_airline_cpi_alt_snapshot"],
+    "WM":  ["vw_airline_cpi_wm_snapshot"],
 }
 
 # Tenant -> Superset virtual/derived datasets that need cap_date RLS but
@@ -168,6 +177,10 @@ TENANT_CAPDATE_ONLY_TABLES = {
         "alt_all_airlines_fares",
         "alt_velocity_normalized",
         "alt_pricing_recommendations",
+    ],
+    "WM":  [
+        "wm_all_airlines_fares",
+        "wm_pricing_recommendations",
     ],
     "FJL": [
         "vds_cfl_cheapest_competitor",
@@ -713,6 +726,7 @@ _DASHBOARD_DATE_VIEW = {
     "2": "vw_airline_cpi_pw_snapshot",
     "3": "vw_cfl_cpi_fjl_snapshot",
     "4": "vw_airline_cpi_alt_snapshot",
+    "5": "vw_airline_cpi_wm_snapshot",
 }
 
 # Whitelist of view names we'll ever query from this endpoint. The view name

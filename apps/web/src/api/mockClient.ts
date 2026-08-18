@@ -20,7 +20,7 @@ import type {
   IngestionRunDetail,
   IngestedFile,
   IngestionRunListQuery,
-  IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionAuditLog, IngestionPreview,
+  IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionDeleteDataResult, IngestionAuditLog, IngestionPreview,
 } from '../types';
 import {
   mockAirlineSnapshots, mockCflSnapshots,
@@ -81,6 +81,7 @@ export const mockClient: CpiApiClient = {
     validate: (_id: string) => Promise.reject(new Error('Mock client does not implement ingestion.validate')) as Promise<IngestionValidationResult>,
     commit: (_id: string, _replace: boolean) => Promise.reject(new Error('Mock client does not implement ingestion.commit')) as Promise<IngestionCommitResult>,
     cancel: (_id: string) => Promise.reject(new Error('Mock client does not implement ingestion.cancel')) as Promise<IngestionJob>,
+    deleteData: (_id: string) => Promise.reject(new Error('Mock client does not implement ingestion.deleteData')) as Promise<IngestionDeleteDataResult>,
     getAudit: (id: string) => delay({ job_id: id, entries: [] } as IngestionAuditLog),
     getPreview: (id: string) => delay({ job_id: id, sample_valid: [], sample_rejected: [] } as IngestionPreview),
   },
@@ -380,6 +381,10 @@ export const mockClient: CpiApiClient = {
         }, 2000);
         return delay({ ...row });
       },
+      deleteFileData: (_ingestedFileId: string): Promise<{ rows_deleted: number }> =>
+        Promise.reject(new Error('Mock client does not implement ingestionRuns.deleteFileData')),
+      reingestFile: (_ingestedFileId: string): Promise<RunNowResult> =>
+        Promise.reject(new Error('Mock client does not implement ingestionRuns.reingestFile')),
     },
     // Password management isn't exercised offline; stubs keep the interface satisfied.
     passwordManagement: {
@@ -393,6 +398,10 @@ export const mockClient: CpiApiClient = {
         delay({ sent: false, message: 'Not available in mock mode' }),
       forceReset: (_email: string, _newPassword: string, _forceChangeOnLogin: boolean) =>
         delay({ success: false, message: 'Not available in mock mode' }),
+      deactivateUser: (_userId: string) => delay(undefined as unknown as void),
+      resetMfa: (userId: string) => delay({ user_id: userId, email: '', mfa_reset: true }),
+      reactivateUser: (_userId: string) => delay(undefined as unknown as void),
+      deleteUser: (_userId: string) => delay(undefined as unknown as void),
     },
     // SMTP settings aren't exercised offline; stubs keep the interface satisfied.
     settings: {

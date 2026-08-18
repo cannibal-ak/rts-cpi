@@ -1,6 +1,6 @@
 // ──────── User & Session ────────
-export type UserRole = 'TENANT_ADMIN';
-export type ModuleCode = 'airline_jy' | 'airline_pw' | 'airline_alt' | 'cfl_fjl';
+export type UserRole = 'TENANT_ADMIN' | 'TENANT_USER';
+export type ModuleCode = 'airline_jy' | 'airline_pw' | 'airline_alt' | 'cfl_fjl' | 'airline_wm';
 export type Capability = 'alerts' | 'exports' | 'saved_views';
 
 export interface TenantSession {
@@ -603,6 +603,9 @@ export interface IngestionJob {
   committed_at: string | null;
   replaced_by_job_id: string | null;
   error_message: string | null;
+  /** True only for a COMMITTED, manually-uploaded job whose inserted fact
+   *  rows can be deleted from the Ingestion Jobs page. Computed by the API. */
+  deletable?: boolean;
 }
 
 export type IngestionMode = 'STRICT' | 'LENIENT';
@@ -728,6 +731,11 @@ export interface IngestionCommitResult {
   job: IngestionJob;
   rows_inserted: number;
   replaced_job_id: string | null;
+}
+
+export interface IngestionDeleteDataResult {
+  job: IngestionJob;
+  rows_deleted: number;
 }
 
 export interface IngestionAuditEntry {

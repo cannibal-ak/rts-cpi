@@ -19,6 +19,7 @@ import {
 } from '@mui/material';
 import {
   Refresh, Close, ContentCopy, ExpandMore, Stop,
+  DeleteOutline, CloudSync,
 } from '@mui/icons-material';
 import PageHeader from '../../components/common/PageHeader';
 import { api } from '../../api';
@@ -79,6 +80,7 @@ function statusColor(status: string): StatusColor {
     case 'RUNNING': return 'info';
     case 'CANCELLING': return 'warning';
     case 'CANCELLED': return 'default';
+    case 'DELETED': return 'default';
     default: return 'default';
   }
 }
@@ -88,6 +90,7 @@ function outcomeColor(outcome: string): StatusColor {
   switch (outcome) {
     case 'COMMITTED': return 'success';
     case 'DUPLICATE': return 'default';
+    case 'DELETED': return 'default';
     case 'FAILED': return 'error';
     default: return 'warning';
   }
@@ -145,13 +148,38 @@ interface DetailDrawerProps {
   onClose: () => void;
   showToast: (message: string, severity: ToastState['severity']) => void;
   onCancelRequest: (runId: string) => Promise<void>;
+  onDeleteFile: (runId: string, fileId: string) => Promise<void>;
+  onReingestFile: (runId: string, fileId: string) => Promise<void>;
 }
 
 function DetailDrawer({
   open, run, loading, scheduleLookup, onClose, showToast, onCancelRequest,
+  onDeleteFile, onReingestFile,
 }: DetailDrawerProps) {
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  // Per-file delete / re-ingest confirmation + in-flight tracking.
+  const [fileAction, setFileAction] = useState<
+    { type: 'delete' | 'reingest'; file: IngestedFile } | null
+  >(null);
+  const [fileActionBusy, setFileActionBusy] = useState(false);
+
+  const handleConfirmFileAction = async () => {
+    if (!run || !fileAction) return;
+    setFileActionBusy(true);
+    try {
+      if (fileAction.type === 'delete') {
+        await onDeleteFile(run.id, fileAction.file.id);
+      } else {
+        await onReingestFile(run.id, fileAction.file.id);
+      }
+      setFileAction(null);
+    } catch {
+      // Toast already surfaced by the parent handler; keep dialog open.
+    } finally {
+      setFileActionBusy(false);
+    }
+  };
 
   const copyId = (id: string) => {
     if (navigator.clipboard) {
@@ -232,6 +260,59 @@ function DetailDrawer({
             disabled={cancelling}
           >
             {cancelling ? 'Cancelling…' : 'Cancel run'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Per-file delete / re-ingest confirmation */}
+      <Dialog
+        open={fileAction !== null}
+        onClose={() => !fileActionBusy && setFileAction(null)}
+        aria-labelledby="file-action-dialog-title"
+      >
+        <DialogTitle id="file-action-dialog-title">
+          {fileAction?.type === 'delete'
+            ? 'Delete this day’s data?'
+            : 'Re-ingest this file from SFTP?'}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText component="div">
+            {fileAction?.type === 'delete' ? (
+              <>
+                This permanently removes the database rows loaded from{' '}
+                <strong>{fileAction?.file.remote_filename}</strong>. The SFTP
+                duplicate marker is cleared too, so the same or an updated file
+                can be pulled again later. <strong>This cannot be undone.</strong>
+              </>
+            ) : (
+              <>
+                This re-downloads{' '}
+                <strong>{fileAction?.file.remote_filename}</strong> from the SFTP
+                folder and <strong>replaces</strong> this day’s data with the
+                file’s current contents. A new run will appear in the list. If
+                the file on SFTP is unchanged, nothing is re-loaded.
+              </>
+            )}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setFileAction(null)} disabled={fileActionBusy}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleConfirmFileAction}
+            color={fileAction?.type === 'delete' ? 'error' : 'primary'}
+            variant="contained"
+            startIcon={
+              fileActionBusy
+                ? <CircularProgress size={16} color="inherit" />
+                : fileAction?.type === 'delete' ? <DeleteOutline /> : <CloudSync />
+            }
+            disabled={fileActionBusy}
+          >
+            {fileActionBusy
+              ? 'Working…'
+              : fileAction?.type === 'delete' ? 'Delete data' : 'Re-ingest'}
           </Button>
         </DialogActions>
       </Dialog>
@@ -368,6 +449,7 @@ function DetailDrawer({
                       <TableCell>Size</TableCell>
                       <TableCell>Outcome</TableCell>
                       <TableCell>Error</TableCell>
+                      <TableCell align="right">Actions</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -407,6 +489,50 @@ function DetailDrawer({
                           ) : (
                             '—'
                           )}
+                        </TableCell>
+                        <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>
+                          <Tooltip
+                            title={
+                              f.schedule_id
+                                ? 'Re-pull this file from SFTP and replace this day’s data'
+                                : 'Source schedule was deleted — cannot re-pull'
+                            }
+                          >
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="primary"
+                                disabled={f.schedule_id === null || fileActionBusy}
+                                onClick={() => setFileAction({ type: 'reingest', file: f })}
+                                aria-label="Re-ingest from SFTP"
+                              >
+                                <CloudSync fontSize="inherit" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                          <Tooltip
+                            title={
+                              f.ingestion_job_id && f.outcome === 'COMMITTED'
+                                ? 'Delete this day’s data from the database'
+                                : 'Only committed files have data to delete'
+                            }
+                          >
+                            <span>
+                              <IconButton
+                                size="small"
+                                color="error"
+                                disabled={
+                                  f.ingestion_job_id === null ||
+                                  f.outcome !== 'COMMITTED' ||
+                                  fileActionBusy
+                                }
+                                onClick={() => setFileAction({ type: 'delete', file: f })}
+                                aria-label="Delete this day's data"
+                              >
+                                <DeleteOutline fontSize="inherit" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -604,6 +730,42 @@ export default function IngestionRunsPage() {
     } catch (err) {
       const e = err as Error & ApiErrorShape;
       showToast(e.message || 'Failed to cancel run', 'error');
+      throw err;
+    }
+  };
+
+  const handleDeleteFile = async (runId: string, fileId: string) => {
+    try {
+      const res = await api.admin.ingestionRuns.deleteFileData(fileId);
+      showToast(
+        `Deleted ${res.rows_deleted} row(s); this day can be re-pulled from SFTP`,
+        'success',
+      );
+      // Refresh the open drawer (the file's row is gone) and the list.
+      try {
+        const detail = await api.admin.ingestionRuns.get(runId);
+        setSelectedRun(detail);
+      } catch {
+        // Best-effort; list auto-refresh will reconcile.
+      }
+      await fetchRuns();
+    } catch (err) {
+      const e = err as Error & ApiErrorShape;
+      showToast(e.message || 'Failed to delete data', 'error');
+      throw err;
+    }
+  };
+
+  const handleReingestFile = async (_runId: string, fileId: string) => {
+    try {
+      await api.admin.ingestionRuns.reingestFile(fileId);
+      showToast('Re-ingest queued — a new run will appear shortly', 'info');
+      // The new REINGEST run is RUNNING; fetching now surfaces it and
+      // arms the 5s auto-refresh to track it to completion.
+      await fetchRuns();
+    } catch (err) {
+      const e = err as Error & ApiErrorShape;
+      showToast(e.message || 'Failed to queue re-ingest', 'error');
       throw err;
     }
   };
@@ -810,6 +972,8 @@ export default function IngestionRunsPage() {
         onClose={() => setDrawerOpen(false)}
         showToast={showToast}
         onCancelRequest={handleCancelRun}
+        onDeleteFile={handleDeleteFile}
+        onReingestFile={handleReingestFile}
       />
 
       <Snackbar
