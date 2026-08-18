@@ -27,6 +27,7 @@ MAX_PAGE_SIZE = 1000
 # index scan, so a short window costs nothing and keeps new dates visible.
 _LATEST_DATE_TTL = 60.0
 _COUNT_TTL = 60.0
+_METADATA_TTL = 300.0
 
 
 def _latest_date(db: Session, view_name: str, column: str) -> str | None:
@@ -122,25 +123,32 @@ def get_filter_metadata(
         if user_identity != "FJL":
             raise HTTPException(status_code=403, detail="Not Authorized")
 
-    result = []
-
-    # Date list — sourced from the SAME tenant view the grid queries, keyed on
-    # cap_date (the column the snapshots filter matches). Previously this merged
-    # filename-parsed dates + DISTINCT report_date; a date could be offered
-    # whose rows carry a different cap_date, giving an empty grid on select.
-    # Enumerating cap_date guarantees every option returns rows.
+    # The DISTINCT sweep below ran uncached on every grid mount — memoised
+    # 300s to match airline/velocity metadata. Single-tenant module, so the
+    # view name alone is a sufficient key.
     view_name = "vw_cfl_cpi_fjl_snapshot"
-    file_dates = db.execute(text(
-        f"SELECT DISTINCT cap_date FROM {view_name} WHERE cap_date IS NOT NULL "
-        "ORDER BY cap_date DESC"
-    )).scalars().all()
-    all_dates = [d.isoformat() for d in file_dates]
-    if not all_dates:
-        all_dates = ["No file dates available"]
 
-    result.append({"field": "file_date", "label": "File Date", "values": all_dates})
+    def _produce() -> list[dict]:
+        result = []
 
-    return result
+        # Date list — sourced from the SAME tenant view the grid queries, keyed on
+        # cap_date (the column the snapshots filter matches). Previously this merged
+        # filename-parsed dates + DISTINCT report_date; a date could be offered
+        # whose rows carry a different cap_date, giving an empty grid on select.
+        # Enumerating cap_date guarantees every option returns rows.
+        file_dates = db.execute(text(
+            f"SELECT DISTINCT cap_date FROM {view_name} WHERE cap_date IS NOT NULL "
+            "ORDER BY cap_date DESC"
+        )).scalars().all()
+        all_dates = [d.isoformat() for d in file_dates]
+        if not all_dates:
+            all_dates = ["No file dates available"]
+
+        result.append({"field": "file_date", "label": "File Date", "values": all_dates})
+
+        return result
+
+    return cached(("cfl_filter_meta", view_name), _METADATA_TTL, _produce)
 
 
 @router.get("/export")

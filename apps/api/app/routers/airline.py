@@ -180,48 +180,55 @@ def get_filter_metadata(
             raise HTTPException(status_code=403, detail="Not Authorized")
         effective_tenant = user_identity  # locked to own tenant
 
-    result = []
+    # Both sweeps below are full DISTINCT scans of the tenant view(s) and ran
+    # uncached on every grid mount — the one grid-adjacent read the 3034363
+    # perf pass missed (velocity's metadata got a 300s memo). Same helper,
+    # same TTL, keyed on the resolved tenant so a platform admin's all-tenant
+    # response never shares an entry with a tenant user's.
+    def _produce() -> list[dict]:
+        result = []
 
-    # Date list — sourced from the SAME tenant view(s) the grid queries, keyed
-    # on cap_date (the column the snapshots filter matches). Previously this
-    # merged filename-parsed dates + DISTINCT report_date; a date could be
-    # offered whose rows carry a different cap_date, giving an empty grid on
-    # select. Enumerating cap_date guarantees every option returns rows.
-    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot"}
-    date_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM"]
-    date_set = set()
-    for dt in date_tenants:
-        dv = AIRLINE_VIEW_MAP.get(dt)
-        if not dv:
-            continue
-        date_set.update(db.execute(text(
-            f"SELECT DISTINCT cap_date FROM {dv} WHERE cap_date IS NOT NULL"
-        )).scalars().all())
-    all_dates = sorted((d.isoformat() for d in date_set), reverse=True)
-    if not all_dates:
-        all_dates = ["No file dates available"]
+        # Date list — sourced from the SAME tenant view(s) the grid queries, keyed
+        # on cap_date (the column the snapshots filter matches). Previously this
+        # merged filename-parsed dates + DISTINCT report_date; a date could be
+        # offered whose rows carry a different cap_date, giving an empty grid on
+        # select. Enumerating cap_date guarantees every option returns rows.
+        AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot"}
+        date_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM"]
+        date_set = set()
+        for dt in date_tenants:
+            dv = AIRLINE_VIEW_MAP.get(dt)
+            if not dv:
+                continue
+            date_set.update(db.execute(text(
+                f"SELECT DISTINCT cap_date FROM {dv} WHERE cap_date IS NOT NULL"
+            )).scalars().all())
+        all_dates = sorted((d.isoformat() for d in date_set), reverse=True)
+        if not all_dates:
+            all_dates = ["No file dates available"]
 
-    result.append({"field": "file_date", "label": "File Date", "values": all_dates})
+        result.append({"field": "file_date", "label": "File Date", "values": all_dates})
 
-    # Airline filter — sourced from the actual ref_al values of the same
-    # tenant view the snapshots query uses. The tenant_code can differ from
-    # the airline code carried in the data (e.g. ALT → ref_al 'SKY'), so we
-    # must read DISTINCT ref_al rather than echo the tenant code.
-    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot"}
-    view_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM"]
-    vals = []
-    for vt in view_tenants:
-        view_name = AIRLINE_VIEW_MAP.get(vt)
-        if not view_name:
-            continue
-        vals.extend(db.execute(text(
-            f"SELECT DISTINCT ref_al FROM {view_name} "
-            "WHERE ref_al IS NOT NULL AND ref_al <> '' ORDER BY ref_al"
-        )).scalars().all())
+        # Airline filter — sourced from the actual ref_al values of the same
+        # tenant view the snapshots query uses. The tenant_code can differ from
+        # the airline code carried in the data (e.g. ALT → ref_al 'SKY'), so we
+        # must read DISTINCT ref_al rather than echo the tenant code.
+        view_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM"]
+        vals = []
+        for vt in view_tenants:
+            view_name = AIRLINE_VIEW_MAP.get(vt)
+            if not view_name:
+                continue
+            vals.extend(db.execute(text(
+                f"SELECT DISTINCT ref_al FROM {view_name} "
+                "WHERE ref_al IS NOT NULL AND ref_al <> '' ORDER BY ref_al"
+            )).scalars().all())
 
-    result.append({"field": "airline", "label": "Airline", "values": vals})
+        result.append({"field": "airline", "label": "Airline", "values": vals})
 
-    return result
+        return result
+
+    return cached(("airline_filter_meta", effective_tenant or "ALL"), _METADATA_TTL, _produce)
 
 
 @router.get("/export")

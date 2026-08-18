@@ -281,6 +281,10 @@ export interface PageInfo {
   page: number;
   page_size: number;
   has_next: boolean;
+  /** cap_date the server actually queried — echoes the pinned date when the client sent none. */
+  applied_file_date?: string | null;
+  /** True when the server skipped count(*) because with_total=false was sent (total will be 0). */
+  total_is_cached?: boolean;
 }
 
 export interface Paginated<T> {

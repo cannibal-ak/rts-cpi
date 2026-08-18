@@ -21,6 +21,7 @@ import type {
   SmtpConfigRead, SmtpConfigUpdate, SmtpTestRequest, SmtpTestResponse,
 } from '../types/smtpConfig';
 import { authStorage } from '../utils/authStorage';
+import { clearDatasetCache } from './datasetCache';
 import type {
   AdminTenantOption, AdminInviteUserResponse, AdminResendInviteResponse,
   AdminSendResetEmailResponse, InviteVerifyResponse, InviteAcceptResponse,
@@ -90,6 +91,10 @@ function forceLogout(): never {
     _loggingOut = true;
     authStorage.removeRefreshToken();
     _accessToken = null;
+    // The location assignment reloads the page, which already drops the
+    // in-memory dataset cache — this call is here so the invariant survives
+    // if forceLogout ever becomes SPA navigation.
+    clearDatasetCache();
     window.location.href = '/login';
   }
   throw new Error('Session expired');
