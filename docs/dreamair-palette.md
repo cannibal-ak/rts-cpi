@@ -93,12 +93,16 @@ brand azure; competitors are spaced around it.
 **Slot order is fixed and must not be reordered** — the validator's checks are on
 *adjacent* pairs, so the order is part of the result.
 
+Slots 2–8 are assigned to competitors in descending row volume, so the busiest
+carrier gets the most separable hue and the assignment is reproducible from the
+data rather than from arrival order.
+
 | # | Carrier | Hex | On white | | # | Carrier | Hex | On white |
 |---|---|---|---|---|---|---|---|---|
-| 1 | **DA** (DreamAir) | `#1268E3` | 5.10:1 | | 5 | YS | `#0E9DA8` | 3.28:1 |
-| 2 | TC | `#E8632A` | 3.36:1 | | 6 | Coa | `#A05A2C` | 5.26:1 |
-| 3 | KQ | `#D6208F` | 4.71:1 | | 7 | UI | `#9B4FD8` | 4.66:1 |
-| 4 | Fli | `#C08A00` | 3.05:1 | | 8 | Aur | `#2E7D32` | 5.13:1 |
+| 1 | **DA** (DreamAir) | `#1268E3` | 5.10:1 | | 5 | Aur | `#0E9DA8` | 3.28:1 |
+| 2 | TC | `#E8632A` | 3.36:1 | | 6 | YS | `#A05A2C` | 5.26:1 |
+| 3 | KQ | `#D6208F` | 4.71:1 | | 7 | Coa | `#9B4FD8` | 4.66:1 |
+| 4 | Fli | `#C08A00` | 3.05:1 | | 8 | UI | `#2E7D32` | 5.13:1 |
 
 The competitors actually present in the DreamAir data, by volume over Jan–Jun
 2026: TC (1.36M rows), KQ (790k), Fli (190k), Aur (86k), YS (73k), Coa (44k),
