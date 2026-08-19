@@ -93,18 +93,24 @@ brand azure; competitors are spaced around it.
 **Slot order is fixed and must not be reordered** — the validator's checks are on
 *adjacent* pairs, so the order is part of the result.
 
-| # | Code | Hex | On white | | # | Code | Hex | On white |
+| # | Carrier | Hex | On white | | # | Carrier | Hex | On white |
 |---|---|---|---|---|---|---|---|---|
-| 1 | **DA** | `#1268E3` | 5.10:1 | | 5 | teal | `#0E9DA8` | 3.28:1 |
-| 2 | orange | `#E8632A` | 3.36:1 | | 6 | brown | `#A05A2C` | 5.26:1 |
-| 3 | magenta | `#D6208F` | 4.71:1 | | 7 | orchid | `#9B4FD8` | 4.66:1 |
-| 4 | gold | `#C08A00` | 3.05:1 | | 8 | green | `#159467` | 3.84:1 |
+| 1 | **DA** (DreamAir) | `#1268E3` | 5.10:1 | | 5 | YS | `#0E9DA8` | 3.28:1 |
+| 2 | TC | `#E8632A` | 3.36:1 | | 6 | Coa | `#A05A2C` | 5.26:1 |
+| 3 | KQ | `#D6208F` | 4.71:1 | | 7 | UI | `#9B4FD8` | 4.66:1 |
+| 4 | Fli | `#C08A00` | 3.05:1 | | 8 | Aur | `#2E7D32` | 5.13:1 |
 
-Slots 2–8 are assigned to competitor codes in first-seen order by
-`buildAirlineColorMap()`. The competitors present in the DreamAir data are
-`KQ`, `TC`, `YS`, `Fli`, `BN`, `DK`, `S6`, `BW`.
+The competitors actually present in the DreamAir data, by volume over Jan–Jun
+2026: TC (1.36M rows), KQ (790k), Fli (190k), Aur (86k), YS (73k), Coa (44k),
+UI (32k), CQ (24k). That is **eight** competitors for **seven** identity slots.
 
-Fallbacks for unnamed carriers: `#64748B`, `#4A8DEC`, `#0F766E`, `#B45309`,
+**CQ, the smallest, takes the neutral fallback rather than a ninth hue.** This
+is deliberate, not an oversight: no ninth hue exists that keeps the set
+separable (see the note below), and the documented remedy for an overflowing
+categorical scale is to fold the smallest series into "Other", never to
+generate another colour.
+
+Fallbacks for unnamed carriers, CQ first: `#64748B`, `#0F766E`, `#B45309`,
 `#7C3AED`. **No azure-family fallback** — nothing may impersonate the host
 carrier. (This is the same rule as WinAir's "no red-family fallback", moved to
 the new brand hue.)
@@ -122,6 +128,32 @@ Validated on white, in the order above:
 
 This clears WinAir's Palette A on CVD separation (16.3 vs 12.9) and, unlike it,
 has no sub-3:1 slot — so no slot depends on direct labels for relief.
+
+**The all-pairs limit — read before adding a hue.** The run above tests
+*adjacent* pairs, which is the right test for these line and bar forms, where
+series are also separated by position, a legend, and tooltips. Under
+`--pairs all` this set fails, worst pair gold `#C08A00` ↔ TC orange `#E8632A`
+at normal-vision ΔE 11.4 and deutan ΔE 1.1.
+
+That is not a defect introduced here; it is the ceiling for eight-plus
+categorical hues, and WinAir's shipped palette fails the same way. It was
+searched properly: a locked-anchor greedy plus local search over a
+forty-colour pool could not lift the all-pairs normal-vision floor past 12.3
+at nine slots, and every nine-slot candidate that scored well on adjacency did
+so by adding a second violet or a near-azure indigo — `#5E35B1` alongside
+`#9B4FD8` measures ΔE 14.0 head to head, under the 15 floor, so the legend
+would have two violets a reader cannot separate.
+
+Two consequences:
+
+1. **Do not add a ninth carrier hue.** Fold the smallest carrier into "Other".
+2. Where a chart genuinely needs any-pair discrimination (a scatter, a map),
+   facet it or cut series instead of relying on colour.
+
+The green slot is `#2E7D32` rather than the `#159467` this palette started
+with: `#159467` is a blue-green and sat ΔE 9.4 from the `#0E9DA8` teal, the
+worst pair in the set. A true forest green moves that to 11.4 while keeping
+every adjacent check and the ≥3:1 floor intact.
 
 This set is mirrored in three places that must stay identical:
 `apps/web/src/components/dashboard/dreamair/priceChartTheme.ts`,
@@ -195,11 +227,12 @@ still dash the forecast.
 
 ### Hue reuse across palettes A and B
 
-`#9B4FD8` appears in both palettes, and `#10996B`/`#159467` are neighbours. This
-is safe because the scopes never meet: Palette B charts have no carrier dimension
-at all (velocity is DA-only data), and Palette A charts plot no metrics as
-series. The rule is **one palette per chart** — never mix A and B slots inside a
-single chart.
+`#9B4FD8` appears in both palettes (UI's carrier colour in A, the forecast in B),
+and B's `#10996B` sits between A's teal `#0E9DA8` and green `#2E7D32`. This is
+safe because the scopes never meet: Palette B charts have no carrier dimension at
+all (velocity is DA-only data), and Palette A charts plot no metrics as series.
+The rule is **one palette per chart** — never mix A and B slots inside a single
+chart.
 
 ---
 
