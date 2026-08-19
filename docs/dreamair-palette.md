@@ -1,0 +1,351 @@
+# DreamAir (DA) colour palette
+
+The single source of truth for DreamAir colour — app chrome, native charts, and
+Superset charts alike. Anchored on the DreamAir logo azure `#1268E3`.
+
+Every categorical value below was checked with the data-viz validator
+(`scripts/validate_palette.js` — OKLab ΔE ×100, Machado–Oliveira–Fernandes CVD
+simulation at severity 1.0) against the surface it actually renders on: **white
+`#FFFFFF`** for Superset charts, which draw on a white canvas — not the
+`#fcfcfb` default. Measured results are quoted per section. Do not add or change
+a hex without re-running the validator.
+
+This document is the DreamAir counterpart of `docs/winair-palette.md` and follows
+its section order deliberately, so the two can be diffed.
+
+**Where the anchor came from.** `DreamAir.svg` is a base64 PNG inside an SVG
+wrapper, so the brand hue was sampled from pixels rather than read from fill
+attributes: of the saturated, non-background pixels, 29.1% fall in the 210–220°
+azure band and 22.1% in 200–210°, with a secondary orchid mass at 270–305°.
+`#1268E3` is the centre of the dominant band; `#9B4FD8` represents the orchid.
+
+---
+
+## 0. How DreamAir differs from WinAir
+
+Worth stating up front, because it changes two rules the WinAir doc had to work
+around:
+
+- **Red is free.** WinAir's brand *is* red, so its doc has to keep red away from
+  error and status meanings. DreamAir's brand is azure, so red carries its
+  conventional meaning here: `#C0392B` is critical, and "Reduce" in Palette C.
+- **Cyan is not free.** The mirror of the same fact. Cyan sits next to azure, so
+  the rate-family measure hue that WinAir renders in cyan (`#0891B2`) is a
+  teal-green here (`#10996B`). Cyan against the azure brand fails the
+  normal-vision floor in dark mode (ΔE 11.6, floor 15).
+
+---
+
+## 1. Brand core
+
+To be defined in `apps/web/src/components/dashboard/dreamairTheme.ts` — a
+sibling of `bannerTheme.ts`, not an edit to it. WinAir imports `bannerTheme.ts`
+directly, and the tenants must be able to move independently.
+
+| Role | Hex | Notes |
+|---|---|---|
+| Brand azure | `#1268E3` | sampled from the DreamAir logo; the anchor for everything below. White text 5.10:1 |
+| Brand azure, pressed | `#0D4FB5` | one step darker — pressed/active chrome. White text 7.49:1 |
+| Brand ink, dark mode | `lighten(#1268E3, 0.3)` ≈ `#5A92EB` | matches the WinAir treatment; flat azure is thin on dark paper |
+| Deep ink | `#0B2E6B` | headings and the darkest brand step |
+
+Azure is an **accent**, not a surface. The dashboard chrome (tab row, filter
+card) sits on the light lilac grey below; azure appears on it only for the
+committing action and brand marks.
+
+| Role | Hex | Contrast on chrome |
+|---|---|---|
+| Chrome surface | `#E7E3F3` | — |
+| Chrome accent (selection, active borders, chips) | `#7A45B8` | 4.95:1 |
+| Chrome ink | `#221B3D` | 12.91:1 |
+| Chrome label ink | `#463A6B` | 8.03:1 |
+| Chrome muted ink | `#6A5F8C` | 4.60:1 |
+| Chrome error ink / tint | `#9A2A22` / `rgba(154,42,34,0.09)` | 6.11:1 |
+
+Every one of these meets or beats its WinAir counterpart (ink 10.17, label 5.89,
+muted 3.86, accent 4.53).
+
+`#7A45B8` is a **UI** accent only. As with WinAir's teal it never becomes a
+series colour — the orchid that *does* appear in charts is the brighter
+`#9B4FD8` in Palette A slot 7.
+
+The alpha-derived tokens keep WinAir's alpha values exactly, re-based on the
+DreamAir ink `rgb(34,27,61)` and accent `rgb(122,69,184)`:
+
+| Token | Value |
+|---|---|
+| border | `rgba(34,27,61,0.13)` |
+| field line | `rgba(34,27,61,0.45)` |
+| disabled bg / ink | `rgba(34,27,61,0.10)` / `rgba(34,27,61,0.38)` |
+| hover bg | `rgba(34,27,61,0.07)` |
+| skeleton / skeleton text | `rgba(34,27,61,0.11)` / `rgba(34,27,61,0.08)` |
+| slider rail | `rgba(34,27,61,0.28)` |
+| chip bg | `rgba(122,69,184,0.14)` |
+
+---
+
+## 2. Palette A — carrier identity
+
+Used **only where a series is an airline**: the Superset price-comparison charts
+on the DreamAir dashboard and the native Latest Prices panel. DA is always the
+brand azure; competitors are spaced around it.
+
+**Slot order is fixed and must not be reordered** — the validator's checks are on
+*adjacent* pairs, so the order is part of the result.
+
+| # | Code | Hex | On white | | # | Code | Hex | On white |
+|---|---|---|---|---|---|---|---|---|
+| 1 | **DA** | `#1268E3` | 5.10:1 | | 5 | teal | `#0E9DA8` | 3.28:1 |
+| 2 | orange | `#E8632A` | 3.36:1 | | 6 | brown | `#A05A2C` | 5.26:1 |
+| 3 | magenta | `#D6208F` | 4.71:1 | | 7 | orchid | `#9B4FD8` | 4.66:1 |
+| 4 | gold | `#C08A00` | 3.05:1 | | 8 | green | `#159467` | 3.84:1 |
+
+Slots 2–8 are assigned to competitor codes in first-seen order by
+`buildAirlineColorMap()`. The competitors present in the DreamAir data are
+`KQ`, `TC`, `YS`, `Fli`, `BN`, `DK`, `S6`, `BW`.
+
+Fallbacks for unnamed carriers: `#64748B`, `#4A8DEC`, `#0F766E`, `#B45309`,
+`#7C3AED`. **No azure-family fallback** — nothing may impersonate the host
+carrier. (This is the same rule as WinAir's "no red-family fallback", moved to
+the new brand hue.)
+
+Validated on white, in the order above:
+
+```
+[PASS] Lightness band       all 8 inside L 0.43–0.77
+[PASS] Chroma floor         all 8 >= 0.1
+[PASS] CVD separation       worst adjacent #A05A2C↔#0E9DA8 ΔE 16.3 (deutan) · tritan 8.2
+[PASS] Normal-vision floor  worst adjacent #D6208F↔#E8632A ΔE 19.5 (normal)
+[PASS] Contrast vs surface  all 8 >= 3:1
+→ ALL CHECKS PASS
+```
+
+This clears WinAir's Palette A on CVD separation (16.3 vs 12.9) and, unlike it,
+has no sub-3:1 slot — so no slot depends on direct labels for relief.
+
+This set is mirrored in three places that must stay identical:
+`apps/web/src/components/dashboard/dreamair/priceChartTheme.ts`,
+`scripts/superset_provision_dreamair.py`, `scripts/superset/da_recolor_dash7.py`.
+
+---
+
+## 3. Palette B — measure series
+
+Used where a series is a **metric, not an airline**: the velocity chart
+(Booking / Capacity / Seat Factor), and any future KPI or trend chart. Same
+two-family structure as WinAir, because the four velocity series are really two
+measure pairs.
+
+### B1 — Seats family (azure, ordinal pair)
+
+Capacity is the envelope; Current Booking is the part of it that has sold. That
+is an ordered relationship, so it takes one hue in two steps, not two hues.
+
+| Role | Light | Dark |
+|---|---|---|
+| Envelope (Capacity, target, prior period) | `#7FB0F0` | `#9CC3F5` |
+| Filled / actual (Current Booking, revenue) | `#0D4FB5` | `#4A8DEC` |
+
+Validated as an ordinal ramp — **ALL PASS in both modes**: monotone lightness,
+ΔL gaps clear of the 0.06 floor, single hue (spread 5° light / 3° dark), light
+end 2.24:1 on white and 5.24:1 on dark.
+
+Full azure ramp, if more than two steps are ever needed (validated 5-step, all
+PASS on white — note the light end is the B1 envelope colour, so the ramp and
+the pair agree):
+
+`#7FB0F0` · `#4A8DEC` · `#1268E3` · `#0D4FB5` · `#0A3C8A`
+
+This is also the **sequential** hue for DreamAir magnitude encodings (heatmaps).
+
+### B2 — Rate family (the % measures)
+
+| Role | Light | Dark |
+|---|---|---|
+| Actual Seat Factor (measured) | `#10996B` | `#1FA97C` |
+| Forecasted Seat Factor (modelled) | `#9B4FD8` | `#A96FE0` |
+
+Validated as categorical against the seats anchor — `#1268E3`, `#10996B`,
+`#9B4FD8`: **all six checks PASS on white** (worst adjacent CVD ΔE 12.8,
+normal-vision ΔE 25.8, every slot ≥ 3:1). The dark triple `#4A8DEC`, `#1FA97C`,
+`#A96FE0` also passes **all six** (CVD ΔE 16.0, normal 21.0) — better than
+WinAir's dark set, which carries a WARN.
+
+**Why teal-green and not cyan for the measured rate.** WinAir uses cyan
+`#0891B2` here. Against an azure brand that fails: `#0891B2` vs `#4A8DEC` scores
+normal-vision ΔE 11.6 in dark mode, under the 15 floor — a full-colour reader
+cannot reliably separate them. Teal-green `#10996B` is the nearest hue that
+clears the floor in both modes while staying clear of the status green `#0CA30C`.
+
+**Why violet for the forecast.** Same reasoning WinAir gives, and it lands better
+here: gold is a carrier slot and amber already means "sold out" on the
+availability markers, so a third meaning would make gold ambiguous. Violet reads
+as *computed* rather than *warning*, which is what a forecast is — and orchid is
+DreamAir's own secondary brand hue, so the modelled series is on-brand.
+
+**Secondary encoding — wanted, but not available in Superset.** Forecast and
+Actual are the same measure, so ideally the forecast line would be dashed and the
+actual solid. Superset's `mixed_timeseries` has no per-metric line style: both
+rate metrics live in the same query group (`metrics_b`) and share one
+`seriesTypeB`, so no form_data key dashes one and not the other. Colour alone
+carries the distinction there, which is legal at ΔE 12.8 — above the ≥8 target,
+not in the 6–8 band that would *require* a second channel. Where a chart form
+does support it (the native ECharts panels, which set `lineStyle` per series),
+still dash the forecast.
+
+### Hue reuse across palettes A and B
+
+`#9B4FD8` appears in both palettes, and `#10996B`/`#159467` are neighbours. This
+is safe because the scopes never meet: Palette B charts have no carrier dimension
+at all (velocity is DA-only data), and Palette A charts plot no metrics as
+series. The rule is **one palette per chart** — never mix A and B slots inside a
+single chart.
+
+---
+
+## 4. Status colours (reserved — never a series)
+
+Unlike WinAir, DreamAir's brand does not collide with the "red = critical"
+convention, so status can use the conventional hues directly. They still always
+ship with an icon and a label — never colour alone. Never use a status colour for
+"series 4", and never use a series colour for state.
+
+| Role | Hex | On white |
+|---|---|---|
+| good | `#0CA30C` | 3.35:1 |
+| warning | `#FAB219` | 1.83:1 — icon + label is the mitigation |
+| serious | `#EC835A` | 2.64:1 — icon + label is the mitigation |
+| critical | `#C0392B` | 5.44:1 — a true red, which is available here because the brand is azure |
+
+The chrome error ink stays `#9A2A22` (6.11:1 on the chrome surface), matching
+WinAir. Error tint and status critical are allowed to differ: one is a surface
+treatment inside the filter card, the other is a data state.
+
+---
+
+## 5. Chart chrome
+
+| Role | Light | Dark |
+|---|---|---|
+| Chart surface | `#FFFFFF` (Superset canvas) | `#1A1A19` |
+| Primary ink | `#221B3D` (16.25:1) | `#FFFFFF` (17.42:1) |
+| Secondary ink | `#463A6B` (10.11:1) | `#C7C3D6` (10.12:1) |
+| Muted (axis, tick labels) | `#6A5F8C` (5.79:1) | `#918BA6` (5.35:1) |
+| Gridline (hairline) | `#E6E3EE` | `#2C2A30` |
+| Baseline / axis | `#C7C2D4` | `#3A3740` |
+
+Ink follows the chrome tokens in `dreamairTheme.ts` so the embed and the app
+around it agree. **Text never wears a series colour** — a coloured mark beside
+the label carries identity.
+
+---
+
+## 6. Applying this in Superset — read this first
+
+Everything in this section is inherited from the WinAir build and applies
+unchanged; it is repeated here rather than cross-referenced because getting it
+wrong is silent.
+
+Colour is bound by `label_colors`, a dict keyed on the **series name Superset
+actually builds**. A key that does not match that name character-for-character is
+*silently ignored* — no error, no warning, the chart just falls through to
+`rts_cpi_palette[0]` (forest green `#2B6B2B`).
+
+The series name is rarely what the chart's legend shows. Four traps:
+
+| Chart shape | Series name is actually… | Trap |
+|---|---|---|
+| `dist_bar` with empty "Breakdowns" (`columns: []`) | the **metric label** — one series per metric | groupby values are x-axis *categories*, never series. Carrier keys on such a chart are all dead. |
+| `mixed_timeseries`, query B (`metrics_b`) | the label **plus a literal ` (1)` suffix** | the legend shows the unsuffixed name; only the colour lookup is suffixed. `MixedTimeseries/transformProps.ts:408`. Query A has no suffix. |
+| one metric + a groupby, `truncate_metric` off | `"<metric>, <carrier>"` | the bare carrier code never matches. |
+| one metric + a groupby, `truncate_metric` on | the bare carrier code | the composite never matches. The opposite trap. |
+
+Two more, learned building WinAir's per-carrier Competitor Breakdown:
+
+- **x-axis label must differ from every series-column label.** A chart with
+  `x_axis = airline` *and* `groupby = [airline]` sends duplicate `airline`
+  labels and `/api/v1/chart/data` rejects it with a 400 ("Duplicate
+  column/metric labels"). Make the x-axis an adhoc column with a distinct label
+  (`airline` AS `Airline`).
+- **An engine-level dry run is not proof.** `QueryContext.get_payload()` skips
+  the duplicate-label validator that the REST endpoint runs — a chart can pass
+  in-container testing and 400 on the dashboard. Verify through
+  `POST /api/v1/chart/data` with a guest token, with `dashboardId` set in
+  `form_data` (the guest access branch requires it).
+
+**Write to all three places**, and know which one does the work: the
+**dashboard's** `json_metadata.label_colors` is what binds when a chart renders
+inside a dashboard (`Chart.jsx` overwrites each slice's copy with it); the
+slice's `params.label_colors` and `query_context.form_data.label_colors` keep
+Explore consistent. Additive only — merge keys, never replace the dict.
+
+**Standalone Chart-view cannot be fixed this way.** Explore's request builder
+drops `label_colors`, so a chart opened by bare URL falls through to the scheme
+regardless.
+
+**Never edit `rts_cpi_palette`** — it is cross-tenant. A DreamAir change there
+would repaint JY, PW, FJL and WM.
+
+### Availability-marker colours (cross-surface rule)
+
+The native Latest Prices panel and Superset must mark availability the same way.
+These are **carried over from WinAir unchanged** — they are semantic, not brand:
+
+| Marker | Hex | Why not brand |
+|---|---|---|
+| Sold out | `#F39C12` | an event, and amber is the conventional read |
+| Not on sale | `#9E9E9E` | absence, not an event — stays grey on both surfaces |
+
+Amber-vs-gold tension with the Palette A gold slot `#C08A00` is accepted
+deliberately, exactly as on WinAir.
+
+> **Data note.** The DreamAir dataset (re-ingested PW Jan–Jun 2026) contains no
+> `ref_seats = 0` rows, so the **sold-out** marker never fires — only "not on
+> sale" appears. The amber is specified so the chart is correct if seat-zero data
+> ever arrives, not because it is currently reachable.
+
+### Palette C — recommendation semantics
+
+The recommendation traffic-light. On DreamAir this is straightforward, because
+red is not the brand:
+
+| Category | Hex | Meaning |
+|---|---|---|
+| Reduce | `#C0392B` | act — price is too high |
+| Monitor | `#C08A00` | watch |
+| No Change | `#64748B` | neutral — **deliberately grey** |
+| Consider Increase | `#1BAF7A` | opportunity |
+
+Validated in display order on white: worst adjacent CVD ΔE 12.7, normal-vision
+ΔE 18.7, all four inside the lightness band. Two expected flags, both the same
+ones WinAir carries:
+
+- **chroma floor FAIL on `#64748B`** — expected and intended. A "nothing to do"
+  category should not carry a hue. Do not "fix" this by saturating the grey.
+- **contrast WARN on `#1BAF7A` (2.82:1)** — relieved by per-bar value labels,
+  which the chart already draws.
+
+Unlike WinAir, `#C0392B` here means only "Reduce" and "critical" — the same
+meaning in both scopes — so the one-palette-per-chart rule is easier to hold.
+
+---
+
+## 7. Checklist when changing a hex
+
+1. Re-run the validator in the **slot order used in code**, once per mode.
+   The dev host has no `node` on the PATH — run it inside the web container, and
+   keep the filename, because the script's CLI guard checks
+   `process.argv[1].endsWith("validate_palette.js")` and prints nothing if you
+   rename it:
+
+   ```bash
+   docker exec cpi-web-1 mkdir -p /tmp/pal
+   docker cp ~/CPI/scripts/validate_palette.js cpi-web-1:/tmp/pal/validate_palette.js
+   docker exec cpi-web-1 sh -lc 'cd /tmp/pal && node validate_palette.js "#1268E3,…" --mode light --surface "#FFFFFF"'
+   ```
+
+   Then again with `--mode dark --surface "#1A1A19"`. Add `--ordinal` for a ramp.
+2. Update all three mirrors (frontend theme, provisioning script, recolour script).
+3. Re-apply the recolour script and verify through `POST /api/v1/chart/data`
+   with a guest token — not an engine dry run.
+4. Update the measured numbers quoted in this document.
