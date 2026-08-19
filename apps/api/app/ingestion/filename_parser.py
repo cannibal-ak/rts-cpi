@@ -33,8 +33,12 @@ SUPPORTED_DATE_FORMATS: dict[str, str] = {
 
 # Recognised tenant prefixes — used for diagnostic error messages when a
 # filename does not match any tight pattern but the user clearly intended one.
+# This list had drifted behind filename_patterns.yaml: wm has been an ingesting
+# tenant since migration 034 but was never added, so a malformed WM_* upload
+# reported "unknown tenant prefix" instead of naming the real problem. wm and da
+# are both listed now; keep this in step with the yaml.
 KNOWN_PREFIXES = frozenset(
-    {"jy", "jyvelocitydata", "pw", "pwvelocitydata", "fjl"}
+    {"jy", "jyvelocitydata", "pw", "pwvelocitydata", "fjl", "wm", "da"}
 )
 SUPPORTED_EXTENSIONS = frozenset({"csv", "xlsx"})
 

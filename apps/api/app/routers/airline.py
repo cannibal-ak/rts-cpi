@@ -36,11 +36,20 @@ MAX_PAGE_SIZE = 1000
 # the injection guard: view names are interpolated into raw SQL, so they may
 # only ever come from here. The older handlers each declare an identical map
 # inline, which shadows this one harmlessly; they are left as they are.
+#
+# ONBOARDING A TENANT TOUCHES ALL OF THEM. Adding a code here alone is not
+# enough — the inline copies in list_snapshots, get_filter_metadata and
+# export_snapshots shadow this one, and get_filter_metadata additionally
+# carries two hardcoded all-tenant lists. Miss one and that endpoint 403s for
+# the new tenant while the others work, which reads as a permissions bug
+# rather than a missing map entry. Grep for the previous tenant's code and
+# expect a hit in every one of them.
 AIRLINE_VIEW_MAP = {
     "JY": "vw_airline_cpi_jy_snapshot",
     "PW": "vw_airline_cpi_pw_snapshot",
     "ALT": "vw_airline_cpi_alt_snapshot",
     "WM": "vw_airline_cpi_wm_snapshot",
+    "DA": "vw_airline_cpi_da_snapshot",
 }
 
 # 60s is enough: with ix_air_snap_<tenant>_grid in place, `max(cap_date)` is an
@@ -94,7 +103,7 @@ def list_snapshots(
     with_total: bool = Query(True, description="Set false to skip count(*) on repeat pages."),
 ):
     # Enforce tenant scoping — non-platform users are locked to their own airline
-    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot"}
+    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot", "DA": "vw_airline_cpi_da_snapshot"}
     if is_platform_admin(user_identity, user_roles):
         effective_tenant = tenant or "JY"  # platform admin can pick, defaults to JY
     else:
@@ -172,7 +181,7 @@ def get_filter_metadata(
     tenant: str | None = Query(None),
 ):
     # Enforce tenant scoping — non-platform users locked to own airline
-    AIRLINE_TENANTS = {"JY", "PW", "ALT", "WM"}
+    AIRLINE_TENANTS = {"JY", "PW", "ALT", "WM", "DA"}
     if is_platform_admin(user_identity, user_roles):
         effective_tenant = tenant  # platform admin can pick or see all
     else:
@@ -193,8 +202,8 @@ def get_filter_metadata(
         # merged filename-parsed dates + DISTINCT report_date; a date could be
         # offered whose rows carry a different cap_date, giving an empty grid on
         # select. Enumerating cap_date guarantees every option returns rows.
-        AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot"}
-        date_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM"]
+        AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot", "DA": "vw_airline_cpi_da_snapshot"}
+        date_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM", "DA"]
         date_set = set()
         for dt in date_tenants:
             dv = AIRLINE_VIEW_MAP.get(dt)
@@ -213,7 +222,7 @@ def get_filter_metadata(
         # tenant view the snapshots query uses. The tenant_code can differ from
         # the airline code carried in the data (e.g. ALT → ref_al 'SKY'), so we
         # must read DISTINCT ref_al rather than echo the tenant code.
-        view_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM"]
+        view_tenants = [effective_tenant] if effective_tenant else ["JY", "PW", "ALT", "WM", "DA"]
         vals = []
         for vt in view_tenants:
             view_name = AIRLINE_VIEW_MAP.get(vt)
@@ -241,7 +250,7 @@ def export_snapshots(
     airline: str | None = None,
 ):
     # Enforce tenant scoping — non-platform users locked to own airline
-    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot"}
+    AIRLINE_VIEW_MAP = {"JY": "vw_airline_cpi_jy_snapshot", "PW": "vw_airline_cpi_pw_snapshot", "ALT": "vw_airline_cpi_alt_snapshot", "WM": "vw_airline_cpi_wm_snapshot", "DA": "vw_airline_cpi_da_snapshot"}
     if is_platform_admin(user_identity, user_roles):
         effective_tenant = tenant or "JY"
     else:
@@ -827,13 +836,14 @@ def price_point_history(
     )
 
 
-# ── Velocity endpoints (multi-tenant: JY + PW) ──────────────────────
+# ── Velocity endpoints (multi-tenant: JY, PW, ALT, WM, DA) ──────────
 
 VELOCITY_VIEW_MAP = {
     "JY": "vw_velocity_jy_snapshot",
     "PW": "vw_velocity_pw_snapshot",
     "ALT": "vw_velocity_alt_snapshot",
     "WM": "vw_velocity_wm_snapshot",
+    "DA": "vw_velocity_da_snapshot",
 }
 VELOCITY_TENANTS = set(VELOCITY_VIEW_MAP.keys())
 

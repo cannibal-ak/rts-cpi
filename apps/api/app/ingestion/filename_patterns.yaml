@@ -57,3 +57,20 @@ patterns:
     date_format: DDMMYY
     case_insensitive: false
     example: "WM_VL_010426.CSV"
+
+  # DreamAir. Same layout as PW — the demo data IS PW's source files with the
+  # RefAL column rewritten and the filename re-prefixed (see
+  # scripts/relabel_pw_files_as_da.py), so the parser needs no new date format.
+  - regex: "^DA_(\\d{6})\\.xlsx$"
+    tenant_code: DA
+    domain: AIRLINE
+    date_format: DDMMYY
+    case_insensitive: true
+    example: "DA_010426.xlsx"
+
+  - regex: "^DA_VL_(\\d{6})\\.(?i:csv|xlsx)$"
+    tenant_code: DA
+    domain: VELOCITY
+    date_format: DDMMYY
+    case_insensitive: false
+    example: "DA_VL_010426.CSV"
