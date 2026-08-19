@@ -154,6 +154,29 @@ DASHBOARDS = {
             "legseg_type",          # Leg/Segment
         },
     },
+    "6": {
+        "title": "Airline CPI DA Dashboard",
+        "superset_id": 7,                                          # Superset ID=7
+        "uuid": "fb8e11f0-cc7a-4395-bd42-86996e44c701",
+        "embedded_uuid": "0d8531b9-3f36-48de-8286-4f99fcd407ef",
+        "domain": "airline",
+        "tenant": "DA",
+        # DreamAir is a WinAir twin, so it suppresses the same seven native
+        # filters and keeps the same four: route, flt_num, days_left, stops.
+        #
+        # These uuids are DEV values. Provisioning mints fresh uuids per
+        # environment, so prod's will differ -- as WinAir's already do -- and
+        # the prod deploy must carry prod's, not these.
+        "hidden_filter_columns": {
+            "airline",              # Airline
+            "dtd_bucket",           # Days to Departure
+            "price_status",         # Price Position
+            "recommendation",       # Pricing Action
+            "lowest_competitor",    # Cheapest Competitor
+            "eqp",                  # Aircraft
+            "legseg_type",          # Leg/Segment
+        },
+    },
 }
 
 # Tenant -> per-tenant Superset dataset view names (for RLS filtering).
@@ -166,6 +189,7 @@ TENANT_TABLES = {
     "FJL": ["vw_cfl_cpi_fjl_snapshot"],
     "ALT": ["vw_airline_cpi_alt_snapshot"],
     "WM":  ["vw_airline_cpi_wm_snapshot"],
+    "DA":  ["vw_airline_cpi_da_snapshot"],
 }
 
 # Tenant -> Superset virtual/derived datasets that need cap_date RLS but
@@ -199,6 +223,13 @@ TENANT_CAPDATE_ONLY_TABLES = {
         "wm_all_airlines_fares_availability",
         "wm_pricing_recommendations",
         "wm_velocity_normalized",
+    ],
+    "DA":  [
+        "da_all_airlines_fares",
+        "da_all_airlines_fares_availability",
+        "da_pricing_recommendations",
+        "da_velocity_normalized",
+        "da_deployed_capacity",
     ],
     "FJL": [
         "vds_cfl_cheapest_competitor",
@@ -933,6 +964,7 @@ _DASHBOARD_DATE_VIEW = {
     "3": "vw_cfl_cpi_fjl_snapshot",
     "4": "vw_airline_cpi_alt_snapshot",
     "5": "vw_airline_cpi_wm_snapshot",
+    "6": "vw_airline_cpi_da_snapshot",
 }
 
 # Whitelist of view names we'll ever query from this endpoint. The view name
