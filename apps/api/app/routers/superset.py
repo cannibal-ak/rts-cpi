@@ -191,16 +191,17 @@ DASHBOARDS = {
     "6": {
         "title": "Airline CPI DA Dashboard",
         "superset_id": 7,                                          # Superset ID=7
-        "uuid": "fb8e11f0-cc7a-4395-bd42-86996e44c701",
-        "embedded_uuid": "0d8531b9-3f36-48de-8286-4f99fcd407ef",
+        "uuid": "f6a9f820-acc1-4fd8-9b7e-ba0f6c7dab99",
+        "embedded_uuid": "b7bb685a-54ca-489a-b132-671192b4b038",
         "domain": "airline",
         "tenant": "DA",
         # DreamAir is a WinAir twin, so it suppresses the same seven native
         # filters and keeps the same four: route, flt_num, days_left, stops.
         #
-        # These uuids are DEV values. Provisioning mints fresh uuids per
-        # environment, so prod's will differ -- as WinAir's already do -- and
-        # the prod deploy must carry prod's, not these.
+        # These are the PROD uuids, minted by scripts/superset_provision_dreamair.py
+        # on 2026-08-19. Provisioning mints fresh uuids per environment, so the
+        # dev host carries different ones -- as WinAir's already do. Do not copy
+        # this block between environments.
         "hidden_filter_columns": {
             "airline",              # Airline
             "dtd_bucket",           # Days to Departure
