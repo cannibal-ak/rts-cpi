@@ -26,7 +26,7 @@ import { useDashboardCharts } from '../../hooks/useDashboardCharts';
 import { useDashboardTabs } from '../../hooks/useDashboardTabs';
 import { getPrimaryDashboardId, hasChartView } from '../../pages/superset/dashboardAccess';
 import { subItemSx, subItemTextProps } from './sidebarSubItem';
-import { BANNER_BG, brandInk } from '../dashboard/bannerTheme';
+import { useTenantChrome } from '../dashboard/tenantChrome';
 
 interface Props {
   /** Same navigate-then-collapse handler the top-level rows use. */
@@ -56,10 +56,9 @@ export default function SidebarDashboardCharts({ onNavigate }: Props) {
   const dashboardId = getPrimaryDashboardId(session);
   const listCharts = hasChartView(dashboardId);
 
-  // Same WinAir brand-red accent the parent Sidebar applies to its rows.
-  const isWmTenant =
-    session.enabled_modules.length === 1 && session.enabled_modules[0] === 'airline_wm';
-  const accent = isWmTenant ? BANNER_BG : undefined;
+  // Same branded accent the parent Sidebar applies to its rows.
+  const chrome = useTenantChrome();
+  const accent = chrome?.BANNER_BG;
 
   // Both hooks run every render (hook rules); passing undefined is what skips
   // the fetch, so only the relevant one ever hits the network. Each is cached
@@ -122,7 +121,7 @@ export default function SidebarDashboardCharts({ onNavigate }: Props) {
   if (loading && rows.length === 0) {
     return (
       <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
-        <CircularProgress size={16} sx={accent ? { color: brandInk } : undefined} />
+        <CircularProgress size={16} sx={chrome ? { color: chrome.brandInk } : undefined} />
       </Box>
     );
   }

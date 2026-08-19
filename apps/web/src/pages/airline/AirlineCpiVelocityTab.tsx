@@ -13,11 +13,11 @@ import { api } from '../../api';
 import { fetchAllPagesCached } from '../../api/datasetCache';
 import { isAbortError } from '../../api/httpClient';
 import type { VelocitySnapshot, FilterMetadata } from '../../types';
-import { BANNER_BG, brandInk } from '../../components/dashboard/bannerTheme';
+import { getTenantChrome } from '../../components/dashboard/tenantChrome';
 
 interface AirlineCpiVelocityTabProps {
   /** Tenant code selects which airline's velocity snapshot to query. */
-  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM';
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA';
   filters: Record<string, string>;
   onFiltersChange: (f: Record<string, string>) => void;
   /** Parent populates this ref so the page toolbar's Export button can fire CSV. */
@@ -131,7 +131,7 @@ const EXPORT_COLUMNS: Array<{ header: string; key: keyof VelocitySnapshot }> = [
 // from memory after a 50-row freshness probe instead of re-walking every page.
 function fetchAllRows(
   baseQuery: Record<string, string>,
-  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM',
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA',
   onProgress?: (loaded: number, total: number) => void,
   signal?: AbortSignal,
 ): Promise<VelocitySnapshot[]> {
@@ -173,7 +173,10 @@ function downloadBlob(blob: Blob, filename: string) {
 // ────────────────────────────────────────────────────────────────────────
 export default function AirlineCpiVelocityTab({ tenantCode, filters, onFiltersChange, exportRef }: AirlineCpiVelocityTabProps) {
   // WinAir accents follow the brand red; other tenants keep theme primary.
-  const isWm = tenantCode === 'WM';
+  const chrome = getTenantChrome(tenantCode.toLowerCase());
+  const isWm = chrome !== null;
+  const brandInk = chrome?.brandInk;
+  const BANNER_BG = chrome?.BANNER_BG;
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [allData, setAllData] = useState<VelocitySnapshot[]>([]);

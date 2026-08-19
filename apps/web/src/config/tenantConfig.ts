@@ -25,6 +25,7 @@ export const TENANT_MODULE_MAP: Record<string, ModuleCode> = {
   fjl: 'cfl_fjl',
   alt: 'airline_alt',
   wm: 'airline_wm',
+  da: 'airline_da',
 };
 
 // slug → tenant_name. Reproduces the pre-3b mockRolePresets names EXACTLY
@@ -37,4 +38,5 @@ export const TENANT_NAME_MAP: Record<string, string> = {
   fjl: 'Baltic Ferries - FJL',
   alt: 'Sky Airways',
   wm: 'WinAir',
+  da: 'DreamAir',
 };

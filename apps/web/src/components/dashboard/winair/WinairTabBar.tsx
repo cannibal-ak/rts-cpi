@@ -1,11 +1,7 @@
 import { Box, Tabs, Tab, Alert, Skeleton, CircularProgress } from '@mui/material';
 import { ScatterPlot } from '@mui/icons-material';
 import type { DashboardTab } from '../../../api/client';
-import {
-  BANNER_BG, BANNER_HEADER_BG,
-  FILTER_BG, FILTER_BORDER, FILTER_ERROR_BG, FILTER_ERROR_INK,
-  FILTER_FIELD_BG, FILTER_FIELD_LINE, FILTER_LABEL_INK, FILTER_SKELETON,
-} from '../bannerTheme';
+import { useBrandedChrome } from '../tenantChrome';
 
 /**
  * Reserved key for the CPI-rendered Latest Prices pane.
@@ -50,6 +46,11 @@ interface WinairTabBarProps {
 export default function WinairTabBar({
   tabs, value, onChange, loading, switching, error,
 }: WinairTabBarProps) {
+  const {
+    BANNER_BG, BANNER_HEADER_BG, FILTER_BG, FILTER_BORDER, FILTER_ERROR_BG, FILTER_ERROR_INK,
+    FILTER_FIELD_BG, FILTER_FIELD_LINE, FILTER_LABEL_INK, FILTER_SKELETON,
+  } = useBrandedChrome();
+
   // With no usable section list, still offer a way into the embed. Superset
   // opens its own default section when no permalink pins one.
   const fallbackEntry: DashboardTab[] =

@@ -6,7 +6,7 @@ import { Close, ExpandLess, ExpandMore, ShowChart, FlightTakeoff } from '@mui/ic
 import { api } from '../../../api';
 import type { PricePoint, PriceHistoryPoint } from '../../../api/client';
 import { formatClock, formatDeparture, formatDuration, formatSeen } from './priceChartTheme';
-import { brandInk } from '../bannerTheme';
+import { useBrandedChrome } from '../tenantChrome';
 
 interface PriceDetailCardProps {
   point: PricePoint;
@@ -138,6 +138,8 @@ function Sparkline({ points, color }: { points: PriceHistoryPoint[]; color: stri
 export default function PriceDetailCard({
   point, color, currency, showMarket, onClose,
 }: PriceDetailCardProps) {
+  const { brandInk } = useBrandedChrome();
+
   const [expanded, setExpanded] = useState(true);
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<PriceHistoryPoint[] | null>(null);

@@ -21,7 +21,7 @@ import {
   SOLD_OUT_Y, NOT_ON_SALE_Y, AVAILABILITY_LABELS,
 } from './priceChartTheme';
 import { FULL_DEP_RANGE, FULL_DURATION_RANGE, isNarrowed, type Range } from './PriceChartFilters';
-import { brandInk } from '../bannerTheme';
+import { useBrandedChrome } from '../tenantChrome';
 import { api } from '../../../api';
 import type { PricePoint, NoFareDay } from '../../../api/client';
 
@@ -96,6 +96,8 @@ function pointKey(p: PricePoint): string {
 export default function LatestPricesPanel({
   routes, capDate, stops, fltNums, daysLeft, depTime, duration, routeOptions, active,
 }: LatestPricesPanelProps) {
+  const { brandInk } = useBrandedChrome();
+
   const theme = useTheme();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<echarts.ECharts | null>(null);

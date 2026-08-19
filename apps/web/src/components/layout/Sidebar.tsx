@@ -30,7 +30,7 @@ import { NavItem } from '../../types';
 import { isSuperAdmin } from '../../utils/access';
 import SidebarDashboardCharts from './SidebarDashboardCharts';
 import { selectedRowSx, subItemSx, subItemTextProps } from './sidebarSubItem';
-import { BANNER_BG, BANNER_HEADER_BG, brandInk } from '../dashboard/bannerTheme';
+import { useTenantChrome } from '../dashboard/tenantChrome';
 
 const DRAWER_WIDTH = 260;
 const RAIL_WIDTH = 68;
@@ -110,11 +110,11 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
   const { hasAccess, session } = useSession();
   const { logout } = useAuth();
 
-  // WinAir's chrome follows its brand red instead of the app navy. Undefined
-  // for every other tenant, and every use below falls back to theme primary.
-  const isWmTenant =
-    session.enabled_modules.length === 1 && session.enabled_modules[0] === 'airline_wm';
-  const accent = isWmTenant ? BANNER_BG : undefined;
+  // A branded tenant's chrome follows its own brand colour instead of the app
+  // navy. Null for every other tenant, and every use below falls back to theme
+  // primary. WinAir was the only one; DreamAir is the second.
+  const chrome = useTenantChrome();
+  const accent = chrome?.BANNER_BG;
 
   const filteredItems = navigationItems.filter(item => {
     if (item.requireSuperAdmin && !isSuperAdmin(session)) return false;
@@ -266,7 +266,7 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
                       bgcolor: accent ?? 'primary.main',
                       color: 'primary.contrastText',
                       '& .MuiListItemIcon-root': { color: 'primary.contrastText' },
-                      '&:hover': { bgcolor: accent ? BANNER_HEADER_BG : 'primary.dark' },
+                      '&:hover': { bgcolor: chrome ? chrome.BANNER_HEADER_BG : 'primary.dark' },
                     },
                   }}
                 >
@@ -362,9 +362,9 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
                         ...(hasSubItems && onPath && {
                           // brandInk lightens the red in dark mode (flat red
                           // reads ~2.9:1 on dark paper); navy path unchanged.
-                          color: accent ? brandInk : 'primary.main',
+                          color: chrome ? chrome.brandInk : 'primary.main',
                           '& .MuiListItemIcon-root': {
-                            color: accent ? brandInk : 'primary.main',
+                            color: chrome ? chrome.brandInk : 'primary.main',
                           },
                         }),
                         ...selectedRowSx(accent),

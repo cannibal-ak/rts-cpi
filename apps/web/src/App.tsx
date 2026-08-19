@@ -115,6 +115,12 @@ export default function App() {
                   </ProtectedRoute>
                 } />
 
+                <Route path="/cpi/airline/da" element={
+                  <ProtectedRoute requiredModules={['airline_da']} requiredRoles={['TENANT_ADMIN', 'TENANT_USER']}>
+                    <AirlineCpiPage tenantCode="DA" />
+                  </ProtectedRoute>
+                } />
+
                 <Route path="/cpi/cruise/fjl" element={
                   <ProtectedRoute requiredModules={['cfl_fjl']} requiredRoles={['TENANT_ADMIN', 'TENANT_USER']}>
                     <CflCpiPage tenantCode="FJL" />

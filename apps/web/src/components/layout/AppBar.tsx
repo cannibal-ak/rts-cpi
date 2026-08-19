@@ -25,12 +25,13 @@ import { useThemeMode } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import interCaribbeanLogo from '../../assets/logos/jy-logo-banner.png';
 import winairLogo from '../../assets/logos/winair-logo.png';
+import dreamairLogo from '../../assets/logos/dreamair-logo.png';
 import precisionAirLogo from '../../assets/logos/precisionair-logo.png';
 import fjordlineLogo from '../../assets/logos/fjordline-logo.png';
 import skyLogoLight from '../../assets/logos/sky-airways-logo.png';
 import skyLogoDark from '../../assets/logos/sky-airways-logo-dark.png';
 import { TENANT_CONFIG, TENANT_FALLBACK } from '../../utils/tenantConfig';
-import { BANNER_BG } from '../dashboard/bannerTheme';
+import { getTenantChrome, tenantKeyFromModules } from '../dashboard/tenantChrome';
 
 interface AppBarProps {
   onToggleSidebar: () => void;
@@ -46,22 +47,20 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
 
   // Derive tenant key from enabled_modules. A single-module session
   // identifies a tenant; multi-module or empty is the RTS platform admin.
-  const tenantKey: keyof typeof TENANT_CONFIG =
-    session.enabled_modules.length === 1
-      ? (session.enabled_modules[0] === 'airline_jy' ? 'jy'
-        : session.enabled_modules[0] === 'airline_pw' ? 'pw'
-        : session.enabled_modules[0] === 'airline_alt' ? 'alt'
-        : session.enabled_modules[0] === 'airline_wm' ? 'wm'
-        : session.enabled_modules[0] === 'cfl_fjl' ? 'fjl'
-        : 'rts')
-      : 'rts';
+  // tenantKeyFromModules is shared with useTenantChrome so the logo and the
+  // chrome can never disagree about which tenant this is.
+  const tenantKey = tenantKeyFromModules(session.enabled_modules);
 
   const isJyTenant = tenantKey === 'jy';
   const isWmTenant = tenantKey === 'wm';
+  const isDaTenant = tenantKey === 'da';
   const isPwTenant = tenantKey === 'pw';
   const isFjlTenant = tenantKey === 'fjl';
   const isAltTenant = tenantKey === 'alt';
   const tenant = TENANT_CONFIG[tenantKey] ?? TENANT_FALLBACK;
+  // null for unbranded tenants, which is what `isWmTenant ? BANNER_BG :
+  // 'primary.light'` used to express.
+  const chrome = getTenantChrome(tenantKey);
 
   // Explicit chip-label overrides win; otherwise strip the TENANT_ prefix
   // and title-case (TENANT_ADMIN → "Admin", TENANT_USER → "Subtenant").
@@ -158,6 +157,13 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
             alt="WinAir"
             sx={{ height: 48, mr: 1.5 }}
           />
+        ) : isDaTenant ? (
+          <Box
+            component="img"
+            src={dreamairLogo}
+            alt="DreamAir"
+            sx={{ height: 48, mr: 1.5 }}
+          />
         ) : (
           /* RTS Logo — tries PNG first, falls back to SVG. Dark-mode
              flips the navy artwork to white via CSS filter; PNG has a
@@ -206,7 +212,7 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
                   height: 36,
                   // WinAir's avatar wears its brand red; everyone else keeps
                   // the app-primary pair.
-                  bgcolor: isWmTenant ? BANNER_BG : 'primary.light',
+                  bgcolor: chrome ? chrome.BANNER_BG : 'primary.light',
                   color: isWmTenant ? '#ffffff' : 'primary.dark',
                   fontSize: 14,
                   fontWeight: 500,
@@ -247,7 +253,7 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
               sx={{
                 width: 42,
                 height: 42,
-                bgcolor: isWmTenant ? BANNER_BG : 'primary.light',
+                bgcolor: chrome ? chrome.BANNER_BG : 'primary.light',
                 color: isWmTenant ? '#ffffff' : 'primary.dark',
                 fontSize: 15,
                 fontWeight: 500,
