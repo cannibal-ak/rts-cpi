@@ -66,7 +66,12 @@ def main() -> int:
         "FROM slices s JOIN dashboard_slices ds ON ds.slice_id = s.id "
         "WHERE ds.dashboard_id = ? ORDER BY s.id", (dash_id,)).fetchall()
 
-    hdr = {"Authorization": f"Bearer {guest}", "Content-Type": "application/json"}
+    # MUST be X-GuestToken (GUEST_TOKEN_HEADER_NAME in infra/superset_config.py).
+    # With Authorization: Bearer the request still authenticates, but Superset
+    # does not treat it as a guest user, so the token's RLS rules -- including
+    # the cap_date clause -- are silently NOT applied and the check passes on
+    # unfiltered data the dashboard would never show.
+    hdr = {"X-GuestToken": guest, "Content-Type": "application/json"}
     errors, unbound_all, empty = [], set(), []
 
     for s in slices:
@@ -79,6 +84,7 @@ def main() -> int:
         qc.setdefault("form_data", {})["dashboardId"] = dash_id
         qc["result_format"] = "json"
         qc["result_type"] = "full"
+        qc["force"] = True   # bypass the chart cache; a hit would mask a real failure
 
         try:
             r = requests.post(f"{SUPERSET}/api/v1/chart/data", headers=hdr,
