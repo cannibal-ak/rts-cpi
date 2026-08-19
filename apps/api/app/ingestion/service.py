@@ -126,7 +126,9 @@ def _seats_or_default(value: object) -> int:
 # feed still in the archive; every current feed carries RefCur/CompCur.
 # ALT is a demo clone built by direct INSERT and never ingests, but it is
 # listed so the fallback stays truthful if that ever changes.
-_TENANT_FALLBACK_CURRENCY = {"JY": "USD", "PW": "USD", "WM": "USD", "ALT": "EUR"}
+# DA is a demo tenant that DOES ingest — its files are PW's, relabelled — so
+# it inherits PW's USD.
+_TENANT_FALLBACK_CURRENCY = {"JY": "USD", "PW": "USD", "WM": "USD", "ALT": "EUR", "DA": "USD"}
 _FALLBACK_CURRENCY = "USD"
 
 
@@ -182,14 +184,25 @@ class IngestionService:
         basename = os.path.basename(filename)
 
         # Dedup gate: an identical file (same SHA-256) that is already
-        # COMMITTED is rejected outright with HTTP 409. FAILED / REJECTED
-        # prior jobs are silently allowed (the user is retrying after a
-        # parser fix). STAGED / VALIDATED with the same hash is allowed
-        # too but logged so operators can spot accidental duplicates.
+        # COMMITTED **for this tenant** is rejected outright with HTTP 409.
+        # FAILED / REJECTED prior jobs are silently allowed (the user is
+        # retrying after a parser fix). STAGED / VALIDATED with the same hash
+        # is allowed too but logged so operators can spot accidental duplicates.
+        #
+        # The tenant_code term matters for feeds that carry no airline column,
+        # where the tenant is known only from the filename. Velocity CSVs are
+        # exactly that: DA_VL_080126.csv and PW_VL_080126.csv are byte-identical
+        # on purpose (the DreamAir demo data is PW's, re-prefixed), so a
+        # tenant-blind hash check would reject the second tenant's copy as a
+        # duplicate and leave that tenant with no velocity data at all.
+        #
+        # This strictly NARROWS the gate: a genuine re-upload within one tenant
+        # is still a 409, which is the case the gate was written for.
         existing_committed = (
             self.db.query(IngestionJob)
             .filter(
                 IngestionJob.file_hash == file_hash,
+                IngestionJob.tenant_code == parsed.tenant_code,
                 IngestionJob.status == "COMMITTED",
             )
             .first()
@@ -207,10 +220,14 @@ class IngestionService:
                 existing_job_id=str(existing_committed.id),
             )
 
+        # Tenant-scoped for the same reason as the COMMITTED gate above:
+        # without it, every DreamAir velocity upload logs a spurious warning
+        # about PW's byte-identical copy.
         existing_inflight = (
             self.db.query(IngestionJob)
             .filter(
                 IngestionJob.file_hash == file_hash,
+                IngestionJob.tenant_code == parsed.tenant_code,
                 IngestionJob.status.in_(("STAGED", "VALIDATED")),
             )
             .first()
