@@ -4,3 +4,6 @@ __pycache__
 .venv
 .env.local
 alembic/versions/__pycache__
+
+# DreamAir demo source files -- deploy input, never part of the image
+data/da_demo/
