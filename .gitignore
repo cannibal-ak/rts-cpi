@@ -144,3 +144,6 @@ cpi_deploy_bundle_*.tar.gz
 superset_backups/
 _restore/
 *.tar.gz
+
+# DreamAir demo build artefacts (regenerate with scripts/relabel_pw_files_as_da.py)
+apps/api/data/da_demo/
