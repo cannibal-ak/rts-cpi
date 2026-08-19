@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Build the DreamAir demo dataset from PW's source files.
 
-DreamAir's demo data is PW's Jan-Jun 2026 feed re-badged. This script produces
-the DA_* files; it does NOT ingest them (see ingest_dreamair_demo.py).
+DreamAir's demo data is PW's feed re-badged. This script produces the DA_* files;
+it does NOT ingest them (see ingest_dreamair_demo.py).
+
+By default every PW file on disk is processed. The archive runs from 2025-08-16
+to 2026-08-19, though the 18 airline files before 2025-09-03 use an older layout
+the parser rejects ("Unrecognized AIRLINE schema"), and velocity does not start
+until 2025-12-12 -- so Sep-Nov 2025 are fare-only days. Use --start/--end to
+narrow the window; the original build ran --start 2026-01-01 --end 2026-07-01.
 
 WHY RE-INGEST RATHER THAN COPY THE ROWS
 ---------------------------------------
@@ -71,9 +77,6 @@ SRC_ROOTS = [
 AIRLINE_RE = re.compile(r"^PW_(\d{2})(\d{2})(\d{2})\.xlsx$", re.IGNORECASE)
 VELOCITY_RE = re.compile(r"^PW_VL_(\d{2})(\d{2})(\d{2})\.(csv|xlsx)$", re.IGNORECASE)
 
-WINDOW_START = date(2026, 1, 1)
-WINDOW_END = date(2026, 7, 1)  # exclusive
-
 SRC_CODE = "PW"
 DST_CODE = "DA"
 
@@ -103,8 +106,8 @@ def _committed_pw_hashes(engine) -> set[str]:
         return {r[0] for r in rows}
 
 
-def discover() -> dict[str, list[Path]]:
-    """basename -> every copy of it found on disk."""
+def discover(start: date | None, end: date | None) -> dict[str, list[Path]]:
+    """basename -> every copy of it found on disk. Bounds are [start, end)."""
     found: dict[str, list[Path]] = defaultdict(list)
     for root in SRC_ROOTS:
         if not root.exists():
@@ -116,7 +119,9 @@ def discover() -> dict[str, list[Path]]:
             if not m:
                 continue
             d = _file_date(m)
-            if d is None or not (WINDOW_START <= d < WINDOW_END):
+            if d is None:
+                continue
+            if (start is not None and d < start) or (end is not None and d >= end):
                 continue
             found[p.name].append(p)
     return found
@@ -177,7 +182,14 @@ def main() -> int:
     ap.add_argument("--out", required=True, help="output directory for DA_* files")
     ap.add_argument("--limit", type=int, default=0, help="process at most N of each kind")
     ap.add_argument("--force", action="store_true", help="rewrite outputs that already exist")
+    ap.add_argument("--start", type=date.fromisoformat, default=None,
+                    help="earliest file date to process, YYYY-MM-DD (default: no bound)")
+    ap.add_argument("--end", type=date.fromisoformat, default=None,
+                    help="exclusive upper bound on file date, YYYY-MM-DD (default: no bound)")
     args = ap.parse_args()
+
+    if args.start and args.end and args.start >= args.end:
+        raise SystemExit(f"--start {args.start} is not before --end {args.end}")
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -189,10 +201,11 @@ def main() -> int:
     committed = _committed_pw_hashes(engine)
     print(f"committed PW file hashes: {len(committed)}")
 
-    found = discover()
+    found = discover(args.start, args.end)
     airline = sorted(n for n in found if AIRLINE_RE.match(n))
     velocity = sorted(n for n in found if VELOCITY_RE.match(n))
-    print(f"discovered in {WINDOW_START}..{WINDOW_END}: "
+    window = f"{args.start or 'beginning'}..{args.end or 'end'}"
+    print(f"discovered in {window}: "
           f"{len(airline)} airline, {len(velocity)} velocity")
 
     if args.limit:
