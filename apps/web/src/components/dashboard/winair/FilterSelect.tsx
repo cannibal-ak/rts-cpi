@@ -1,14 +1,6 @@
 import { Autocomplete, TextField, Checkbox, Chip, Tooltip, Box, Typography } from '@mui/material';
 import { CheckBoxOutlineBlank, CheckBox as CheckBoxIcon, KeyboardArrowDown } from '@mui/icons-material';
-import {
-  FILTER_ACCENT,
-  FILTER_CHIP_BG,
-  FILTER_FIELD_BG,
-  FILTER_FIELD_LINE,
-  FILTER_INK,
-  FILTER_LABEL_INK,
-  FILTER_MUTED_INK,
-} from '../bannerTheme';
+import { useBrandedChrome } from '../tenantChrome';
 
 export interface FilterSelectProps {
   label: string;
@@ -53,6 +45,11 @@ export default function FilterSelect({
   id,
   minWidth = 0,
 }: FilterSelectProps) {
+  const {
+    FILTER_ACCENT, FILTER_CHIP_BG, FILTER_FIELD_BG, FILTER_FIELD_LINE, FILTER_INK,
+    FILTER_LABEL_INK, FILTER_MUTED_INK,
+  } = useBrandedChrome();
+
   const ink = onBanner ? FILTER_INK : undefined;
   const active = value.length > 0;
   const fieldId = id ? `filter-${id}` : undefined;

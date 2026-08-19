@@ -24,7 +24,7 @@ import DateFilterToggle from '../../components/dashboard/DateFilterToggle';
 import SingleChartViewer from '../../components/dashboard/SingleChartViewer';
 import KPIRow from '../../components/dashboard/KPIRow';
 import CapDateChip from '../../components/dashboard/CapDateChip';
-import { BANNER_BG, brandInk } from '../../components/dashboard/bannerTheme';
+import { getTenantChrome } from '../../components/dashboard/tenantChrome';
 import WinairTopFilterBar from '../../components/dashboard/winair/WinairTopFilterBar';
 import LatestPricesPanel from '../../components/dashboard/winair/LatestPricesPanel';
 import WinairTabBar, { PRICES_TAB, DASHBOARD_TAB } from '../../components/dashboard/winair/WinairTabBar';
@@ -51,6 +51,8 @@ const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline:
   // WinAir's header renders no title at all (see the header bar below), so this
   // string is unread for '5' \u2014 the row is here for tenant and freshnessDomain.
   '5': { title: 'WinAir Dashboard', tenant: 'WM', isAirline: true, freshnessDomain: 'Airline CPI \u2013 WM' },
+  // DreamAir is a WinAir twin: same header treatment, so this title is unread too.
+  '6': { title: 'DreamAir Dashboard', tenant: 'DA', isAirline: true, freshnessDomain: 'Airline CPI \u2013 DreamAir' },
 };
 
 // Dashboards allow-listed for the Chart-view filter overlay (see chartFiltersEnabled).
@@ -139,7 +141,14 @@ export default function DashboardViewerPage() {
   // iframe URL, which Superset reads once at mount — so `appliedFilterParams`
   // is what the embed is currently built from, and `pendingFilters` is what the
   // user has staged. Apply promotes one to the other and re-embeds.
-  const isWinair = meta?.tenant === 'WM';
+  // "Winair" here means "a tenant with its own out-of-iframe filter bar and tab
+  // row", which is now WinAir and DreamAir. The name is kept so the ~25 call
+  // sites below stay recognisable against git history; the chrome it paints
+  // with comes from the tenant, not from a hardcoded WinAir constant.
+  const chrome = getTenantChrome(meta?.tenant?.toLowerCase());
+  const isWinair = chrome !== null;
+  const BANNER_BG = chrome?.BANNER_BG;
+  const brandInk = chrome?.brandInk;
   // Dashboards whose Chart view mints a form_data_key overlay so the global
   // filter bar reaches the standalone explore iframe. App-route ids. WM only for
   // now — it is the only dashboard with an out-of-iframe bar. Extend one at a

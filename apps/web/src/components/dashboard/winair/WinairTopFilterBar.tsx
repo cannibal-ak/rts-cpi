@@ -2,12 +2,7 @@ import type React from 'react';
 import { Box, Button, Typography, Skeleton, Tooltip, Chip } from '@mui/material';
 import { FilterAltOff, Check, Tune } from '@mui/icons-material';
 import FilterSelect from './FilterSelect';
-import {
-  BANNER_BG, BANNER_HEADER_BG,
-  FILTER_ACCENT, FILTER_BG, FILTER_BORDER, FILTER_DISABLED_BG, FILTER_DISABLED_INK,
-  FILTER_ERROR_INK, FILTER_HOVER_BG, FILTER_INK, FILTER_LABEL_INK, FILTER_MUTED_INK,
-  FILTER_SKELETON, FILTER_SKELETON_TEXT,
-} from '../bannerTheme';
+import { useBrandedChrome } from '../tenantChrome';
 import type {
   DashboardFilter,
   DashboardFilterSelections,
@@ -84,6 +79,12 @@ export default function WinairTopFilterBar({
   scopeLabel,
   extraControls,
 }: WinairTopFilterBarProps) {
+  const {
+    BANNER_BG, BANNER_HEADER_BG, FILTER_ACCENT, FILTER_BG, FILTER_BORDER, FILTER_DISABLED_BG,
+    FILTER_DISABLED_INK, FILTER_ERROR_INK, FILTER_HOVER_BG, FILTER_INK, FILTER_LABEL_INK,
+    FILTER_MUTED_INK, FILTER_SKELETON, FILTER_SKELETON_TEXT,
+  } = useBrandedChrome();
+
   // Count only what is on screen: a stale selection for a filter this dashboard
   // no longer surfaces would otherwise be counted with no control to clear it.
   const activeCount = filters.filter(f => (pending[f.id] ?? []).length > 0).length;

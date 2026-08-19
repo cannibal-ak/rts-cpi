@@ -2,10 +2,7 @@ import { Box, Slider, Typography, Tooltip } from '@mui/material';
 import {
   formatDuration, DEP_TIME_MIN, DEP_TIME_MAX, DURATION_MIN, DURATION_MAX,
 } from './priceChartTheme';
-import {
-  FILTER_ACCENT, FILTER_FIELD_BG, FILTER_FIELD_LINE, FILTER_INK,
-  FILTER_LABEL_INK, FILTER_MUTED_INK, FILTER_SLIDER_RAIL,
-} from '../bannerTheme';
+import { useBrandedChrome } from '../tenantChrome';
 
 export type Range = [number, number];
 
@@ -40,6 +37,11 @@ interface TimeRangeFilterProps {
 export default function TimeRangeFilter({
   label, value, min, max, onChange, disabled, help,
 }: TimeRangeFilterProps) {
+  const {
+    FILTER_ACCENT, FILTER_FIELD_BG, FILTER_FIELD_LINE, FILTER_INK, FILTER_LABEL_INK,
+    FILTER_MUTED_INK, FILTER_SLIDER_RAIL,
+  } = useBrandedChrome();
+
   const active = value[0] > min || value[1] < max;
 
   const body = (

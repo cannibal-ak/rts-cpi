@@ -6,11 +6,11 @@ import AirlineCpiPricingTab from './AirlineCpiPricingTab';
 import AirlineCpiVelocityTab from './AirlineCpiVelocityTab';
 import { api } from '../../api';
 import type { DataFreshness } from '../../types';
-import { brandInk } from '../../components/dashboard/bannerTheme';
+import { getTenantChrome } from '../../components/dashboard/tenantChrome';
 
 interface AirlineCpiPageProps {
   /** Tenant code determines which snapshot view to query (JY, PW, ALT or WM). */
-  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM';
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA';
 }
 
 const TENANT_LABELS: Record<string, string> = {
@@ -43,8 +43,10 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   const pageTitle = TENANT_LABELS[tenantCode] || `Airline CPI – ${tenantCode}`;
   // WinAir's page chrome follows its brand red (see bannerTheme); others keep
   // theme primary untouched.
-  const isWm = tenantCode === 'WM';
-  const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT', 'WM'];
+  const chrome = getTenantChrome(tenantCode.toLowerCase());
+  const isWm = chrome !== null;
+  const brandInk = chrome?.brandInk;
+  const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT', 'WM', 'DA'];
   const showTabs = TENANTS_WITH_VELOCITY.includes(tenantCode);
 
   const tab: 0 | 1 = showTabs && searchParams.get('tab') === 'velocity' ? 1 : 0;

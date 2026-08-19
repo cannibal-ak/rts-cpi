@@ -19,6 +19,7 @@ export const TENANT_CONFIG: Record<string, TenantConfigEntry> = {
   fjl:     { initials: 'FL', displayName: 'FJL Cruise',    orgName: 'Fjord Line' },
   alt:     { initials: 'SA', displayName: 'Sky',           orgName: 'Sky Airways' },
   wm:      { initials: 'WA', displayName: 'WinAir',        orgName: 'WinAir' },
+  da:      { initials: 'DA', displayName: 'DreamAir',      orgName: 'DreamAir' },
 };
 
 export const TENANT_FALLBACK: TenantConfigEntry = {

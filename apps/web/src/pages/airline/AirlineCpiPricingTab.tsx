@@ -13,10 +13,10 @@ import { api } from '../../api';
 import { fetchAllPagesCached } from '../../api/datasetCache';
 import { isAbortError } from '../../api/httpClient';
 import type { AirlineSnapshot, FilterMetadata } from '../../types';
-import { BANNER_BG, brandInk } from '../../components/dashboard/bannerTheme';
+import { getTenantChrome, useTenantChrome } from '../../components/dashboard/tenantChrome';
 
 interface AirlineCpiPricingTabProps {
-  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM';
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA';
   filters: Record<string, string>;
   onFiltersChange: (f: Record<string, string>) => void;
   /** Parent populates this ref so the page toolbar's Export button can fire CSV. */
@@ -355,7 +355,7 @@ const EXPORT_COLUMNS: Array<{ header: string; key: keyof AirlineSnapshot }> = [
 // re-walking every page. See api/datasetCache.ts.
 function fetchAllRows(
   baseQuery: Record<string, string>,
-  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM',
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA',
   onProgress?: (loaded: number, total: number) => void,
   signal?: AbortSignal,
 ): Promise<AirlineSnapshot[]> {
@@ -397,7 +397,10 @@ function downloadBlob(blob: Blob, filename: string) {
 // ────────────────────────────────────────────────────────────────────────
 export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersChange, exportRef }: AirlineCpiPricingTabProps) {
   // WinAir accents follow the brand red; other tenants keep theme primary.
-  const isWm = tenantCode === 'WM';
+  const chrome = getTenantChrome(tenantCode.toLowerCase());
+  const isWm = chrome !== null;
+  const brandInk = chrome?.brandInk;
+  const BANNER_BG = chrome?.BANNER_BG;
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [allData, setAllData] = useState<AirlineSnapshot[]>([]);
@@ -770,6 +773,10 @@ interface PricingRowProps {
 }
 
 function PricingRow({ row, expanded, onToggle, isWm = false }: PricingRowProps) {
+  // PricingRow is its own component, so it reads the chrome from the session
+  // rather than from the page's closure. isWm stays in the props for the
+  // caller's other uses.
+  const chrome = useTenantChrome();
   const isRT = row.trip_type === 'RT';
   return (
     <>
@@ -816,7 +823,7 @@ function PricingRow({ row, expanded, onToggle, isWm = false }: PricingRowProps) 
               bgcolor: 'action.hover',
               p: 1,
               borderLeft: 3,
-              borderColor: isWm ? brandInk : 'primary.main',
+              borderColor: chrome ? chrome.brandInk : 'primary.main',
               maxHeight: 150,
               overflowY: 'auto',
             }}>

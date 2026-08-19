@@ -54,6 +54,19 @@ export const navigationItems: NavItem[] = [
     ],
   },
   {
+    label: 'Airline CPI Data',
+    path: '/cpi/airline/da',
+    icon: 'Flight',
+    requiredModules: ['airline_da'],
+    requiredRoles: ['TENANT_ADMIN', 'TENANT_USER'],
+    category: 'Modules',
+    hideForSuperAdmin: true,
+    children: [
+      { label: 'Pricing', path: '/cpi/airline/da?tab=pricing', icon: 'PriceChange' },
+      { label: 'Velocity', path: '/cpi/airline/da?tab=velocity', icon: 'Speed' },
+    ],
+  },
+  {
     label: 'Cruise/Ferry CPI \u2013 FJL',
     path: '/cpi/cruise/fjl',
     icon: 'DirectionsBoat',
