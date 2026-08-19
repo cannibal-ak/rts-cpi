@@ -964,7 +964,12 @@ _DASHBOARD_DATE_VIEW = {
     "3": "vw_cfl_cpi_fjl_snapshot",
     "4": "vw_airline_cpi_alt_snapshot",
     "5": "vw_airline_cpi_wm_snapshot",
-    "6": "vw_airline_cpi_da_snapshot",
+    # DreamAir points at an INTERSECTION of its fare and velocity dates, not the
+    # fare view, because its two feeds do not cover the same days -- 162 fare
+    # dates, 147 with velocity. Offering the other 15 meant the picker defaulted
+    # to 2026-06-30, where the cap_date RLS clause left the velocity chart with
+    # zero rows and it rendered empty. See migration 039.
+    "6": "vw_da_dashboard_dates",
 }
 
 # Whitelist of view names we'll ever query from this endpoint. The view name
