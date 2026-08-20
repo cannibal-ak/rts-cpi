@@ -259,10 +259,146 @@ export interface AlertRule {
   created_at: string; owner: string;
 }
 
+export type AlertSeverity = 'info' | 'warning' | 'critical';
+
+/** Structured facts behind an alert. Every field optional — a rule family that
+ *  does not compute one simply omits it, and the row renderer skips it. */
+export interface AlertPayload {
+  route?: string;
+  origin?: string;
+  destination?: string;
+  window?: string;
+  competitor?: string;
+  currency?: string;
+  metric?: string;
+  state?: 'undercut' | 'cheapest' | string;
+  prev_value?: number;
+  current_value?: number;
+  delta_abs?: number;
+  delta_pct?: number;
+  direction?: 'up' | 'down';
+  da_fare?: number;
+  da_rank?: number;
+  cheaper_competitors?: number;
+  /** How many competitors we actually have on this route. Six of DreamAir's
+   *  twelve routes carry exactly one, so "rank 1 of 2" needs this context. */
+  competitor_count?: number;
+  best_competitor?: string;
+  best_competitor_fare?: number;
+  observations?: number;
+  prev_observations?: number;
+  evaluated_at?: string;
+  rule_key?: string;
+  [key: string]: unknown;
+}
+
 export interface AlertEvent {
   id: string; rule_id: string; rule_name: string; triggered_at: string;
-  severity: 'info' | 'warning' | 'critical';
+  severity: AlertSeverity;
   message: string; delivery_status: 'pending' | 'sent' | 'failed';
+
+  // Added with the alerts engine (migration 040).
+  rule_key: string;
+  scope_key?: string | null;
+  /** The capture date this fact is ABOUT, and the baseline it was compared
+   *  against. Distinct from triggered_at, which is when we say it happened. */
+  observed_at?: string | null;
+  prev_observed_at?: string | null;
+  /** 'backfill' marks an event computed retroactively from real historical
+   *  captures rather than observed live. */
+  evaluation_mode: 'live' | 'backfill' | 'manual' | 'preview' | string;
+  payload: AlertPayload;
+  /** Per-user, computed per request — two users of one tenant see the same
+   *  events with different read state. */
+  is_read: boolean;
+}
+
+export interface AlertSummary {
+  unread_count: number;
+  capped: boolean;
+  recent: AlertEvent[];
+  newest_triggered_at: string | null;
+}
+
+/** One control on the settings screen. Ranges and options come from the server
+ *  so the client never hard-codes what a threshold may be. */
+export interface AlertTunable {
+  key: string;
+  label: string;
+  type: 'number' | 'enum' | 'bool' | 'multiselect';
+  unit: 'percent' | 'currency' | 'places' | string | null;
+  min: number | null;
+  max: number | null;
+  step: number | null;
+  options: string[] | null;
+  help: string | null;
+}
+
+export interface AlertPreset {
+  id: string;
+  rule_key: string;
+  name: string;
+  description: string | null;
+  domain: string;
+  rule_type: string;
+  is_active: boolean;
+  is_preset: boolean;
+  severity_default: AlertSeverity;
+  condition: Record<string, unknown>;
+  tunables: AlertTunable[];
+  /** Fields that must be filled before the rule may be switched on. */
+  missing_requirements: string[];
+  created_at: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface AlertPresetUpdate {
+  is_active?: boolean;
+  condition?: Record<string, unknown>;
+}
+
+export interface AlertRunSummary {
+  tenant_code: string;
+  cap_date: string | null;
+  prev_cap_date: string | null;
+  cap_date_age_days: number | null;
+  rules_evaluated: string[];
+  groups_evaluated: number;
+  events_created: number;
+  events_suppressed_dedupe: number;
+  groups_skipped_currency: number;
+  captures_skipped_incomplete: number;
+  duration_ms: number;
+  mode: string;
+  note: string | null;
+}
+
+export interface AlertPreview {
+  rule_key: string;
+  cap_date: string | null;
+  prev_cap_date: string | null;
+  would_fire: number;
+  groups_evaluated: number;
+  sample: { severity: AlertSeverity; message: string; payload: AlertPayload }[];
+}
+
+export interface AlertEventQuery {
+  page?: number;
+  page_size?: number;
+  unread_only?: boolean;
+  rule_key?: string;
+  severity?: AlertSeverity;
+  route?: string;
+  competitor?: string;
+  since?: string;
+  until?: string;
+  with_total?: boolean;
+}
+
+export interface MarkReadResult {
+  updated: number;
+  unread_count: number;
 }
 
 

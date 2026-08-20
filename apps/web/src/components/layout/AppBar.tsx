@@ -11,7 +11,7 @@ import {
   Tooltip,
 } from '@mui/material';
 import {
-  Menu as MenuIcon,
+  MenuOpen,
   LightMode,
   DarkMode,
   PersonOutlined,
@@ -31,12 +31,15 @@ import fjordlineLogo from '../../assets/logos/fjordline-logo.png';
 import skyLogoLight from '../../assets/logos/sky-airways-logo.png';
 import skyLogoDark from '../../assets/logos/sky-airways-logo-dark.png';
 import { TENANT_CONFIG, TENANT_FALLBACK } from '../../utils/tenantConfig';
+import { getTenantChrome, tenantKeyFromModules } from '../dashboard/tenantChrome';
+import NotificationBell from '../alerts/NotificationBell';
 
 interface AppBarProps {
   onToggleSidebar: () => void;
+  sidebarOpen: boolean;
 }
 
-export default function AppBar({ onToggleSidebar }: AppBarProps) {
+export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
   const { session } = useSession();
   const { mode, toggleTheme } = useThemeMode();
   const { logout } = useAuth();
@@ -45,16 +48,9 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
 
   // Derive tenant key from enabled_modules. A single-module session
   // identifies a tenant; multi-module or empty is the RTS platform admin.
-  const tenantKey: keyof typeof TENANT_CONFIG =
-    session.enabled_modules.length === 1
-      ? (session.enabled_modules[0] === 'airline_jy' ? 'jy'
-        : session.enabled_modules[0] === 'airline_pw' ? 'pw'
-        : session.enabled_modules[0] === 'airline_alt' ? 'alt'
-        : session.enabled_modules[0] === 'airline_wm' ? 'wm'
-        : session.enabled_modules[0] === 'airline_da' ? 'da'
-        : session.enabled_modules[0] === 'cfl_fjl' ? 'fjl'
-        : 'rts')
-      : 'rts';
+  // tenantKeyFromModules is shared with useTenantChrome so the logo and the
+  // chrome can never disagree about which tenant this is.
+  const tenantKey = tenantKeyFromModules(session.enabled_modules);
 
   const isJyTenant = tenantKey === 'jy';
   const isWmTenant = tenantKey === 'wm';
@@ -63,6 +59,9 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
   const isFjlTenant = tenantKey === 'fjl';
   const isAltTenant = tenantKey === 'alt';
   const tenant = TENANT_CONFIG[tenantKey] ?? TENANT_FALLBACK;
+  // null for unbranded tenants, which is what `isWmTenant ? BANNER_BG :
+  // 'primary.light'` used to express.
+  const chrome = getTenantChrome(tenantKey);
 
   // Explicit chip-label overrides win; otherwise strip the TENANT_ prefix
   // and title-case (TENANT_ADMIN → "Admin", TENANT_USER → "Subtenant").
@@ -98,14 +97,19 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
       }}
     >
       <Toolbar sx={{ gap: 1 }}>
-        <IconButton
-          edge="start"
-          aria-label="Toggle sidebar navigation"
-          onClick={onToggleSidebar}
-          sx={{ mr: 1 }}
-        >
-          <MenuIcon />
-        </IconButton>
+        <Tooltip title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}>
+          <IconButton
+            edge="start"
+            aria-label={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+            onClick={onToggleSidebar}
+            sx={{ mr: 1 }}
+          >
+            {/* MenuOpen's arrow points left (collapse); mirrored when the
+                sidebar is collapsed so the arrow points the way the panel
+                will move. */}
+            <MenuOpen sx={{ transform: sidebarOpen ? 'none' : 'scaleX(-1)' }} />
+          </IconButton>
+        </Tooltip>
 
         {isPwTenant ? (
           <Box
@@ -191,6 +195,10 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
         <Box sx={{ flexGrow: 1 }} />
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          {/* Renders null unless this session has alerting, so the header is
+              byte-identical for the platform admin and non-adopting tenants. */}
+          <NotificationBell />
+
           <Tooltip title={`Switch to ${mode === 'light' ? 'dark' : 'light'} mode`}>
             <IconButton onClick={toggleTheme} aria-label="Toggle theme">
               {mode === 'light' ? <DarkMode /> : <LightMode />}
@@ -207,8 +215,10 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
                 sx={{
                   width: 36,
                   height: 36,
-                  bgcolor: 'primary.light',
-                  color: 'primary.dark',
+                  // WinAir's avatar wears its brand red; everyone else keeps
+                  // the app-primary pair.
+                  bgcolor: chrome ? chrome.BANNER_BG : 'primary.light',
+                  color: isWmTenant ? '#ffffff' : 'primary.dark',
                   fontSize: 14,
                   fontWeight: 500,
                   transition: 'opacity 150ms ease',
@@ -248,8 +258,8 @@ export default function AppBar({ onToggleSidebar }: AppBarProps) {
               sx={{
                 width: 42,
                 height: 42,
-                bgcolor: 'primary.light',
-                color: 'primary.dark',
+                bgcolor: chrome ? chrome.BANNER_BG : 'primary.light',
+                color: isWmTenant ? '#ffffff' : 'primary.dark',
                 fontSize: 15,
                 fontWeight: 500,
               }}

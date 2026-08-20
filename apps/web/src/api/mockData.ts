@@ -1,6 +1,6 @@
 import type {
   AirlineSnapshot, CflSnapshot,
-  AlertRule, AlertEvent, TenantFeature,
+  AlertRule, AlertEvent, AlertPreset, TenantFeature,
   FilterMetadata,
 } from '../types';
 
@@ -132,16 +132,181 @@ export function generateAlertRules(): AlertRule[] {
 
 // ── Alert events ────────────────────
 export function generateAlertEvents(): AlertEvent[] {
+  // Relative to now, so the "time ago" labels stay believable whenever this
+  // runs. Real DreamAir routes and competitor codes (TC, KQ, YS, UI, ...).
+  const hoursAgo = (h: number) =>
+    new Date(Date.now() - h * 3_600_000).toISOString();
+  const dayOf = (h: number) =>
+    new Date(Date.now() - h * 3_600_000).toISOString().slice(0, 10);
+
+  const ev = (
+    id: string, h: number, severity: AlertEvent['severity'],
+    rule_key: string, rule_name: string, message: string,
+    payload: AlertEvent['payload'], is_read: boolean,
+  ): AlertEvent => ({
+    id, rule_id: `ar-${rule_key}`, rule_key, rule_name,
+    triggered_at: hoursAgo(h), severity, message,
+    delivery_status: 'sent', scope_key: null,
+    observed_at: dayOf(h), prev_observed_at: dayOf(h + 48),
+    evaluation_mode: 'live', payload, is_read,
+  });
+
   return [
-    { id: 'ae-001', rule_id: 'ar-001', rule_name: 'Fare Drop > 15% on Key Routes', triggered_at: '2026-03-05T07:30:00Z', severity: 'critical', message: 'Fare dropped 22% on LHR-DXB (competitor: EK, was $820 now $640)', delivery_status: 'sent' },
-    { id: 'ae-002', rule_id: 'ar-002', rule_name: 'New Competitor on LHR-JFK', triggered_at: '2026-03-04T18:00:00Z', severity: 'warning', message: 'New carrier detected on LHR-JFK route: Norse Atlantic (fare $289)', delivery_status: 'sent' },
-    { id: 'ae-003', rule_id: 'ar-001', rule_name: 'Fare Drop > 15% on Key Routes', triggered_at: '2026-03-03T12:15:00Z', severity: 'info', message: 'Fare dropped 16% on CDG-SIN (competitor: SQ, was $1250 now $1050)', delivery_status: 'sent' },
-    { id: 'ae-004', rule_id: 'ar-005', rule_name: 'DVR-CLS Vehicle Fare Spike', triggered_at: '2026-03-04T06:00:00Z', severity: 'warning', message: 'Vehicle fare increased 32% on DVR-CLS (P&O, was $180 now $238)', delivery_status: 'sent' },
-    { id: 'ae-005', rule_id: 'ar-004', rule_name: 'Daily Import Health Check', triggered_at: '2026-03-05T10:00:00Z', severity: 'info', message: 'All airline imports within 24h freshness window', delivery_status: 'sent' },
-    { id: 'ae-006', rule_id: 'ar-001', rule_name: 'Fare Drop > 15% on Key Routes', triggered_at: '2026-03-02T09:45:00Z', severity: 'critical', message: 'Fare dropped 28% on LHR-JFK (competitor: AA, was $650 now $468)', delivery_status: 'sent' },
-    { id: 'ae-007', rule_id: 'ar-003', rule_name: 'CFL Price Anomaly Detection', triggered_at: '2026-03-01T14:30:00Z', severity: 'warning', message: 'Statistical anomaly on STO-TLL route (z-score 4.2, Stena Line)', delivery_status: 'failed' },
+    ev('ae-001', 2, 'warning', 'undercut_position', 'Lost the cheapest position',
+       'We are no longer cheapest on ZNZ-NBO for departures 00–07 days out — rank 3 of 3. YS at USD 205.00 against our USD 333.75.',
+       { route: 'ZNZ-NBO', origin: 'ZNZ', destination: 'NBO', window: '00-07',
+         currency: 'USD', state: 'undercut', da_fare: 333.75, da_rank: 3,
+         competitor_count: 3, best_competitor: 'YS', best_competitor_fare: 205.0 }, false),
+    ev('ae-002', 5, 'warning', 'comp_price_move', 'Competitor fare moved sharply',
+       'TC cut its ZNZ-NBO fare 30.6% (USD 229.00 → USD 159.00) for departures 15–30 days out.',
+       { route: 'ZNZ-NBO', competitor: 'TC', window: '15-30', currency: 'USD',
+         prev_value: 229.0, current_value: 159.0, delta_abs: -70.0,
+         delta_pct: -30.6, direction: 'down' }, false),
+    ev('ae-003', 9, 'warning', 'comp_price_move', 'Competitor fare moved sharply',
+       'UI cut its DAR-ARK fare 26.3% (USD 95.00 → USD 70.00) for departures 00–07 days out.',
+       { route: 'DAR-ARK', competitor: 'UI', window: '00-07', currency: 'USD',
+         prev_value: 95.0, current_value: 70.0, delta_abs: -25.0,
+         delta_pct: -26.3, direction: 'down' }, false),
+    ev('ae-004', 26, 'info', 'undercut_position', 'Lost the cheapest position',
+       'We are cheapest again on JRO-MWZ for departures 08–14 days out at USD 108.40.',
+       { route: 'JRO-MWZ', window: '08-14', currency: 'USD', state: 'cheapest',
+         da_fare: 108.4, da_rank: 1, competitor_count: 1 }, false),
+    ev('ae-005', 30, 'warning', 'comp_price_move', 'Competitor fare moved sharply',
+       'TC raised its ARK-ZNZ fare 46.1% (USD 204.00 → USD 298.00) for departures 08–14 days out.',
+       { route: 'ARK-ZNZ', competitor: 'TC', window: '08-14', currency: 'USD',
+         prev_value: 204.0, current_value: 298.0, delta_abs: 94.0,
+         delta_pct: 46.1, direction: 'up' }, true),
+    ev('ae-006', 33, 'warning', 'undercut_position', 'Lost the cheapest position',
+       'We are no longer cheapest on JRO-DAR for departures 00–07 days out — rank 2 of 2. TC at USD 150.00 against our USD 160.40.',
+       { route: 'JRO-DAR', window: '00-07', currency: 'USD', state: 'undercut',
+         da_fare: 160.4, da_rank: 2, competitor_count: 1,
+         best_competitor: 'TC', best_competitor_fare: 150.0 }, true),
+    ev('ae-007', 51, 'warning', 'comp_price_move', 'Competitor fare moved sharply',
+       'KQ cut its DAR-NBO fare 18.4% (USD 326.00 → USD 266.00) for departures 00–07 days out.',
+       { route: 'DAR-NBO', competitor: 'KQ', window: '00-07', currency: 'USD',
+         prev_value: 326.0, current_value: 266.0, delta_abs: -60.0,
+         delta_pct: -18.4, direction: 'down' }, true),
+    ev('ae-008', 55, 'info', 'undercut_position', 'Lost the cheapest position',
+       'We are cheapest again on JRO-ZNZ for departures 08–14 days out at USD 169.40.',
+       { route: 'JRO-ZNZ', window: '08-14', currency: 'USD', state: 'cheapest',
+         da_fare: 169.4, da_rank: 1, competitor_count: 1 }, true),
+    ev('ae-009', 74, 'warning', 'comp_price_move', 'Competitor fare moved sharply',
+       'YS raised its ARK-ZNZ fare 22.8% (USD 151.00 → USD 185.00) for departures 15–30 days out.',
+       { route: 'ARK-ZNZ', competitor: 'YS', window: '15-30', currency: 'USD',
+         prev_value: 151.0, current_value: 185.0, delta_abs: 34.0,
+         delta_pct: 22.8, direction: 'up' }, true),
+    ev('ae-010', 80, 'warning', 'comp_price_move', 'Competitor fare moved sharply',
+       'TC cut its DAR-MWZ fare 13.5% (USD 192.00 → USD 166.00) for departures 00–07 days out.',
+       { route: 'DAR-MWZ', competitor: 'TC', window: '00-07', currency: 'USD',
+         prev_value: 192.0, current_value: 166.0, delta_abs: -26.0,
+         delta_pct: -13.5, direction: 'down' }, true),
+    ev('ae-011', 98, 'info', 'undercut_position', 'Lost the cheapest position',
+       'We are cheapest again on ARK-ZNZ for departures 08–14 days out at USD 224.40.',
+       { route: 'ARK-ZNZ', window: '08-14', currency: 'USD', state: 'cheapest',
+         da_fare: 224.4, da_rank: 1, competitor_count: 4 }, true),
+    ev('ae-012', 121, 'warning', 'comp_price_move', 'Competitor fare moved sharply',
+       'Coa cut its DAR-JRO fare 34.2% (USD 452.00 → USD 297.00) for departures 15–30 days out.',
+       { route: 'DAR-JRO', competitor: 'Coa', window: '15-30', currency: 'USD',
+         prev_value: 452.0, current_value: 297.0, delta_abs: -155.0,
+         delta_pct: -34.2, direction: 'down' }, true),
+    ev('ae-013', 145, 'warning', 'undercut_position', 'Lost the cheapest position',
+       'We are no longer cheapest on DAR-MWZ for departures 08–14 days out — rank 2 of 2. YS at USD 131.00 against our USD 166.40.',
+       { route: 'DAR-MWZ', window: '08-14', currency: 'USD', state: 'undercut',
+         da_fare: 166.4, da_rank: 2, competitor_count: 1,
+         best_competitor: 'YS', best_competitor_fare: 131.0 }, true),
+    ev('ae-014', 168, 'warning', 'comp_price_move', 'Competitor fare moved sharply',
+       'Fli raised its JRO-NBO fare 27.9% (USD 283.00 → USD 362.00) for departures 00–07 days out.',
+       { route: 'JRO-NBO', competitor: 'Fli', window: '00-07', currency: 'USD',
+         prev_value: 283.0, current_value: 362.0, delta_abs: 79.0,
+         delta_pct: 27.9, direction: 'up' }, true),
   ];
 }
+
+const _WINDOW_TUNABLE = {
+  key: 'windows', label: 'Departure windows', type: 'multiselect' as const,
+  unit: null, min: null, max: null, step: null,
+  options: ['00-07', '08-14', '15-30'],
+  help: 'How far ahead of departure to watch, in days.',
+};
+
+export function generateAlertPresets(): AlertPreset[] {
+  return [
+    {
+      id: 'ar-undercut_position', rule_key: 'undercut_position',
+      name: 'Lost the cheapest position',
+      description: 'Our cheapest available fare on a route and departure window fell behind the competition, or recovered.',
+      domain: 'airline', rule_type: 'threshold', is_active: true,
+      is_preset: true, severity_default: 'warning',
+      condition: { max_rank: 1, min_gap_pct: 1.0, notify_on_recovery: true,
+                   windows: ['00-07', '08-14', '15-30'], routes: null },
+      tunables: [
+        { key: 'max_rank', label: 'Alert when our rank falls below', type: 'number',
+          unit: 'places', min: 1, max: 5, step: 1, options: null,
+          help: '1 means alert as soon as we are no longer cheapest.' },
+        { key: 'min_gap_pct', label: 'Ignore gaps smaller than', type: 'number',
+          unit: 'percent', min: 0, max: 20, step: 0.5, options: null,
+          help: 'Stops being undercut by pennies from raising an alert.' },
+        { key: 'notify_on_recovery', label: 'Also tell me when we recover',
+          type: 'bool', unit: null, min: null, max: null, step: null,
+          options: null, help: null },
+        { key: 'routes', label: 'Routes', type: 'multiselect', unit: null,
+          min: null, max: null, step: null, options: null,
+          help: 'Leave empty to watch every route.' },
+        _WINDOW_TUNABLE,
+      ],
+      missing_requirements: [], created_at: null, updated_at: null, updated_by: null,
+    },
+    {
+      id: 'ar-comp_price_move', rule_key: 'comp_price_move',
+      name: 'Competitor fare moved sharply',
+      description: "A competitor's cheapest available fare on a route and departure window moved by more than the threshold since the previous capture.",
+      domain: 'airline', rule_type: 'threshold', is_active: true,
+      is_preset: true, severity_default: 'warning',
+      condition: { move_pct: 10.0, direction: 'both', min_abs_move: 5.0,
+                   windows: ['00-07', '08-14', '15-30'], competitors: null, routes: null },
+      tunables: [
+        { key: 'move_pct', label: 'Move of at least', type: 'number',
+          unit: 'percent', min: 1, max: 50, step: 0.5, options: null,
+          help: 'Percentage change against the previous capture.' },
+        { key: 'min_abs_move', label: 'and at least', type: 'number',
+          unit: 'currency', min: 0, max: 500, step: 1, options: null,
+          help: 'Ignores large percentages on cheap fares.' },
+        { key: 'direction', label: 'Direction', type: 'enum', unit: null,
+          min: null, max: null, step: null, options: ['down', 'up', 'both'], help: null },
+        { key: 'competitors', label: 'Competitors', type: 'multiselect',
+          unit: null, min: null, max: null, step: null, options: null,
+          help: 'Leave empty to watch every competitor.' },
+        _WINDOW_TUNABLE,
+      ],
+      missing_requirements: [], created_at: null, updated_at: null, updated_by: null,
+    },
+    {
+      id: 'ar-comp_price_threshold', rule_key: 'comp_price_threshold',
+      name: 'Competitor fare crossed a price line',
+      description: "A competitor's cheapest available fare crossed an absolute price you set.",
+      domain: 'airline', rule_type: 'threshold', is_active: false,
+      is_preset: true, severity_default: 'info',
+      condition: { operator: 'below', value: null, currency: 'USD',
+                   windows: ['00-07'], competitors: null, routes: null },
+      tunables: [
+        { key: 'operator', label: 'Alert when the fare goes', type: 'enum',
+          unit: null, min: null, max: null, step: null,
+          options: ['below', 'above'], help: null },
+        { key: 'value', label: 'this price', type: 'number', unit: 'currency',
+          min: 0, max: 100000, step: 1, options: null, help: null },
+        { key: 'routes', label: 'on routes', type: 'multiselect', unit: null,
+          min: null, max: null, step: null, options: null, help: null },
+        { key: 'competitors', label: 'Competitors', type: 'multiselect',
+          unit: null, min: null, max: null, step: null, options: null,
+          help: 'Leave empty to watch every competitor.' },
+        _WINDOW_TUNABLE,
+      ],
+      missing_requirements: ['value', 'routes'],
+      created_at: null, updated_at: null, updated_by: null,
+    },
+  ];
+}
+
 
 
 
@@ -181,6 +346,7 @@ export const mockAirlineSnapshots: AirlineSnapshot[] = [];
 export const mockCflSnapshots: CflSnapshot[] = [];
 export const mockAlertRules = generateAlertRules();
 export const mockAlertEvents = generateAlertEvents();
+export const mockAlertPresets = generateAlertPresets();
 
 
 export const mockTenantFeatures = generateTenantFeatures();

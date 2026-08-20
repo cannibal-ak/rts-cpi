@@ -5,6 +5,8 @@ import type { CpiApiClient, SnapshotQuery, JobQuery, DashboardChartsResponse, Da
 import type {
   Paginated,
   AlertRule,
+  AlertEvent,
+  AlertPreset,
   SftpConnection,
   SftpConnectionCreate,
   SftpConnectionUpdate,
@@ -25,7 +27,7 @@ import type {
 } from '../types';
 import {
   mockAirlineSnapshots, mockCflSnapshots,
-  mockAlertRules, mockAlertEvents,
+  mockAlertRules, mockAlertEvents, mockAlertPresets,
   mockTenantFeatures,
   mockFilterMetadata,
 } from './mockData';
@@ -66,6 +68,14 @@ const mockPwUsers: AdminUserListItem[] = [
     role: 'TENANT_ADMIN', is_active: true, is_locked: false, force_password_change: false,
     last_login: null, created_at: '2026-01-01T00:00:00Z' },
 ];
+
+// Mutable copies so mark-read actually flips state in mock mode — a frozen
+// array cannot exercise the badge. Same pattern as mockTenantFeatures.
+const _mockEvents: AlertEvent[] = mockAlertEvents.map(e => ({ ...e }));
+const _mockPresets: AlertPreset[] = mockAlertPresets.map(p => ({ ...p }));
+
+const _byNewest = (a: AlertEvent, b: AlertEvent) =>
+  b.triggered_at.localeCompare(a.triggered_at);
 
 export const mockClient: CpiApiClient = {
   airline: {
@@ -129,9 +139,101 @@ export const mockClient: CpiApiClient = {
     getPreview: (id: string) => delay({ job_id: id, sample_valid: [], sample_rejected: [] } as IngestionPreview),
   },
   alerts: {
-    listRules: () => delay([...mockAlertRules]),
-    createRule: (rule) => delay({ ...rule, id: `rule-${Date.now()}`, created_at: new Date().toISOString() } as AlertRule),
-    listEvents: () => delay([...mockAlertEvents]),
+    getSummary: () => {
+      const unread = _mockEvents.filter(e => !e.is_read);
+      return delay({
+        unread_count: unread.length,
+        capped: false,
+        recent: [..._mockEvents].sort(_byNewest).slice(0, 5),
+        newest_triggered_at: _mockEvents.length
+          ? [..._mockEvents].sort(_byNewest)[0].triggered_at
+          : null,
+      });
+    },
+
+    listEvents: (q) => {
+      let rows = [..._mockEvents].sort(_byNewest);
+      if (q?.unread_only) rows = rows.filter(e => !e.is_read);
+      if (q?.severity) rows = rows.filter(e => e.severity === q.severity);
+      if (q?.rule_key) rows = rows.filter(e => e.rule_key === q.rule_key);
+      if (q?.route) rows = rows.filter(e => e.payload?.route === q.route);
+      if (q?.competitor) rows = rows.filter(e => e.payload?.competitor === q.competitor);
+      if (q?.since) rows = rows.filter(e => (e.observed_at ?? '') >= q.since!);
+      if (q?.until) rows = rows.filter(e => (e.observed_at ?? '') <= q.until!);
+      const page = q?.page ?? 1;
+      const pageSize = q?.page_size ?? 25;
+      const start = (page - 1) * pageSize;
+      const items = rows.slice(start, start + pageSize);
+      return delay({
+        items,
+        page_info: {
+          total: rows.length, page, page_size: pageSize,
+          has_next: start + pageSize < rows.length,
+        },
+      });
+    },
+
+    unreadCount: () => delay({
+      unread: _mockEvents.filter(e => !e.is_read).length, capped: false,
+    }),
+
+    markRead: (ids) => {
+      let updated = 0;
+      _mockEvents.forEach(e => {
+        if (ids.includes(e.id) && !e.is_read) { e.is_read = true; updated++; }
+      });
+      return delay({ updated, unread_count: _mockEvents.filter(e => !e.is_read).length });
+    },
+
+    markUnread: (ids) => {
+      let updated = 0;
+      _mockEvents.forEach(e => {
+        if (ids.includes(e.id) && e.is_read) { e.is_read = false; updated++; }
+      });
+      return delay({ updated, unread_count: _mockEvents.filter(e => !e.is_read).length });
+    },
+
+    markAllRead: () => {
+      let updated = 0;
+      _mockEvents.forEach(e => { if (!e.is_read) { e.is_read = true; updated++; } });
+      return delay({ updated, unread_count: 0 });
+    },
+
+    listPresets: () => delay(_mockPresets.map(p => ({ ...p }))),
+
+    getPreset: (ruleKey) => {
+      const p = _mockPresets.find(x => x.rule_key === ruleKey);
+      return p ? delay({ ...p }) : Promise.reject(new Error(`no preset ${ruleKey}`));
+    },
+
+    updatePreset: (ruleKey, body) => {
+      const p = _mockPresets.find(x => x.rule_key === ruleKey);
+      if (!p) return Promise.reject(new Error(`no preset ${ruleKey}`));
+      if (body.is_active !== undefined) p.is_active = body.is_active;
+      if (body.condition) p.condition = { ...p.condition, ...body.condition };
+      p.updated_at = new Date().toISOString();
+      return delay({ ...p });
+    },
+
+    previewPreset: (ruleKey) => delay({
+      rule_key: ruleKey,
+      cap_date: '2026-08-12',
+      prev_cap_date: '2026-08-10',
+      would_fire: 3,
+      groups_evaluated: 65,
+      sample: _mockEvents.slice(0, 3).map(e => ({
+        severity: e.severity, message: e.message, payload: e.payload,
+      })),
+    }),
+
+    run: () => delay({
+      tenant_code: 'DA',
+      cap_date: '2026-08-12', prev_cap_date: '2026-08-10', cap_date_age_days: 8,
+      rules_evaluated: ['undercut_position', 'comp_price_move'],
+      groups_evaluated: 95, events_created: 0, events_suppressed_dedupe: 8,
+      groups_skipped_currency: 0, captures_skipped_incomplete: 1,
+      duration_ms: 42, mode: 'manual', note: null,
+    }),
   },
   admin: {
     getTenantFeatures: () => delay([...mockTenantFeatures]),

@@ -4,7 +4,8 @@
  */
 import type {
   Paginated, AirlineSnapshot, VelocitySnapshot, CflSnapshot, FilterMetadata,
-  AlertRule, AlertEvent,
+  AlertRule, AlertEvent, AlertSummary, AlertPreset, AlertPresetUpdate,
+  AlertPreview, AlertRunSummary, AlertEventQuery, MarkReadResult,
   TenantFeature, DataFreshness,
   SftpConnection, SftpConnectionCreate, SftpConnectionUpdate,
   SftpConnectionTestResult, SftpConnectionListQuery,
@@ -382,9 +383,23 @@ export interface CpiApiClient {
   };
   // Alerts
   alerts: {
-    listRules(): Promise<AlertRule[]>;
-    createRule(rule: Omit<AlertRule, 'id' | 'created_at'>): Promise<AlertRule>;
-    listEvents(): Promise<AlertEvent[]>;
+    // Feed. getSummary is what the notification bell polls: one small request
+    // that serves both the badge and the popover, so opening the popover costs
+    // nothing and the two can never disagree.
+    getSummary(opts?: RequestOptions): Promise<AlertSummary>;
+    listEvents(q?: AlertEventQuery, opts?: RequestOptions): Promise<Paginated<AlertEvent>>;
+    unreadCount(opts?: RequestOptions): Promise<{ unread: number; capped: boolean }>;
+    markRead(eventIds: string[]): Promise<MarkReadResult>;
+    markUnread(eventIds: string[]): Promise<MarkReadResult>;
+    markAllRead(before?: string): Promise<MarkReadResult>;
+
+    // Preset settings. Reads are open to any tenant user; writes need
+    // TENANT_ADMIN and are enforced server-side.
+    listPresets(): Promise<AlertPreset[]>;
+    getPreset(ruleKey: string): Promise<AlertPreset>;
+    updatePreset(ruleKey: string, body: AlertPresetUpdate): Promise<AlertPreset>;
+    previewPreset(ruleKey: string, body: AlertPresetUpdate): Promise<AlertPreview>;
+    run(dryRun?: boolean): Promise<AlertRunSummary>;
   };
 
   // Admin

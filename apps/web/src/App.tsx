@@ -27,6 +27,10 @@ import ChangePasswordPage from './pages/auth/ChangePasswordPage';
 import AcceptInvitePage from './pages/auth/AcceptInvitePage';
 import SetupMfaPage from './pages/auth/SetupMfaPage';
 import SecurityPage from './pages/auth/SecurityPage';
+import AlertsPage from './pages/alerts/AlertsPage';
+import AlertPresetsPage from './pages/alerts/AlertPresetsPage';
+import { AlertsProvider } from './context/AlertsContext';
+import { ALERTS_MODULES } from './alerts/alertsAccess';
 import { isSuperAdmin } from './utils/access';
 import { getPrimaryDashboardId } from './pages/superset/dashboardAccess';
 
@@ -80,7 +84,9 @@ export default function App() {
               <Route
                 element={
                   <AuthGuard>
-                    <MainLayout />
+                    <AlertsProvider>
+                      <MainLayout />
+                    </AlertsProvider>
                   </AuthGuard>
                 }
               >
@@ -89,6 +95,31 @@ export default function App() {
 
                 {/* Security settings (any authenticated user) */}
                 <Route path="/security" element={<SecurityPage />} />
+
+                {/* Alerts. Two routes rather than one tabbed page: the feed is
+                    open to any tenant user, the settings are TENANT_ADMIN only,
+                    and a single route could carry only one guard. */}
+                <Route path="/alerts" element={
+                  <ProtectedRoute
+                    requiredModules={ALERTS_MODULES}
+                    requiredRoles={['TENANT_ADMIN', 'TENANT_USER']}
+                    denyForSuperAdmin
+                  >
+                    <AlertsPage />
+                  </ProtectedRoute>
+                } />
+
+                {/* The app's first tenant-admin-owned settings page; every
+                    existing /admin/* route is RTS platform admin only. */}
+                <Route path="/alerts/settings" element={
+                  <ProtectedRoute
+                    requiredModules={ALERTS_MODULES}
+                    requiredRoles={['TENANT_ADMIN']}
+                    denyForSuperAdmin
+                  >
+                    <AlertPresetsPage />
+                  </ProtectedRoute>
+                } />
 
                 {/* Modules */}
                 <Route path="/cpi/airline/jy" element={
