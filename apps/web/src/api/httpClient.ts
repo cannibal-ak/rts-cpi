@@ -5,7 +5,8 @@
 import type { CpiApiClient, SnapshotQuery, JobQuery, ChartFormDataKeyResponse, DashboardChartsResponse, DashboardDateFilter, DashboardFilterConfigResponse, DashboardFilterSelections, DashboardPermalinkResponse, DashboardTabsResponse, KpiKey, KpiSummaryResponse, KpiDetailResponse, PriceHistoryQuery, PriceHistoryResponse, PricePointsQuery, PricePointsResponse } from './client';
 import type {
   Paginated, AirlineSnapshot, VelocitySnapshot, CflSnapshot, FilterMetadata,
-  AlertRule, AlertEvent,
+  AlertRule, AlertEvent, AlertSummary, AlertPreset, AlertPresetUpdate,
+  AlertPreview, AlertRunSummary, AlertEventQuery, MarkReadResult,
   TenantFeature, DataFreshness,
   SftpConnection, SftpConnectionCreate, SftpConnectionUpdate,
   SftpConnectionTestResult, SftpConnectionListQuery,
@@ -427,9 +428,43 @@ export const httpClient: CpiApiClient = {
       get<IngestionPreview>(`/api/v1/ingestion/jobs/${id}/preview`),
   },
   alerts: {
-    listRules: () => get<AlertRule[]>('/api/v1/alerts/rules'),
-    createRule: (rule) => post<AlertRule>('/api/v1/alerts/rules', rule),
-    listEvents: () => get<AlertEvent[]>('/api/v1/alerts/events'),
+    getSummary: (opts?: RequestOptions) =>
+      get<AlertSummary>('/api/v1/alerts/summary', undefined, opts),
+
+    listEvents: (q?: AlertEventQuery, opts?: RequestOptions) => {
+      const params: Record<string, string | number | undefined> = {};
+      if (q?.page !== undefined) params.page = q.page;
+      if (q?.page_size !== undefined) params.page_size = q.page_size;
+      if (q?.unread_only) params.unread_only = 'true';
+      if (q?.rule_key) params.rule_key = q.rule_key;
+      if (q?.severity) params.severity = q.severity;
+      if (q?.route) params.route = q.route;
+      if (q?.competitor) params.competitor = q.competitor;
+      if (q?.since) params.since = q.since;
+      if (q?.until) params.until = q.until;
+      if (q?.with_total === false) params.with_total = 'false';
+      return get<Paginated<AlertEvent>>('/api/v1/alerts/events', params, opts);
+    },
+
+    unreadCount: (opts?: RequestOptions) =>
+      get<{ unread: number; capped: boolean }>('/api/v1/alerts/events/unread-count', undefined, opts),
+
+    markRead: (eventIds: string[]) =>
+      post<MarkReadResult>('/api/v1/alerts/events/read', { event_ids: eventIds }),
+    markUnread: (eventIds: string[]) =>
+      post<MarkReadResult>('/api/v1/alerts/events/unread', { event_ids: eventIds }),
+    markAllRead: (before?: string) =>
+      post<MarkReadResult>('/api/v1/alerts/events/read-all', { before: before ?? null }),
+
+    listPresets: () => get<AlertPreset[]>('/api/v1/alerts/rules'),
+    getPreset: (ruleKey: string) =>
+      get<AlertPreset>(`/api/v1/alerts/rules/${encodeURIComponent(ruleKey)}`),
+    updatePreset: (ruleKey: string, body: AlertPresetUpdate) =>
+      patch<AlertPreset>(`/api/v1/alerts/rules/${encodeURIComponent(ruleKey)}`, body),
+    previewPreset: (ruleKey: string, body: AlertPresetUpdate) =>
+      post<AlertPreview>(`/api/v1/alerts/rules/${encodeURIComponent(ruleKey)}/preview`, body),
+    run: (dryRun = false) =>
+      post<AlertRunSummary>(`/api/v1/alerts/run?dry_run=${dryRun}`, {}),
   },
 
   admin: {

@@ -32,6 +32,7 @@ import skyLogoLight from '../../assets/logos/sky-airways-logo.png';
 import skyLogoDark from '../../assets/logos/sky-airways-logo-dark.png';
 import { TENANT_CONFIG, TENANT_FALLBACK } from '../../utils/tenantConfig';
 import { getTenantChrome, tenantKeyFromModules } from '../dashboard/tenantChrome';
+import NotificationBell from '../alerts/NotificationBell';
 
 interface AppBarProps {
   onToggleSidebar: () => void;
@@ -194,6 +195,10 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
         <Box sx={{ flexGrow: 1 }} />
 
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+          {/* Renders null unless this session has alerting, so the header is
+              byte-identical for the platform admin and non-adopting tenants. */}
+          <NotificationBell />
+
           <Tooltip title={`Switch to ${mode === 'light' ? 'dark' : 'light'} mode`}>
             <IconButton onClick={toggleTheme} aria-label="Toggle theme">
               {mode === 'light' ? <DarkMode /> : <LightMode />}

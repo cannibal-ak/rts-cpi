@@ -21,6 +21,7 @@ import {
   Storage, Schedule, PlayCircleFilled, VpnKey, AssignmentTurnedIn,
   PriceChange, Speed,
   LogoutOutlined,
+  NotificationsActive, NotificationsNone, Tune,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useSession } from '../../context/SessionContext';
@@ -36,6 +37,8 @@ const DRAWER_WIDTH = 260;
 const RAIL_WIDTH = 68;
 
 const iconMap: Record<string, React.ReactElement> = {
+  NotificationsActive: <NotificationsActive />,
+  NotificationsNone: <NotificationsNone />, Tune: <Tune />,
   Home: <Home />, Flight: <Flight />, DirectionsBoat: <DirectionsBoat />,
   Dashboard: <Dashboard />,
   CloudUpload: <CloudUpload />,
@@ -125,6 +128,27 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
       capabilities: item.requiredCapabilities,
     });
   });
+
+  /**
+   * Children declare their own gates only when they differ from the parent's.
+   * A child with none is as visible as its parent, which is what every existing
+   * sub-item relies on; a child that names roles/modules is checked on its own
+   * terms, so an admin-only sub-item cannot show up for a plain tenant user and
+   * dead-end on /not-authorized.
+   */
+  const visibleChildren = (item: NavItem): NavItem[] =>
+    (item.children ?? []).filter(child => {
+      if (child.requireSuperAdmin && !isSuperAdmin(session)) return false;
+      if (child.hideForSuperAdmin && isSuperAdmin(session)) return false;
+      if (!child.requiredRoles && !child.requiredModules && !child.requiredCapabilities) {
+        return true;
+      }
+      return hasAccess({
+        roles: child.requiredRoles,
+        modules: child.requiredModules,
+        capabilities: child.requiredCapabilities,
+      });
+    });
 
   const categories = Array.from(new Set(filteredItems.map(i => i.category || 'Other')));
 
@@ -346,7 +370,7 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
                 // Rows that own sub-items are section headers: highlighting
                 // them as well as the active child would show two accented
                 // rows at once, so they get a lighter text accent instead.
-                const hasSubItems = !!item.children?.length || isDashboardsRow;
+                const hasSubItems = visibleChildren(item).length > 0 || isDashboardsRow;
                 const isSelected = onPath && !hasSubItems;
                 return (
                   <React.Fragment key={item.path}>
@@ -386,7 +410,7 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
                     </ListItemButton>
 
                     {/* Static sub-items (WinAir's Pricing / Velocity tabs) */}
-                    {(item.children ?? []).map(child => {
+                    {visibleChildren(item).map(child => {
                       const childSelected = isChildActive(
                         location.pathname, location.search, child.path,
                       );

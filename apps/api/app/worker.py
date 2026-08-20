@@ -31,7 +31,11 @@ celery_app = Celery(
     "cpi",
     broker=_BROKER,
     backend=_BACKEND,
-    include=["app.tasks.sftp_pull", "app.tasks.reconcile_task"],
+    include=[
+        "app.tasks.sftp_pull",
+        "app.tasks.reconcile_task",
+        "app.tasks.alerts_eval",
+    ],
 )
 
 celery_app.conf.update(
@@ -59,6 +63,16 @@ celery_app.conf.beat_schedule = {
         # how soon an orphan is observed after that age is reached.
         "schedule": 300.0,
         "options": {"expires": 240.0},
+    },
+    "alerts-evaluate-all": {
+        "task": "app.tasks.alerts.evaluate_all_tenants",
+        # Every 15 minutes. The evaluator anchors on the newest capture
+        # present rather than on the clock, so once a capture pair has been
+        # evaluated every later tick is a ~30ms no-op that the dedupe index
+        # swallows. `expires` stops a backed-up queue stacking ticks that
+        # would all no-op anyway.
+        "schedule": 900.0,
+        "options": {"expires": 600.0},
     },
     "redbeat-reconcile-heartbeat": {
         "task": "app.tasks.reconcile_redbeat",

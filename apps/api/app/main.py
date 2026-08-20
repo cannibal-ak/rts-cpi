@@ -21,6 +21,7 @@ from app.routers import (
     admin_password_management,
     admin_dashboard,
     admin_smtp_config,
+    admin_alerts,
 )
 from app.api.v1 import ingestion as ingestion_v2
 from app.services import redbeat_sync
@@ -122,6 +123,11 @@ app.include_router(admin_dashboard.router, dependencies=_protected)
 # the forgot-password delivery path. Router-level RequirePlatformAdmin
 # + _protected gate match the other admin routers.
 app.include_router(admin_smtp_config.router, dependencies=_protected)
+
+# Platform-admin operations for the alerts engine (backfill, manual evaluate,
+# purge). Router-level RequirePlatformAdmin; _protected adds the password /
+# MFA gates the rest of the app uses.
+app.include_router(admin_alerts.router, dependencies=_protected)
 
 # Phase A ingestion router — Data Ops (manual upload + jobs view).
 # Admin-only; uses _protected pattern like every other admin router.

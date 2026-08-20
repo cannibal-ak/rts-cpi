@@ -39,6 +39,24 @@ export const navigationItems: NavItem[] = [
     hideForSuperAdmin: true,
   },
   {
+    // Alerts sits in Modules, which is already in PER_ITEM_CATEGORIES, so it
+    // gets its own icon-rail entry without introducing a new category.
+    label: 'Alerts',
+    path: '/alerts',
+    icon: 'NotificationsActive',
+    requiredModules: ['airline_da'],
+    requiredRoles: ['TENANT_ADMIN', 'TENANT_USER'],
+    category: 'Modules',
+    hideForSuperAdmin: true,
+    children: [
+      { label: 'Alert feed', path: '/alerts', icon: 'NotificationsNone' },
+      // TENANT_ADMIN only — the Sidebar filters children on their own
+      // requiredRoles so a plain user never sees a link that 403s.
+      { label: 'Alert settings', path: '/alerts/settings', icon: 'Tune',
+        requiredRoles: ['TENANT_ADMIN'] },
+    ],
+  },
+  {
     label: 'Airline CPI Data',
     path: '/cpi/airline/wm',
     icon: 'Flight',

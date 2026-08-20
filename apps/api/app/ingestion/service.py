@@ -500,6 +500,38 @@ class IngestionService:
             self.db.commit()
             self.db.refresh(job)
 
+            # New fare rows have landed and are durable, so re-evaluate this
+            # tenant's alert rules. Five rules, all load-bearing:
+            #   * AFTER the commit, so an alert can only ever describe rows that
+            #     actually exist;
+            #   * dispatch only, never inline — commit_job already owns the
+            #     longest transaction in the app and evaluation is not its job;
+            #   * every exception swallowed, because a Redis outage must not
+            #     fail an ingestion that has already succeeded;
+            #   * imported lazily, to keep celery out of the ingestion import
+            #     graph (same contract redbeat_sync documents);
+            #   * placed here rather than in sftp_pull, so the one edit covers
+            #     both the manual upload and the scheduled pull.
+            # Inert for DreamAir, which never ingests in the demo — this is what
+            # gives the real tenants sub-minute alerts.
+            if (job.domain or "").upper() == "AIRLINE":
+                try:
+                    from app.tasks.alerts_eval import evaluate_tenant_task
+
+                    evaluate_tenant_task.apply_async(
+                        args=[str(job.tenant_id), job.tenant_code,
+                              job.file_date.isoformat() if job.file_date else None],
+                        countdown=5,
+                    )
+                except Exception:
+                    # Not this module's `logger`: it is an app.* logger, which
+                    # does not propagate in this container, so a failure here
+                    # would be invisible. uvicorn.error is the convention.
+                    logging.getLogger("uvicorn.error").warning(
+                        "ALERT_EVAL_DISPATCH_FAILED job=%s tenant=%s",
+                        job.id, job.tenant_code, exc_info=True,
+                    )
+
             return CommitResult(
                 job=job,
                 rows_inserted=rows_inserted,
