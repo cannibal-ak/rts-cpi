@@ -74,6 +74,14 @@ export const mockRolePresets: Record<string, TenantSession> = {
     is_super_admin: false,
     user: { id: 'user-da', name: 'DreamAir', email: 'da@airline.com', roles: ['TENANT_ADMIN'] },
   },
+  airline_5l: {
+    ...mockSession,
+    tenant_id: 'ac000000-0000-0000-0000-000000000001',
+    tenant_name: 'Liat Air',
+    enabled_modules: ['airline_5l'],
+    is_super_admin: false,
+    user: { id: 'user-5l', name: 'Liat Air', email: 'liat@airline.com', roles: ['TENANT_ADMIN'] },
+  },
 };
 
 export const mockDataFreshness: DataFreshness[] = [

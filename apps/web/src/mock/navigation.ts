@@ -44,7 +44,7 @@ export const navigationItems: NavItem[] = [
     label: 'Alerts',
     path: '/alerts',
     icon: 'NotificationsActive',
-    requiredModules: ['airline_da'],
+    requiredModules: ['airline_da', 'airline_5l'],
     requiredRoles: ['TENANT_ADMIN', 'TENANT_USER'],
     category: 'Modules',
     hideForSuperAdmin: true,
@@ -82,6 +82,19 @@ export const navigationItems: NavItem[] = [
     children: [
       { label: 'Pricing', path: '/cpi/airline/da?tab=pricing', icon: 'PriceChange' },
       { label: 'Velocity', path: '/cpi/airline/da?tab=velocity', icon: 'Speed' },
+    ],
+  },
+  {
+    label: 'Airline CPI Data',
+    path: '/cpi/airline/5l',
+    icon: 'Flight',
+    requiredModules: ['airline_5l'],
+    requiredRoles: ['TENANT_ADMIN', 'TENANT_USER'],
+    category: 'Modules',
+    hideForSuperAdmin: true,
+    children: [
+      { label: 'Pricing', path: '/cpi/airline/5l?tab=pricing', icon: 'PriceChange' },
+      { label: 'Velocity', path: '/cpi/airline/5l?tab=velocity', icon: 'Speed' },
     ],
   },
   {

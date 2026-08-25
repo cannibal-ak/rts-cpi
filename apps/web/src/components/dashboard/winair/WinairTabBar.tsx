@@ -87,7 +87,7 @@ export default function WinairTabBar({
           variant="scrollable"
           scrollButtons="auto"
           allowScrollButtonsMobile
-          aria-label="WinAir dashboard sections"
+          aria-label="Dashboard sections"
           sx={{
             minHeight: 44,
             py: 0.75,

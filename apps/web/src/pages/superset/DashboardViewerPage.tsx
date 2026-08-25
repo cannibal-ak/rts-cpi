@@ -53,6 +53,8 @@ const DASHBOARD_META: Record<string, { title: string; tenant: string; isAirline:
   '5': { title: 'WinAir Dashboard', tenant: 'WM', isAirline: true, freshnessDomain: 'Airline CPI \u2013 WM' },
   // DreamAir is a WinAir twin: same header treatment, so this title is unread too.
   '6': { title: 'DreamAir Dashboard', tenant: 'DA', isAirline: true, freshnessDomain: 'Airline CPI \u2013 DreamAir' },
+  // Liat Air is another WinAir twin: same header treatment, so this title is unread too.
+  '7': { title: 'Liat Air Dashboard', tenant: '5L', isAirline: true, freshnessDomain: 'Airline CPI \u2013 Liat Air' },
 };
 
 // Dashboards allow-listed for the Chart-view filter overlay (see chartFiltersEnabled).

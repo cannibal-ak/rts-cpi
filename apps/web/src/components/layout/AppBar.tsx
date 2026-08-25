@@ -26,6 +26,7 @@ import { useAuth } from '../../context/AuthContext';
 import interCaribbeanLogo from '../../assets/logos/jy-logo-banner.png';
 import winairLogo from '../../assets/logos/winair-logo.png';
 import dreamairLogo from '../../assets/logos/dreamair-logo.png';
+import liatLogo from '../../assets/logos/liat-logo.png';
 import precisionAirLogo from '../../assets/logos/precisionair-logo.png';
 import fjordlineLogo from '../../assets/logos/fjordline-logo.png';
 import skyLogoLight from '../../assets/logos/sky-airways-logo.png';
@@ -55,6 +56,7 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
   const isJyTenant = tenantKey === 'jy';
   const isWmTenant = tenantKey === 'wm';
   const isDaTenant = tenantKey === 'da';
+  const isLiatTenant = tenantKey === '5l';
   const isPwTenant = tenantKey === 'pw';
   const isFjlTenant = tenantKey === 'fjl';
   const isAltTenant = tenantKey === 'alt';
@@ -163,6 +165,13 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
             component="img"
             src={dreamairLogo}
             alt="DreamAir"
+            sx={{ height: 48, mr: 1.5 }}
+          />
+        ) : isLiatTenant ? (
+          <Box
+            component="img"
+            src={liatLogo}
+            alt="Liat Air"
             sx={{ height: 48, mr: 1.5 }}
           />
         ) : (

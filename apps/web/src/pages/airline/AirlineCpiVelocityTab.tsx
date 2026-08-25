@@ -17,7 +17,7 @@ import { getTenantChrome } from '../../components/dashboard/tenantChrome';
 
 interface AirlineCpiVelocityTabProps {
   /** Tenant code selects which airline's velocity snapshot to query. */
-  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA';
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA' | '5L';
   filters: Record<string, string>;
   onFiltersChange: (f: Record<string, string>) => void;
   /** Parent populates this ref so the page toolbar's Export button can fire CSV. */
@@ -131,7 +131,7 @@ const EXPORT_COLUMNS: Array<{ header: string; key: keyof VelocitySnapshot }> = [
 // from memory after a 50-row freshness probe instead of re-walking every page.
 function fetchAllRows(
   baseQuery: Record<string, string>,
-  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA',
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA' | '5L',
   onProgress?: (loaded: number, total: number) => void,
   signal?: AbortSignal,
 ): Promise<VelocitySnapshot[]> {

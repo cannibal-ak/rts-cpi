@@ -16,7 +16,7 @@ import type { AirlineSnapshot, FilterMetadata } from '../../types';
 import { getTenantChrome, useTenantChrome } from '../../components/dashboard/tenantChrome';
 
 interface AirlineCpiPricingTabProps {
-  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA';
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA' | '5L';
   filters: Record<string, string>;
   onFiltersChange: (f: Record<string, string>) => void;
   /** Parent populates this ref so the page toolbar's Export button can fire CSV. */
@@ -355,7 +355,7 @@ const EXPORT_COLUMNS: Array<{ header: string; key: keyof AirlineSnapshot }> = [
 // re-walking every page. See api/datasetCache.ts.
 function fetchAllRows(
   baseQuery: Record<string, string>,
-  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA',
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA' | '5L',
   onProgress?: (loaded: number, total: number) => void,
   signal?: AbortSignal,
 ): Promise<AirlineSnapshot[]> {
