@@ -90,6 +90,8 @@ def _resolve_currency(code: str, currency: str | None) -> str | None:
         return "USD"
     if code == "DA":
         return "USD"
+    if code == "5L":
+        return "USD"
     if code != "FJL":
         return None
     resolved = (currency or _FJL_DEFAULT_CURRENCY).upper()
@@ -666,6 +668,19 @@ _DA_KPI_META = {
 }
 
 
+# Liat Air (5L) — the DreamAir twin — reuses the JY KPI machinery verbatim in
+# the same way; only the user-facing labels differ. The key `jy_avg_fare`
+# stays literal as it does for ALT, WM and DA: it is the machinery's key, not
+# a display string. See AIRLINE_CFG["5L"] below.
+_LIAT_KPI_META = {
+    "airlines_analyzed":    {"label": "Airlines Analyzed",    "subheader": "Distinct competitors tracked"},
+    "markets_covered":      {"label": "Markets Covered",      "subheader": "Origin-destination pairs analyzed"},
+    "jy_avg_fare":          {"label": "Liat Air Avg Fare",    "subheader": "Average Liat Air fare across all routes"},
+    "competitors_avg_fare": {"label": "Competitors Avg Fare", "subheader": "Average competitor fare across all routes"},
+    "dep_dates_monitored":  {"label": "Dep Dates Monitored",  "subheader": "Future travel dates with pricing data"},
+}
+
+
 AIRLINE_CFG: dict[str, dict[str, Any]] = {
     "JY": {
         "view": "vw_airline_cpi_jy_snapshot",
@@ -713,6 +728,20 @@ AIRLINE_CFG: dict[str, dict[str, Any]] = {
         "view": "vw_airline_cpi_da_snapshot",
         "summary_sql": _summary_sql_jy,
         "meta": _DA_KPI_META,
+        "float_keys": _JY_FLOAT_KEYS,
+        "null_keys": _JY_NULL_KEYS,
+        "details": {
+            "airlines_analyzed": _detail_jy_airlines,
+            "markets_covered": _detail_jy_markets,
+            "jy_avg_fare": _detail_jy_jy_fare,
+            "competitors_avg_fare": _detail_jy_comp_fare_by_route,
+            "dep_dates_monitored": _detail_jy_dep_dates,
+        },
+    },
+    "5L": {
+        "view": "vw_airline_cpi_5l_snapshot",
+        "summary_sql": _summary_sql_jy,
+        "meta": _LIAT_KPI_META,
         "float_keys": _JY_FLOAT_KEYS,
         "null_keys": _JY_NULL_KEYS,
         "details": {

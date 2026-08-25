@@ -74,3 +74,20 @@ patterns:
     date_format: DDMMYY
     case_insensitive: false
     example: "DA_VL_010426.CSV"
+
+  # Liat Air. Same layout as the other airline feeds; the tenant code is the
+  # carrier's real IATA code 5L, so the prefix is digit-first — fine for a
+  # filename even though SQL identifiers derived from the tenant use "liat".
+  - regex: "^5L_(\\d{6})\\.xlsx$"
+    tenant_code: 5L
+    domain: AIRLINE
+    date_format: DDMMYY
+    case_insensitive: true
+    example: "5L_010426.xlsx"
+
+  - regex: "^5L_VL_(\\d{6})\\.(?i:csv|xlsx)$"
+    tenant_code: 5L
+    domain: VELOCITY
+    date_format: DDMMYY
+    case_insensitive: false
+    example: "5L_VL_010426.CSV"

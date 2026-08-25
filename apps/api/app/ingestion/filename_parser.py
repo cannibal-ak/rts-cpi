@@ -38,7 +38,7 @@ SUPPORTED_DATE_FORMATS: dict[str, str] = {
 # reported "unknown tenant prefix" instead of naming the real problem. wm and da
 # are both listed now; keep this in step with the yaml.
 KNOWN_PREFIXES = frozenset(
-    {"jy", "jyvelocitydata", "pw", "pwvelocitydata", "fjl", "wm", "da"}
+    {"jy", "jyvelocitydata", "pw", "pwvelocitydata", "fjl", "wm", "da", "5l"}
 )
 SUPPORTED_EXTENSIONS = frozenset({"csv", "xlsx"})
 
