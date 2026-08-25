@@ -113,20 +113,33 @@ the two blue slots apart).
 
 | # | Carrier | Hex | On white | | # | Carrier | Hex | On white |
 |---|---|---|---|---|---|---|---|---|
-| 1 | **5L** (Liat Air) | `#D02127` | 5.35:1 | | 5 | *(slot 5)* | `#2E7D32` | 5.13:1 |
-| 2 | *(slot 2)* | `#0375B4` | 4.29:1 | | 6 | *(slot 6)* | `#D6208F` | 4.71:1 |
-| 3 | *(slot 3)* | `#C08A00` | 3.05:1 | | 7 | *(slot 7)* | `#A05A2C` | 5.26:1 |
-| 4 | *(slot 4)* | `#275AA1` | 6.86:1 | | 8 | *(slot 8)* | `#9B4FD8` | 4.66:1 |
+| 1 | **5L** (Liat Air) | `#D02127` | 5.35:1 | | 5 | S6 | `#2E7D32` | 5.13:1 |
+| 2 | BW | `#0375B4` | 4.29:1 | | 6 | PY | `#D6208F` | 4.71:1 |
+| 3 | JY | `#C08A00` | 3.05:1 | | 7 | *(unused)* | `#A05A2C` | 5.26:1 |
+| 4 | WM | `#275AA1` | 6.86:1 | | 8 | *(unused)* | `#9B4FD8` | 4.66:1 |
 
-**Slots 2–8 are UNASSIGNED as of 2026-08-25** — the Liat data has not been
-ingested. When it lands, assign competitors in **descending row volume** by
-running `scripts/superset/liat_dash8_carrier_keys.py` (dry-run, then
-`--apply`): it derives the assignment from `vw_airline_cpi_5l_snapshot`,
-refuses to run against an empty view, and merges the keys additively
-(key-level backup + `--revert`). Afterwards: record the printed table here,
-AND mirror the assignment into `LIAT_CARRIERS.known` in
-`apps/web/src/components/dashboard/tenantCarrierColors.ts` — the native panel
-and the embedded dashboard must colour each carrier identically.
+**Slots were assigned 2026-08-25** by
+`scripts/superset/liat_dash8_carrier_keys.py` from the first committed
+ingest (27,179 rows, cap_dates 2026-08-09..24), in descending row volume —
+so the assignment is reproducible from the data, and the three busiest
+carriers wear the logo's own colours:
+
+| Carrier | Rows | Slot |
+|---|---|---|
+| BW | 12,313 | 2 (logo azure) |
+| JY | 8,202 | 3 (logo gold) |
+| WM | 4,421 | 4 (logo wordmark blue) |
+| S6 | 2,045 | 5 |
+| PY | 198 | 6 |
+
+The same assignment is mirrored in `LIAT_CARRIERS.known` in
+`apps/web/src/components/dashboard/tenantCarrierColors.ts` — the native
+panel and the embedded dashboard must colour each carrier identically. A NEW
+carrier appearing in a later upload takes the next free slot (7, then 8,
+then the neutral fallbacks): re-run the script — existing keys are never
+overwritten, so the established assignment cannot shift under it. Note BW,
+JY, WM and S6 here are Liat's competitors, not the tenants of the same
+codes — each tenant's palette is its own scope.
 
 Note that `5L` also appears as a **competitor** inside JY's and WM's data
 (WinAir's palette gives it mint `#1BAF7A` there). Those tenants' palettes are
