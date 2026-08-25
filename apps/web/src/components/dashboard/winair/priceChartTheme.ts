@@ -46,20 +46,42 @@ const FALLBACK_COLORS = [
 ];
 
 /**
+ * A tenant's carrier-identity colours: the fixed per-code map plus the
+ * fallback cycle for carriers nobody has named yet. WinAir's table below is
+ * the default everywhere; other tenants register theirs in
+ * ../tenantCarrierColors.ts (which is also where the shape is documented).
+ */
+export interface CarrierColorTable {
+  known: Record<string, string>;
+  fallbacks: string[];
+}
+
+/** WinAir's table — the historical constants above, bundled. */
+export const WINAIR_CARRIER_TABLE: CarrierColorTable = {
+  known: KNOWN_AIRLINE_COLORS,
+  fallbacks: FALLBACK_COLORS,
+};
+
+/**
  * Build a code → colour map for exactly the airlines present.
  *
  * `airlines` should already be in the order you want the legend to read;
- * fallbacks are handed out in that order.
+ * fallbacks are handed out in that order. `table` selects the tenant's
+ * identity colours and defaults to WinAir's, so pre-existing call sites are
+ * unchanged; branded tenants pass useCarrierColorTable()'s result.
  */
-export function buildAirlineColorMap(airlines: string[]): Record<string, string> {
+export function buildAirlineColorMap(
+  airlines: string[],
+  table: CarrierColorTable = WINAIR_CARRIER_TABLE,
+): Record<string, string> {
   const map: Record<string, string> = {};
   let nextFallback = 0;
   for (const code of airlines) {
-    const known = KNOWN_AIRLINE_COLORS[code];
+    const known = table.known[code];
     if (known) {
       map[code] = known;
     } else {
-      map[code] = FALLBACK_COLORS[nextFallback % FALLBACK_COLORS.length];
+      map[code] = table.fallbacks[nextFallback % table.fallbacks.length];
       nextFallback += 1;
     }
   }
