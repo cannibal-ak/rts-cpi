@@ -77,34 +77,36 @@ SLICEMAP = {old: 125 + i for i, old in enumerate(LIAT_SLICES)}
 # exists; adding them here would freeze an assignment no data supports yet.
 DA_CODE = "5L"
 CARRIER_COLORS = {
-    "5L": "#1B5FA8",   # slot 1 — brand ocean blue
+    "5L": "#D02127",   # slot 1 — brand red, the logo A-mark gradient midpoint
 }
 # The fixed 10-slot scheme domain (slots 2-8 + the two neutral fallbacks are
-# hue-stable regardless of which carrier lands in which slot).
-LIAT_DOMAIN = ["#1B5FA8", "#E8632A", "#D6208F", "#C08A00", "#0E9DA8",
-               "#A05A2C", "#9B4FD8", "#2E7D32", "#64748B", "#0F766E"]
+# hue-stable regardless of which carrier lands in which slot). Slots 2-4 are
+# the logo's own colours — swoosh azure, gold, wordmark blue.
+LIAT_DOMAIN = ["#D02127", "#0375B4", "#C08A00", "#275AA1", "#2E7D32",
+               "#D6208F", "#A05A2C", "#9B4FD8", "#64748B", "#0F766E"]
 
 # Palette B — measures (velocity chart), docs/liat-palette.md §3. The " (1)"
 # suffix on the rate pair is not decoration: mixed_timeseries appends it to
 # every query-B series name, and the colour lookup uses the suffixed form
 # while the legend shows the bare one.
 MEASURE_COLORS = {
-    "Capacity":                 "#79AEE8",
-    "Current Booking":          "#134878",
-    "Actual Seat Factor (1)":   "#10996B",
-    "Forecasted SF (1)":        "#9B4FD8",
-    "Actual Seat Factor":       "#10996B",
-    "Forecasted SF":            "#9B4FD8",
+    "Capacity":                 "#DE8078",
+    "Current Booking":          "#D02127",
+    "Actual Seat Factor (1)":   "#0375B4",
+    "Forecasted SF (1)":        "#8B5CF6",
+    "Actual Seat Factor":       "#0375B4",
+    "Forecasted SF":            "#8B5CF6",
 }
 
 # Availability markers — semantic, carried over unchanged.
 SOLD_OUT = "#F39C12"
 NOT_ON_SALE = "#9E9E9E"
 
-# Palette C — recommendation traffic light. Same as DreamAir: red is free
-# because the brand is blue.
+# Palette C — recommendation traffic light. As on WinAir, Reduce reuses the
+# brand red: on that chart red means Reduce, not 5L — the scopes never meet
+# (the reco chart has no carrier series). One palette per chart.
 RECO_COLORS = {
-    "Reduce": "#C0392B",
+    "Reduce": "#D02127",
     "Monitor": "#C08A00",
     "No Change": "#64748B",
     "Consider Increase": "#1BAF7A",
@@ -137,9 +139,9 @@ def build_label_colors():
     out.update(MEASURE_COLORS)
     out.update(RECO_COLORS)
     # Fare Composition (dist_bar): series are the METRIC labels, not carriers
-    out["Base"] = "#1B5FA8"
-    out["Tax"] = "#79AEE8"
-    out["YQ"] = "#9B4FD8"
+    out["Base"] = "#D02127"
+    out["Tax"] = "#C08A00"
+    out["YQ"] = "#0375B4"
     return out
 
 
