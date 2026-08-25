@@ -128,7 +128,7 @@ def _seats_or_default(value: object) -> int:
 # listed so the fallback stays truthful if that ever changes.
 # DA is a demo tenant that DOES ingest — its files are PW's, relabelled — so
 # it inherits PW's USD.
-_TENANT_FALLBACK_CURRENCY = {"JY": "USD", "PW": "USD", "WM": "USD", "ALT": "EUR", "DA": "USD"}
+_TENANT_FALLBACK_CURRENCY = {"JY": "USD", "PW": "USD", "WM": "USD", "ALT": "EUR", "DA": "USD", "5L": "USD"}
 _FALLBACK_CURRENCY = "USD"
 
 

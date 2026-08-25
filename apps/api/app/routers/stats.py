@@ -96,6 +96,8 @@ def get_data_freshness(
         results.append(compute_module_freshness(db, AirlineCpiSnapshot, "WM", "Airline CPI – WM"))
     if is_admin or user_identity == "DA":
         results.append(compute_module_freshness(db, AirlineCpiSnapshot, "DA", "Airline CPI – DreamAir"))
+    if is_admin or user_identity == "5L":
+        results.append(compute_module_freshness(db, AirlineCpiSnapshot, "5L", "Airline CPI – Liat Air"))
     if is_admin or user_identity == "FJL":
         results.append(compute_module_freshness(db, CflCpiSnapshot, "FJL", "Cruise/Ferry CPI – FJL"))
 
