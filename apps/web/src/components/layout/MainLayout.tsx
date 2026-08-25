@@ -1,26 +1,57 @@
-import React, { useState, useEffect } from 'react';
-import { Box } from '@mui/material';
+import { useState } from 'react';
+import { Box, useMediaQuery, useTheme } from '@mui/material';
 import { Outlet } from 'react-router-dom';
 import AppBar from './AppBar';
 import Sidebar from './Sidebar';
 import Footer from './Footer';
 
-export default function MainLayout() {
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+// Persisted like the theme choice so a refresh keeps the sidebar the way the
+// user left it. localStorage can be unavailable (private mode), so reads and
+// writes both fail soft.
+const SIDEBAR_OPEN_KEY = 'rts-sidebar-open';
 
-  // Auto-collapse the sidebar 2.5s after initial load: users see the
-  // navigation briefly, then get maximum content area. Fires once on mount
-  // (MainLayout stays mounted across route changes), so it does not re-fire
-  // per navigation; the hamburger toggle still works normally afterward.
-  useEffect(() => {
-    const timer = setTimeout(() => setSidebarOpen(false), 2500);
-    return () => clearTimeout(timer);
-  }, []);
+export default function MainLayout() {
+  const theme = useTheme();
+  // Same breakpoint the Sidebar uses to pick its Drawer variant.
+  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+
+  // Two states on purpose. Desktop open/collapsed is a durable preference;
+  // the mobile drawer is a modal overlay, so it must always START closed (a
+  // phone must never boot with the nav covering the page) and its opens and
+  // closes are ephemeral — a phone session must not rewrite the desktop
+  // default. Crossing the breakpoint mid-session switches which state rules,
+  // so narrowing a window can't throw the overlay over the app either.
+  const [desktopOpen, setDesktopOpen] = useState(() => {
+    try {
+      return localStorage.getItem(SIDEBAR_OPEN_KEY) !== 'false';
+    } catch {
+      return true;
+    }
+  });
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const sidebarOpen = isMobile ? mobileOpen : desktopOpen;
+  const setSidebarOpen = (next: boolean) => {
+    if (isMobile) {
+      setMobileOpen(next);
+      return;
+    }
+    setDesktopOpen(next);
+    try {
+      localStorage.setItem(SIDEBAR_OPEN_KEY, String(next));
+    } catch {
+      // ignore — the choice just won't survive the reload
+    }
+  };
 
   return (
     <Box sx={{ display: 'flex', height: '100vh', width: '100%', overflow: 'hidden' }}>
-      <AppBar onToggleSidebar={() => setSidebarOpen(prev => !prev)} />
-      <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+      <AppBar onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} sidebarOpen={sidebarOpen} />
+      <Sidebar
+        open={sidebarOpen}
+        onOpen={() => setSidebarOpen(true)}
+        onClose={() => setSidebarOpen(false)}
+      />
       <Box
         component="main"
         sx={{
