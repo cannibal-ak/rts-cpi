@@ -28,15 +28,21 @@ import { WINAIR_CARRIER_TABLE } from './winair/priceChartTheme';
 import type { CarrierColorTable } from './winair/priceChartTheme';
 
 /**
- * Liat Air: 5L is always the brand red (liatTheme BANNER_BG). Competitors
- * are UNASSIGNED until the first ingest commits — slots go to carriers by
- * descending row volume, so the mapping cannot exist before the data does.
- * Until then unknown carriers cycle the neutral fallbacks, which no slot
- * colour reuses, so nothing rendered now has to change meaning later.
+ * Liat Air: 5L is always the brand red (liatTheme BANNER_BG). Competitor
+ * slots were assigned by liat_dash8_carrier_keys.py on 2026-08-25 from the
+ * first committed ingest, in descending row volume (docs/liat-palette.md
+ * section 2 records the volumes) — so the three busiest carriers wear the
+ * logo's own colours. This table and the dashboard's label_colors are the
+ * same assignment in two mirrors; change them together or not at all.
  */
 const LIAT_CARRIERS: CarrierColorTable = {
   known: {
     '5L': '#D02127',
+    BW: '#0375B4',
+    JY: '#C08A00',
+    WM: '#275AA1',
+    S6: '#2E7D32',
+    PY: '#D6208F',
   },
   fallbacks: ['#64748B', '#0F766E'],
 };
