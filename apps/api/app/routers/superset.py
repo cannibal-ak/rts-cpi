@@ -229,17 +229,17 @@ DASHBOARDS = {
     "7": {
         "title": "Airline CPI 5L Dashboard",
         "superset_id": 8,                                          # Superset ID=8
-        "uuid": "a1a69a30-3f7d-40dc-a78c-88d9740db683",
-        "embedded_uuid": "308d773e-9df2-4b7d-9617-188d524a6f23",
+        # PROD uuids, minted by scripts/superset_provision_liat.py on
+        # 2026-08-26 -- this Superset instance's dashboard 8 rows, not dev's.
+        "uuid": "a2714fa7-0e04-4ffc-8211-6c428274c178",
+        "embedded_uuid": "a9e9fbf4-0eb2-49f2-a38f-fbc829833f04",
         "domain": "airline",
         "tenant": "5L",
         # Liat Air is another WinAir/DreamAir twin, so it suppresses the same
         # seven native filters and keeps the same four: route, flt_num,
         # days_left, stops.
         #
-        # These uuids are DEV values. Provisioning mints fresh uuids per
-        # environment, so prod's will differ -- as WinAir's and DreamAir's
-        # already do -- and the prod deploy must carry prod's, not these.
+        # Provisioning mints fresh uuids per environment; dev's differ.
         "hidden_filter_columns": {
             "airline",              # Airline
             "dtd_bucket",           # Days to Departure
