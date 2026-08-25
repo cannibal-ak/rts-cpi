@@ -20,6 +20,7 @@ import {
   ROUTE_STYLES, ROUTE_STYLE_COUNT, DAYS_LEFT_MAX,
   SOLD_OUT_Y, NOT_ON_SALE_Y, AVAILABILITY_LABELS,
 } from './priceChartTheme';
+import { useCarrierColorTable } from '../tenantCarrierColors';
 import { FULL_DEP_RANGE, FULL_DURATION_RANGE, isNarrowed, type Range } from './PriceChartFilters';
 import { useBrandedChrome } from '../tenantChrome';
 import { api } from '../../../api';
@@ -262,7 +263,8 @@ export default function LatestPricesPanel({
     return [...reference, ...competitors];
   }, [points]);
 
-  const colorMap = useMemo(() => buildAirlineColorMap(airlines), [airlines]);
+  const carrierTable = useCarrierColorTable();
+  const colorMap = useMemo(() => buildAirlineColorMap(airlines, carrierTable), [airlines, carrierTable]);
   // Style index follows the ORDER THE USER SELECTED, so a route keeps its dash
   // pattern as other routes are added or removed around it.
   const markets = useMemo(
