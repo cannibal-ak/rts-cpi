@@ -10,7 +10,7 @@ import { getTenantChrome } from '../../components/dashboard/tenantChrome';
 
 interface AirlineCpiPageProps {
   /** Tenant code determines which snapshot view to query (JY, PW, ALT or WM). */
-  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA';
+  tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA' | '5L';
 }
 
 const TENANT_LABELS: Record<string, string> = {
@@ -46,7 +46,7 @@ export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {
   const chrome = getTenantChrome(tenantCode.toLowerCase());
   const isWm = chrome !== null;
   const brandInk = chrome?.brandInk;
-  const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT', 'WM', 'DA'];
+  const TENANTS_WITH_VELOCITY: AirlineCpiPageProps['tenantCode'][] = ['JY', 'PW', 'ALT', 'WM', 'DA', '5L'];
   const showTabs = TENANTS_WITH_VELOCITY.includes(tenantCode);
 
   const tab: 0 | 1 = showTabs && searchParams.get('tab') === 'velocity' ? 1 : 0;

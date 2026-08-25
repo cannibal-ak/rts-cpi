@@ -616,7 +616,7 @@ export default function LatestPricesPanel({
             <EmptyState
               icon={<TravelExplore sx={{ fontSize: 56 }} />}
               title="No routes available"
-              description="This dashboard is not offering any Route (O&D) values, so there is nothing to plot. That usually means the capture date holds no WinAir data."
+              description="This dashboard is not offering any Route (O&D) values, so there is nothing to plot. That usually means the capture date holds no data for this airline."
             />
           </Box>
         )}

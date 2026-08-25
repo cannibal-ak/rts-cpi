@@ -26,6 +26,7 @@ export const TENANT_MODULE_MAP: Record<string, ModuleCode> = {
   alt: 'airline_alt',
   wm: 'airline_wm',
   da: 'airline_da',
+  '5l': 'airline_5l',
 };
 
 // slug → tenant_name. Reproduces the pre-3b mockRolePresets names EXACTLY
@@ -39,4 +40,5 @@ export const TENANT_NAME_MAP: Record<string, string> = {
   alt: 'Sky Airways',
   wm: 'WinAir',
   da: 'DreamAir',
+  '5l': 'Liat Air',
 };

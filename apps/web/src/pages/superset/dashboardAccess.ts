@@ -7,6 +7,7 @@ export const DASHBOARD_MODULE_MAP: Record<string, ModuleCode> = {
   '4': 'airline_alt',
   '5': 'airline_wm',
   '6': 'airline_da',
+  '7': 'airline_5l',
 };
 
 export function canAccessDashboard(
@@ -21,9 +22,10 @@ export function canAccessDashboard(
 
 // Dashboards that do NOT offer the standalone Chart view. Their charts are
 // only ever read inside the embedded dashboard, so nothing should link to a
-// single slice - not the in-page selector, not the sidebar. '5' is WinAir and
-// '6' is DreamAir, whose charts are driven by their own top filter bar instead.
-const NO_CHART_VIEW_DASHBOARDS = ['5', '6'];
+// single slice - not the in-page selector, not the sidebar. '5' is WinAir,
+// '6' is DreamAir and '7' is Liat Air, whose charts are driven by their own
+// top filter bar instead.
+const NO_CHART_VIEW_DASHBOARDS = ['5', '6', '7'];
 
 export function hasChartView(dashboardId: string | undefined | null): boolean {
   return !!dashboardId && !NO_CHART_VIEW_DASHBOARDS.includes(dashboardId);
