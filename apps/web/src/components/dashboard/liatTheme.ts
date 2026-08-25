@@ -6,40 +6,45 @@
  * Neither sibling is edited: both are live, and the tenants have to be able
  * to move apart.
  *
- * Anchored on the Liat Air logo's ocean blue #1B5FA8 (the swoosh), with a deep
- * gold chrome accent drawn from the logo's gold — so the filter card reads as
- * a chosen surface rather than an unstyled panel, the same reasoning behind
- * WinAir's teal and DreamAir's orchid, in Liat's hues. On a blue-branded page
- * a blue accent would not separate the chosen state from the brand itself;
- * gold does, and it is Liat's own second colour.
+ * Anchored on the Liat Air logo's red — the A-mark gradient #E32228→#BC2026,
+ * taken at its midpoint #D02127 — with the logo's remaining colours carrying
+ * the rest of the chrome: the filter card sits on a light blue-grey drawn
+ * from the swoosh/wordmark blues, and the chosen-state accent is a text-safe
+ * step of the logo gold. Red is the BRAND ink (sidebar active items, Apply,
+ * spinners, brand marks); gold is the CHOSEN state; blue is the SURFACE
+ * family. Three logo families, one job each — see docs/liat-palette.md §0.
  *
- * Contrast, measured against FILTER_BG: ink 12.94:1, labels 7.69:1, muted
- * 4.92:1, accent 4.78:1, error 6.52:1 — every value clears the WinAir floor
- * (10.17 / 5.89 / 3.86 / 4.53 / 6.11). Full derivation and the CVD/contrast
- * validator runs are in docs/liat-palette.md — do not change a hex here
- * without re-running it and updating that document.
+ * Contrast, measured: white on brand red 5.35:1, white on pressed 8.10:1,
+ * brand red on the chrome surface 4.53:1; card tokens on FILTER_BG — ink
+ * 12.94:1, labels 7.69:1, muted 4.92:1, accent 4.78:1, error 6.52:1 — every
+ * value clears the WinAir floor (10.17 / 5.89 / 3.86 / 4.53 / 6.11). Full
+ * derivation and the CVD/contrast validator runs are in
+ * docs/liat-palette.md — do not change a hex here without re-running it and
+ * updating that document.
  */
 
 import { lighten } from '@mui/material/styles';
 import type { Theme } from '@mui/material/styles';
 
-/** Liat Air brand ocean blue, from the logo swoosh. */
-export const BANNER_BG = '#1B5FA8';
+/** Liat Air brand red — the A-mark gradient midpoint. */
+export const BANNER_BG = '#D02127';
 
 /**
  * Mode-aware brand ink for chrome OUTSIDE the fixed surfaces (sidebar rows,
- * spinners, chart controls): flat ocean blue on light surfaces, lightened on
- * dark paper. Mirrors the WinAir/DreamAir brandInk contract exactly.
+ * spinners, chart controls): flat brand red on light surfaces, lightened on
+ * dark paper (flat red is thin there — the same reason WinAir lightens).
+ * Mirrors the WinAir/DreamAir brandInk contract exactly.
  */
 export const brandInk = (theme: Theme) =>
   theme.palette.mode === 'dark' ? lighten(BANNER_BG, 0.3) : BANNER_BG;
-/** The pressed state of ocean-blue chrome — one step darker than brand. */
-export const BANNER_HEADER_BG = '#134878';
+/** The pressed state of red chrome — the gradient's dark end, one step on. */
+export const BANNER_HEADER_BG = '#9C1B20';
 
 // ── The LIGHT dashboard chrome ─────────────────────────────────
-// A cool blue-grey rather than a neutral grey, and a deep gold accent rather
-// than the brand blue: blue stays for Apply, the one committing action in the
-// card, and for brand marks.
+// A cool blue-grey surface (the logo's blues) and a deep gold accent (the
+// logo's gold): on a red-branded page the chosen state must not be red, or
+// selection would read as brand. Red appears on the card only for Apply,
+// the one committing action.
 
 /** The surface both cards sit on. */
 export const FILTER_BG = '#E6EDF4';
@@ -71,11 +76,10 @@ export const FILTER_HOVER_BG = 'rgba(18,38,63,0.07)';
 /** Loading skeletons — the field block and the label line above it. */
 export const FILTER_SKELETON = 'rgba(18,38,63,0.11)';
 export const FILTER_SKELETON_TEXT = 'rgba(18,38,63,0.08)';
-/** "Filters unavailable", and the tab row's degraded-nav warning. Deep red,
- *  the same semantic value the siblings use — error is not a brand colour,
- *  and on Liat it does not collide with the brand at all. 6.52:1 on
- *  FILTER_BG. Distinct from the logo's red A-mark (#D64541 family), which is
- *  brand art, not a status colour. */
+/** "Filters unavailable", and the tab row's degraded-nav warning. The deep
+ *  red #9A2A22, same as WinAir — and for the same reason now that the brand
+ *  is red: brand red must never read as an error, and an error must never
+ *  read as brand. 6.52:1 on FILTER_BG, and clearly darker than BANNER_BG. */
 export const FILTER_ERROR_INK = '#9A2A22';
 export const FILTER_ERROR_BG = 'rgba(154,42,34,0.09)';
 /** Unfilled part of a range slider. */
