@@ -15,12 +15,18 @@ This document is the Liat counterpart of `docs/dreamair-palette.md` and
 `docs/winair-palette.md` and follows their section order deliberately, so the
 three can be diffed.
 
-**Where the anchor came from.** The supplied logo is a red/gold "A" mark over a
-blue swoosh with white lettering on a sky background. The swoosh blue is the
-brand anchor (`#1B5FA8`, deepened slightly from the gradient's midpoint so white
-text clears 4.5:1 with room). The gold (`#F5C518` family in the mark) becomes
-the chrome accent in a text-safe deep step, `#8A5F00`. The red of the "A" mark
-is brand **art**, not a UI colour — see §0.
+**Where the anchor came from.** The official vector logo
+(`Logos/LiatAir/liat-logo-original.svg`) carries the brand values directly:
+wordmark and letterforms `#275AA1` (white text 6.86:1), swoosh gradient
+`#245293 -> #0375B4`, A-mark red gradient `#E32228 -> #BC2026`, gold fold
+`#E1BD23 -> #F5D332`. The UI anchor stays `#1B5FA8` - it sits inside the
+swoosh gradient, is near-indistinguishable from the wordmark `#275AA1`, and
+the whole validated set below is built on it; re-basing to `#275AA1` would
+re-run every check for no visible change. The gold family becomes the chrome
+accent in a text-safe deep step, `#8A5F00`. The red of the A-mark is brand
+**art**, not a UI colour - see section 0. The header PNG is recomposed from the
+square SVG (mark left, wordmark right) by `Logos/LiatAir/compose_logo.py`,
+because the stacked layout is illegible at the 48px header height.
 
 ---
 
