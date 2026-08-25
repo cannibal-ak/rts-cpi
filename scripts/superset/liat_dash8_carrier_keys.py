@@ -23,10 +23,14 @@ script closes that gap additively, the way da_dash7_exp_keys.py did for Exp:
      never overwritten (additive-only); a key-level JSON backup is written
      first and --revert restores exactly those keys.
 
-After --apply: paste the printed volume/slot table into
-docs/liat-palette.md §2, and verify with an UNSCOPED guest token — a
-cap_date-scoped PASS can hide a carrier whose rows sit outside the tested
-date (the DreamAir Exp lesson).
+After --apply, three follow-ups:
+  1. paste the printed volume/slot table into docs/liat-palette.md §2;
+  2. mirror the same assignment into LIAT_CARRIERS.known in
+     apps/web/src/components/dashboard/tenantCarrierColors.ts — the native
+     Latest Prices panel and the embedded dashboard must colour each carrier
+     identically;
+  3. verify with an UNSCOPED guest token — a cap_date-scoped PASS can hide a
+     carrier whose rows sit outside the tested date (the DreamAir Exp lesson).
 """
 import json
 import os
@@ -40,10 +44,13 @@ DASH = 8
 # postgres DSN: compose-default credentials, overridable.
 PG_DSN = os.environ.get("CPI_PG_DSN", "postgresql://cpi:cpi_secret@postgres:5432/cpi_db")
 
-# docs/liat-palette.md §2 — slots 2..8 then the neutral fallbacks, fixed order.
-SLOT_HEXES = ["#E8632A", "#D6208F", "#C08A00", "#0E9DA8",
-              "#A05A2C", "#9B4FD8", "#2E7D32"]
-FALLBACKS = ["#64748B", "#0F766E", "#B45309", "#7C3AED"]
+# docs/liat-palette.md §2 — slots 2..8 then the neutral fallbacks, fixed
+# order. Slots 2-4 are the logo's own colours (swoosh azure, gold, wordmark
+# blue), so the three busiest competitors wear logo colours. Only the two
+# neutral fallbacks: overflow past them folds into "Other", never a new hue.
+SLOT_HEXES = ["#0375B4", "#C08A00", "#275AA1", "#2E7D32",
+              "#D6208F", "#A05A2C", "#9B4FD8"]
+FALLBACKS = ["#64748B", "#0F766E"]
 
 SOLD_OUT = "#F39C12"
 NOT_ON_SALE = "#9E9E9E"
