@@ -191,6 +191,30 @@ DASHBOARDS = {
             "legseg_type",          # Leg/Segment
         },
     },
+    "7": {
+        "title": "Airline CPI 5L Dashboard",
+        "superset_id": 8,                                          # Superset ID=8
+        "uuid": "a1a69a30-3f7d-40dc-a78c-88d9740db683",
+        "embedded_uuid": "308d773e-9df2-4b7d-9617-188d524a6f23",
+        "domain": "airline",
+        "tenant": "5L",
+        # Liat Air is another WinAir/DreamAir twin, so it suppresses the same
+        # seven native filters and keeps the same four: route, flt_num,
+        # days_left, stops.
+        #
+        # These uuids are DEV values. Provisioning mints fresh uuids per
+        # environment, so prod's will differ -- as WinAir's and DreamAir's
+        # already do -- and the prod deploy must carry prod's, not these.
+        "hidden_filter_columns": {
+            "airline",              # Airline
+            "dtd_bucket",           # Days to Departure
+            "price_status",         # Price Position
+            "recommendation",       # Pricing Action
+            "lowest_competitor",    # Cheapest Competitor
+            "eqp",                  # Aircraft
+            "legseg_type",          # Leg/Segment
+        },
+    },
 }
 
 # Tenant -> per-tenant Superset dataset view names (for RLS filtering).
@@ -204,6 +228,7 @@ TENANT_TABLES = {
     "ALT": ["vw_airline_cpi_alt_snapshot"],
     "WM":  ["vw_airline_cpi_wm_snapshot"],
     "DA":  ["vw_airline_cpi_da_snapshot"],
+    "5L":  ["vw_airline_cpi_5l_snapshot"],
 }
 
 # Tenant -> Superset virtual/derived datasets that need cap_date RLS but
@@ -244,6 +269,13 @@ TENANT_CAPDATE_ONLY_TABLES = {
         "da_pricing_recommendations",
         "da_velocity_normalized",
         "da_deployed_capacity",
+    ],
+    "5L":  [
+        "liat_all_airlines_fares",
+        "liat_all_airlines_fares_availability",
+        "liat_pricing_recommendations",
+        "liat_velocity_normalized",
+        "liat_deployed_capacity",
     ],
     "FJL": [
         "vds_cfl_cheapest_competitor",
@@ -984,6 +1016,10 @@ _DASHBOARD_DATE_VIEW = {
     # to 2026-06-30, where the cap_date RLS clause left the velocity chart with
     # zero rows and it rendered empty. See migration 039.
     "6": "vw_da_dashboard_dates",
+    # Liat Air inherits the same intersection treatment from day one
+    # (migration 042): its feeds arrive from the client, so nothing
+    # guarantees the fare and velocity files cover the same days.
+    "7": "vw_5l_dashboard_dates",
 }
 
 # Whitelist of view names we'll ever query from this endpoint. The view name
