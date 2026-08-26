@@ -103,6 +103,7 @@ export const mockClient: CpiApiClient = {
       delay({
         airline: q.airline,
         flt_num: q.flt_num ?? null,
+        trip_type: q.trip_type ?? null,
         origin: q.origin,
         destination: q.destination,
         dep_date: q.dep_date,
