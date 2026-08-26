@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Typography, CircularProgress, Alert, Chip, Tooltip, useTheme } from '@mui/material';
+import { Box, Typography, CircularProgress, Alert, Chip, Tooltip, useTheme, alpha } from '@mui/material';
 import { TravelExplore } from '@mui/icons-material';
 import * as echarts from 'echarts/core';
 import { LineChart, ScatterChart } from 'echarts/charts';
@@ -97,7 +97,7 @@ function pointKey(p: PricePoint): string {
 export default function LatestPricesPanel({
   routes, capDate, stops, fltNums, daysLeft, depTime, duration, routeOptions, active,
 }: LatestPricesPanelProps) {
-  const { brandInk } = useBrandedChrome();
+  const { brandInk, BANNER_BG } = useBrandedChrome();
 
   const theme = useTheme();
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -278,12 +278,12 @@ export default function LatestPricesPanel({
     const muted = theme.palette.text.secondary;
     const line = theme.palette.divider;
 
-    // Brand red, lightened in dark mode like the sidebar ink. Worn by the
+    // Brand ink, lightened in dark mode like the sidebar ink. Worn by the
     // zoom sliders (otherwise stock ECharts blue) and by the host carrier's
     // legend text below.
     const accent = brandInk(theme);
     const zoomSliderStyle = {
-      fillerColor: 'rgba(205, 31, 37, 0.12)',
+      fillerColor: alpha(BANNER_BG, 0.12),
       handleStyle: { color: accent, borderColor: accent },
       moveHandleStyle: { color: accent },
       emphasis: {
@@ -292,7 +292,7 @@ export default function LatestPricesPanel({
       },
       selectedDataBackground: {
         lineStyle: { color: accent },
-        areaStyle: { color: 'rgba(205, 31, 37, 0.2)' },
+        areaStyle: { color: alpha(BANNER_BG, 0.2) },
       },
     };
 
