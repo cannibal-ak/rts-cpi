@@ -41,6 +41,8 @@ export const BANNER_HEADER_BG = '#0D4FB5';
 export const SCOPE_ACCENT = BANNER_BG;
 /** Its hover/pressed step. */
 export const SCOPE_ACCENT_PRESSED = BANNER_HEADER_BG;
+/** Mode-aware ink form of SCOPE_ACCENT — for DreamAir simply brandInk. */
+export const scopeInk = brandInk;
 
 // ── The LIGHT dashboard chrome ─────────────────────────────────
 // Lilac grey rather than a neutral grey, and an orchid accent rather than the

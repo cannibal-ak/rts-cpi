@@ -40,6 +40,8 @@ export const BANNER_HEADER_BG = '#A5181D';
 export const SCOPE_ACCENT = BANNER_BG;
 /** Its hover/pressed step. */
 export const SCOPE_ACCENT_PRESSED = BANNER_HEADER_BG;
+/** Mode-aware ink form of SCOPE_ACCENT — for WinAir simply brandInk. */
+export const scopeInk = brandInk;
 
 // ── The LIGHT dashboard chrome ─────────────────────────────────
 // Teal grey rather than a neutral grey, so the chrome reads as a chosen

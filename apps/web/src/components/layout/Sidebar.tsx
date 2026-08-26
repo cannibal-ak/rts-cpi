@@ -113,11 +113,15 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
   const { hasAccess, session } = useSession();
   const { logout } = useAuth();
 
-  // A branded tenant's chrome follows its own brand colour instead of the app
-  // navy. Null for every other tenant, and every use below falls back to theme
-  // primary. WinAir was the only one; DreamAir is the second.
+  // A branded tenant's chrome follows its own colours instead of the app
+  // navy. Null for every other tenant, and every use below falls back to
+  // theme primary. Two accents since the Liat red+blue split: the rail's
+  // active tile is a BRAND mark and keeps BANNER_BG, while the panel rows
+  // are "where you are" chrome and read SCOPE_ACCENT — the same hex on
+  // WinAir/DreamAir (aliased), the wordmark blue on Liat.
   const chrome = useTenantChrome();
-  const accent = chrome?.BANNER_BG;
+  const railAccent = chrome?.BANNER_BG;
+  const accent = chrome?.SCOPE_ACCENT;
 
   const filteredItems = navigationItems.filter(item => {
     if (item.requireSuperAdmin && !isSuperAdmin(session)) return false;
@@ -287,7 +291,7 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
                     justifyContent: 'center',
                     px: 0,
                     '&.Mui-selected': {
-                      bgcolor: accent ?? 'primary.main',
+                      bgcolor: railAccent ?? 'primary.main',
                       color: 'primary.contrastText',
                       '& .MuiListItemIcon-root': { color: 'primary.contrastText' },
                       '&:hover': { bgcolor: chrome ? chrome.BANNER_HEADER_BG : 'primary.dark' },
@@ -384,11 +388,11 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
                         px: 1.5,
                         minHeight: 40,
                         ...(hasSubItems && onPath && {
-                          // brandInk lightens the red in dark mode (flat red
-                          // reads ~2.9:1 on dark paper); navy path unchanged.
-                          color: chrome ? chrome.brandInk : 'primary.main',
+                          // scopeInk lightens on dark paper (a flat brand hue
+                          // reads ~2.9:1 there); navy path unchanged.
+                          color: chrome ? chrome.scopeInk : 'primary.main',
                           '& .MuiListItemIcon-root': {
-                            color: chrome ? chrome.brandInk : 'primary.main',
+                            color: chrome ? chrome.scopeInk : 'primary.main',
                           },
                         }),
                         ...selectedRowSx(accent),

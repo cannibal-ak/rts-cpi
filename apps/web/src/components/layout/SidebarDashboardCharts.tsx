@@ -56,9 +56,11 @@ export default function SidebarDashboardCharts({ onNavigate }: Props) {
   const dashboardId = getPrimaryDashboardId(session);
   const listCharts = hasChartView(dashboardId);
 
-  // Same branded accent the parent Sidebar applies to its rows.
+  // Same scope accent the parent Sidebar applies to its rows (the wordmark
+  // blue on Liat, the brand hex on WinAir/DreamAir). The loading spinner
+  // below stays brandInk — loading is brand activity, like every spinner.
   const chrome = useTenantChrome();
-  const accent = chrome?.BANNER_BG;
+  const accent = chrome?.SCOPE_ACCENT;
 
   // Both hooks run every render (hook rules); passing undefined is what skips
   // the fetch, so only the relevant one ever hits the network. Each is cached

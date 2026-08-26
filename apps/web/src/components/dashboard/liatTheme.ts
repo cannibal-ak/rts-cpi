@@ -60,6 +60,14 @@ export const SCOPE_ACCENT = '#275AA1';
  * wordmark blue darkened until the step shows. White text 10.50:1.
  */
 export const SCOPE_ACCENT_PRESSED = '#1B3F72';
+/**
+ * Mode-aware ink form of SCOPE_ACCENT, for scope TEXT outside the fixed
+ * light surfaces (the sidebar's on-path labels and selected rows): flat
+ * wordmark blue on light paper, lightened on dark — the brandInk treatment
+ * in the scope hue.
+ */
+export const scopeInk = (theme: Theme) =>
+  theme.palette.mode === 'dark' ? lighten(SCOPE_ACCENT, 0.3) : SCOPE_ACCENT;
 
 // ── The LIGHT dashboard chrome ─────────────────────────────────
 // A cool blue-grey surface (the logo's blues) and the wordmark blue as the
