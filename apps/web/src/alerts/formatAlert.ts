@@ -22,11 +22,11 @@ export function timeAgo(iso: string | null | undefined): string {
   return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 
-/** Departure window as prose: "0–7 days out". */
+/** Departure window as prose: "0-7 days out". */
 export function windowLabel(window?: string): string {
   if (!window) return '';
   const [from, to] = window.split('-');
-  return `${Number(from)}–${Number(to)} days out`;
+  return `${Number(from)}-${Number(to)} days out`;
 }
 
 export function money(value?: number | null, currency?: string | null): string {
