@@ -6,6 +6,12 @@ the logo's remaining colours (gold, swoosh azure, wordmark blue) carrying the
 other roles. This supersedes the blue-anchored first revision (2026-08-25,
 same day): the client directed that red — the logo's A-mark — is 5L's identity
 in every chart, and that the rest of the palette comes from the logo.
+Revised again 2026-08-26 ("Option B", chrome only — no chart hex changed): the
+client directed that the chrome mix red and blue the way the logo writes them,
+so the chosen/scoped state moved from the gold step to the wordmark blue
+`#275AA1` and the gold left the chrome entirely. Red now appears in the chrome
+only for brand marks and committing actions (Apply, the zoom sliders, sidebar
+and app-bar chrome).
 
 Every categorical value below was checked with the data-viz validator
 (`scripts/validate_palette.js` — OKLab ΔE ×100, Machado–Oliveira–Fernandes CVD
@@ -25,8 +31,8 @@ is also red — its rules port here almost verbatim) and
 |---|---|---|
 | A-mark red gradient | `#E32228 → #BC2026` | brand red `#D02127` (gradient midpoint) — 5L in every chart, brand ink in the chrome |
 | Swoosh gradient | `#245293 → #0375B4` | `#0375B4` = Palette A slot 2 + the measured-rate hue; the blue family also seeds the chrome surface `#E6EDF4` and its inks |
-| Wordmark blue | `#275AA1` | Palette A slot 4 |
-| Gold fold | `#E1BD23 → #F5D332` | chart gold `#C08A00` (text-safe step — the bright `#F5D332` is ~1.6:1 on white, unusable as a series) and the chrome accent `#8A5F00` |
+| Wordmark blue | `#275AA1` | Palette A slot 4 + the chrome's chosen/scoped accent (selected tab pill, date chips, filter accents) with its pressed step `#1B3F72` |
+| Gold fold | `#E1BD23 → #F5D332` | chart gold `#C08A00` (text-safe step — the bright `#F5D332` is ~1.6:1 on white, unusable as a series). Charts only since 2026-08-26 — gold no longer appears in the chrome |
 
 The header PNG is recomposed from the square SVG (mark left, wordmark right)
 by `Logos/LiatAir/compose_logo.py` — the stacked layout is illegible at the
@@ -43,10 +49,17 @@ by `Logos/LiatAir/compose_logo.py` — the stacked layout is illegible at the
   reuse the brand red, with WinAir's scope note: on that chart red means
   Reduce, not 5L, and the scopes never meet (the reco chart has no carrier
   series). One palette per chart.
-- **Gold is three scoped steps of one family.** Chrome accent `#8A5F00`
-  (chosen state), chart gold `#C08A00` (Palette A slot 3 / Palette C Monitor /
-  composition Tax), marker amber `#F39C12` (sold out). They never share a
-  scope; do not move them closer together.
+- **Gold is two scoped steps, charts only.** Chart gold `#C08A00` (Palette A
+  slot 3 / Palette C Monitor / composition Tax) and marker amber `#F39C12`
+  (sold out). They never share a scope; do not move them closer together. The
+  chrome accent `#8A5F00` was retired 2026-08-26 when the chosen state moved
+  to the wordmark blue — do not reintroduce a third gold.
+- **Blue is the chosen state in the chrome — and shares its hex with a
+  carrier.** The chrome's `SCOPE_ACCENT`/`FILTER_ACCENT` `#275AA1` is the
+  same hex as Palette A slot 4 (the WM line). Safe for the exact scope reason
+  the brand red is: chrome is never a chart series, the two never meet inside
+  one plot, and Apply already shares red with the 5L line under it. One
+  palette per chart.
 - **Two blue slots, never adjacent.** Palette A carries both logo blues —
   azure `#0375B4` (slot 2) and wordmark `#275AA1` (slot 4) — separated by the
   gold slot. The adjacency-based validation makes the slot order part of the
@@ -68,13 +81,19 @@ sibling of `bannerTheme.ts` (WinAir) and `dreamairTheme.ts`.
 Red is an **accent**, not a surface. The dashboard chrome (tab row, filter
 card) sits on the light blue-grey below — the logo's blue family — and red
 appears on it only for the committing action (Apply) and brand marks. The
-chosen-state accent is the logo-gold step, NOT red: on a red-branded page a
-red selection would read as brand, not choice.
+chosen/scoped state is the **wordmark blue**, NOT red: on a red-branded page
+a red selection would read as brand, not choice. Since 2026-08-26 that blue
+covers both the filter card's chosen state (`FILTER_ACCENT`) and the
+"where you are" chrome (`SCOPE_ACCENT`: the selected section pill and the
+Latest data / Cap date chips, which the red-branded siblings paint in their
+brand via aliased tokens).
 
 | Role | Hex | Contrast on chrome |
 |---|---|---|
 | Chrome surface | `#E6EDF4` | — |
-| Chrome accent (selection, active borders, chips) | `#8A5F00` | 4.78:1 |
+| Chrome accent (chosen state, active borders, chips, sliders) | `#275AA1` | 5.81:1 (6.86:1 on the white fields) |
+| Scope accent (selected tab pill, date chips) | `#275AA1` | white text on it 6.86:1 |
+| Scope accent, pressed | `#1B3F72` | white text on it 10.50:1; as hover text on a white pill 10.50:1 |
 | Chrome ink | `#12263F` | 12.94:1 |
 | Chrome label ink | `#2F4A6B` | 7.69:1 |
 | Chrome muted ink | `#54677E` | 4.92:1 |
@@ -82,10 +101,14 @@ red selection would read as brand, not choice.
 | Brand red on the chrome surface | `#D02127` | 4.53:1 |
 
 Every card token clears the WinAir floor (ink 10.17, label 5.89, muted 3.86,
-accent 4.53, error 6.11).
+accent 4.53, error 6.11) — the blue accent (5.81) beats the retired gold
+(4.78), and the blue pill's white text (6.86) beats the red pill it replaced
+(5.35). The pressed step is a darkened wordmark blue, not the swoosh
+gradient's dark end `#245293`, which is too close to `#275AA1` to read as a
+state change.
 
 The alpha-derived tokens keep the sibling alpha values exactly, re-based on
-the Liat ink `rgb(18,38,63)` and accent `rgb(138,95,0)`:
+the Liat ink `rgb(18,38,63)` and accent `rgb(39,90,161)`:
 
 | Token | Value |
 |---|---|
@@ -95,7 +118,7 @@ the Liat ink `rgb(18,38,63)` and accent `rgb(138,95,0)`:
 | hover bg | `rgba(18,38,63,0.07)` |
 | skeleton / skeleton text | `rgba(18,38,63,0.11)` / `rgba(18,38,63,0.08)` |
 | slider rail | `rgba(18,38,63,0.28)` |
-| chip bg | `rgba(138,95,0,0.14)` |
+| chip bg | `rgba(39,90,161,0.14)` — accent text on the blended chip 5.56:1 |
 
 ---
 
@@ -205,7 +228,7 @@ PASS on white): `#E8938C` · `#D9524B` · `#D02127` · `#9C1B20`-family `#A5181D
 The measured rate is the **logo swoosh azure** — available here because the
 brand is red (on the blue-branded siblings this hue was too close to their
 anchors). The forecast is violet, the sibling-wide convention: violet reads as
-*computed*, and gold cannot take it (three gold steps already have scopes, §0).
+*computed*, and gold cannot take it (both chart-gold steps already have scopes, §0).
 
 Validated in the render order (seats anchor, actual, forecast): light triple
 `#D02127` / `#0375B4` / `#8B5CF6` — **all-pairs PASS on white** (worst pair
@@ -324,7 +347,7 @@ directly: a red marker would read as a 5L datapoint.
 
 | Marker | Hex | Why not brand |
 |---|---|---|
-| Sold out | `#F39C12` | an event; amber is the conventional read, and it is the third scoped gold step (§0) |
+| Sold out | `#F39C12` | an event; amber is the conventional read, and it is the second scoped gold step (§0) |
 | Not on sale | `#9E9E9E` | absence, not an event — stays grey on both surfaces |
 
 Whether the sold-out marker is reachable depends on the Liat data carrying

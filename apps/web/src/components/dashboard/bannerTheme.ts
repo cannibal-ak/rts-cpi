@@ -29,6 +29,18 @@ export const brandInk = (theme: Theme) =>
 /** The pressed state of red chrome — one step darker than brand. */
 export const BANNER_HEADER_BG = '#A5181D';
 
+/**
+ * The colour of "where you are" chrome — the selected section pill in the
+ * tab row and the Latest data / Cap date scope chips. For WinAir this is the
+ * brand red itself; the tokens exist because Liat paints scope in its logo
+ * blue while keeping red for brand and actions, so the components read a
+ * token instead of assuming scope == brand. Aliases, not new hexes — WinAir
+ * renders byte-identically to before they existed.
+ */
+export const SCOPE_ACCENT = BANNER_BG;
+/** Its hover/pressed step. */
+export const SCOPE_ACCENT_PRESSED = BANNER_HEADER_BG;
+
 // ── The LIGHT dashboard chrome ─────────────────────────────────
 // Teal grey rather than a neutral grey, so the chrome reads as a chosen
 // colour rather than an unstyled panel; the ink is a teal-leaning slate for

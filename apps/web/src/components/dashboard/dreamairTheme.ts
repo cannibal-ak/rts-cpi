@@ -32,6 +32,16 @@ export const brandInk = (theme: Theme) =>
 /** The pressed state of azure chrome — one step darker than brand. */
 export const BANNER_HEADER_BG = '#0D4FB5';
 
+/**
+ * The colour of "where you are" chrome — the selected section pill in the
+ * tab row and the Latest data / Cap date scope chips. DreamAir keeps it on
+ * brand like WinAir; only Liat splits it (see liatTheme.ts). Aliases —
+ * DreamAir renders byte-identically to before they existed.
+ */
+export const SCOPE_ACCENT = BANNER_BG;
+/** Its hover/pressed step. */
+export const SCOPE_ACCENT_PRESSED = BANNER_HEADER_BG;
+
 // ── The LIGHT dashboard chrome ─────────────────────────────────
 // Lilac grey rather than a neutral grey, and an orchid accent rather than the
 // brand azure: on an azure-branded page an azure accent would not separate the
