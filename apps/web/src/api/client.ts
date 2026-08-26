@@ -388,6 +388,9 @@ export interface CpiApiClient {
     // nothing and the two can never disagree.
     getSummary(opts?: RequestOptions): Promise<AlertSummary>;
     listEvents(q?: AlertEventQuery, opts?: RequestOptions): Promise<Paginated<AlertEvent>>;
+    /** Options for the feed's Route dropdown, in the exact ORG-DST form the
+     *  events filter matches on. Empty for tenants without alerts. */
+    listRoutes(opts?: RequestOptions): Promise<string[]>;
     unreadCount(opts?: RequestOptions): Promise<{ unread: number; capped: boolean }>;
     markRead(eventIds: string[]): Promise<MarkReadResult>;
     markUnread(eventIds: string[]): Promise<MarkReadResult>;

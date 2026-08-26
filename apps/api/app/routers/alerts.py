@@ -32,6 +32,7 @@ from pydantic import ValidationError
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.cache import cached
 from app.core.database import set_tenant_context
 from app.core.deps import (
     RequireRoles, get_current_user, get_tenant_db, get_tenant_id,
@@ -47,7 +48,7 @@ from app.services.alerts import evaluator, read_state, runner
 from app.services.alerts.presets import (
     PRESETS, PRESET_ORDER, get_preset, missing_requirements, tunables_payload,
 )
-from app.services.alerts.views import is_alertable
+from app.services.alerts.views import is_alertable, resolve_view
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -228,6 +229,64 @@ def unread_count(
     return read_state.unread_count(db, _user_id(current_user))
 
 
+# How long a tenant's route list may be served from memory. The same 300s the
+# airline filter-metadata endpoint uses: routes change once per daily ingest,
+# so even five minutes of staleness only delays a NEW route's appearance.
+_ROUTES_TTL = 300.0
+
+
+def _available_routes(db: Session, identity: str) -> list[str]:
+    """Every ORG-DST route the tenant can meaningfully filter alerts by.
+
+    Union of two sets: the routes in the LATEST capture of the tenant's fare
+    view (what "available in the application" means to a user), plus every
+    route an event has already fired for — an old alert's route stays
+    pickable after the route leaves the feed. The cap_date equality pin is
+    the queries.py invariant: unpinned, the DISTINCT walks the whole
+    multi-million-row view; pinned, it rides the tenant's grid index. The
+    events pass filters on payload text rather than @> because it WANTS the
+    tiny seq scan — the gin jsonb_path_ops index cannot serve ->> anyway.
+
+    Cached per identity, which is also what resolves the view — so the cache
+    can never hand one tenant another tenant's routes.
+    """
+    view = resolve_view(identity)
+
+    def _produce() -> list[str]:
+        routes: set[str] = set()
+        cap = db.execute(text(f"SELECT max(cap_date) FROM {view}")).scalar()
+        if cap is not None:
+            rows = db.execute(
+                text(f"SELECT DISTINCT ref_org || '-' || ref_dst"
+                     f"  FROM {view} WHERE cap_date = :cap"),
+                {"cap": cap},
+            )
+            routes.update(r[0] for r in rows if r[0])
+        rows = db.execute(text(
+            "SELECT DISTINCT payload->>'route' FROM alert_event"
+            " WHERE payload->>'route' IS NOT NULL"))
+        routes.update(r[0] for r in rows if r[0])
+        return sorted(routes)
+
+    return cached(("alert_routes", identity), _ROUTES_TTL, _produce)
+
+
+@router.get("/routes", response_model=list[str])
+def list_routes(
+    db: Session = Depends(get_tenant_db),
+    user_identity: str = Depends(get_user_identity),
+):
+    """The Route dropdown's options, in the events filter's exact ORG-DST form.
+
+    Empty (not 400) for identities without an alertable view: the page is
+    gated to alert tenants anyway, and a platform admin poking the endpoint
+    should see "no routes", not an error.
+    """
+    if not is_alertable(user_identity):
+        return []
+    return _available_routes(db, user_identity)
+
+
 @router.post("/events/read", response_model=MarkReadOut)
 def mark_read(
     body: MarkReadIn,
@@ -279,14 +338,23 @@ def mark_all_read(
 # Rules
 # ─────────────────────────────────────────────────────────────
 
-def _rule_out(row, preset) -> AlertRuleOut:
+def _rule_out(row, preset, route_options: list[str] | None = None) -> AlertRuleOut:
     condition = row.condition_json if isinstance(row.condition_json, dict) else {}
+    tunables = tunables_payload(preset) if preset else []
+    if route_options is not None:
+        # The routes multiselect ships with options=None in the preset — which
+        # routes exist is tenant DATA, not preset shape. Filled per request
+        # from the same cached list GET /routes serves, so the settings screen
+        # and the feed's dropdown can never disagree.
+        for t in tunables:
+            if t["key"] == "routes" and t["options"] is None:
+                t["options"] = route_options
     return AlertRuleOut(
         id=row.id, rule_key=row.rule_key, name=row.name,
         description=row.description, domain=row.domain, rule_type=row.rule_type,
         is_active=row.is_active, is_preset=row.is_preset,
         severity_default=row.severity_default, condition=condition,
-        tunables=[TunableFieldOut(**t) for t in tunables_payload(preset)] if preset else [],
+        tunables=[TunableFieldOut(**t) for t in tunables],
         missing_requirements=missing_requirements(preset, condition) if preset else [],
         created_at=row.created_at, updated_at=row.updated_at,
         updated_by=getattr(row, "updated_by", None),
@@ -342,12 +410,14 @@ def _ensure_presets(db: Session, tenant_id: str) -> None:
 def list_rules(
     db: Session = Depends(get_tenant_db),
     tenant_id: str = Depends(get_tenant_id),
+    user_identity: str = Depends(get_user_identity),
 ):
     _ensure_presets(db, tenant_id)
     rows = db.execute(text(f"{_RULE_SELECT} ORDER BY r.is_preset DESC, r.name")).all()
     order = {k: i for i, k in enumerate(PRESET_ORDER)}
     rows = sorted(rows, key=lambda r: order.get(r.rule_key, 99))
-    return [_rule_out(r, get_preset(r.rule_key)) for r in rows]
+    routes = _available_routes(db, user_identity) if is_alertable(user_identity) else None
+    return [_rule_out(r, get_preset(r.rule_key), routes) for r in rows]
 
 
 @router.get("/rules/{rule_key}", response_model=AlertRuleOut)
@@ -355,13 +425,15 @@ def get_rule(
     rule_key: str,
     db: Session = Depends(get_tenant_db),
     tenant_id: str = Depends(get_tenant_id),
+    user_identity: str = Depends(get_user_identity),
 ):
     _ensure_presets(db, tenant_id)
     row = db.execute(text(f"{_RULE_SELECT} WHERE r.rule_key = :k"),
                      {"k": rule_key}).first()
     if row is None:
         raise HTTPException(404, f"no rule {rule_key}")
-    return _rule_out(row, get_preset(row.rule_key))
+    routes = _available_routes(db, user_identity) if is_alertable(user_identity) else None
+    return _rule_out(row, get_preset(row.rule_key), routes)
 
 
 @router.patch("/rules/{rule_key}", response_model=AlertRuleOut,
@@ -372,6 +444,7 @@ def update_rule(
     db: Session = Depends(get_tenant_db),
     tenant_id: str = Depends(get_tenant_id),
     current_user: dict = Depends(get_current_user),
+    user_identity: str = Depends(get_user_identity),
 ):
     import json
 
@@ -431,7 +504,11 @@ def update_rule(
     )
     row = db.execute(text(f"{_RULE_SELECT} WHERE r.rule_key = :k"),
                      {"k": rule_key}).first()
-    return _rule_out(row, preset)
+    # Same options injection as the GET paths: the settings screen replaces
+    # its card state with THIS response, so serving options=None here would
+    # blank the routes picker after every save.
+    routes = _available_routes(db, user_identity) if is_alertable(user_identity) else None
+    return _rule_out(row, preset, routes)
 
 
 @router.post("/rules/{rule_key}/preview", response_model=AlertPreviewOut,

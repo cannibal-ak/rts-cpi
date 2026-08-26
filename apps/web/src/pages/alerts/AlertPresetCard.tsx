@@ -11,8 +11,8 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import {
-  Box, Card, CardContent, Chip, FormControlLabel, InputAdornment, MenuItem,
-  Stack, Switch, TextField, Typography, useTheme,
+  Autocomplete, Box, Card, CardContent, Chip, FormControlLabel, InputAdornment,
+  MenuItem, Stack, Switch, TextField, Typography, useTheme,
 } from '@mui/material';
 import CheckCircleOutline from '@mui/icons-material/CheckCircleOutline';
 
@@ -106,10 +106,12 @@ export default function AlertPresetCard({ preset, onSave, onError }: Props) {
     push({ condition: { [t.key]: raw } });
   };
 
-  // Only the scalar controls are rendered. Route and competitor multi-selects
-  // need the tenant's dimension lists, which this screen does not fetch yet;
-  // leaving them out is honest, where an empty picker would look broken.
+  // Scalar controls always render. A multi-select renders once the server
+  // sends its option list — the rules responses now carry the tenant's routes
+  // — and stays hidden without one (the competitor picker still has no list),
+  // because an empty picker would look broken rather than honest.
   const scalar = preset.tunables.filter(t => t.type === 'number' || t.type === 'enum' || t.type === 'bool');
+  const multi = preset.tunables.filter(t => t.type === 'multiselect' && (t.options?.length ?? 0) > 0);
 
   const blocked = preset.missing_requirements.length > 0 && !active;
 
@@ -160,7 +162,7 @@ export default function AlertPresetCard({ preset, onSave, onError }: Props) {
           </Stack>
         </Stack>
 
-        {scalar.length > 0 && (
+        {(scalar.length > 0 || multi.length > 0) && (
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
             {scalar.map(t => {
               const value = condition[t.key];
@@ -213,6 +215,25 @@ export default function AlertPresetCard({ preset, onSave, onError }: Props) {
                 />
               );
             })}
+            {multi.map(t => (
+              <Autocomplete
+                key={t.key}
+                multiple
+                size="small"
+                options={t.options ?? []}
+                // A field the server requires BEFORE activation must stay
+                // editable while the rule is off, or the requirement could
+                // never be satisfied; optional multi-selects grey out with
+                // the scalars.
+                disabled={!active && !preset.missing_requirements.includes(t.key)}
+                value={Array.isArray(condition[t.key]) ? (condition[t.key] as string[]) : []}
+                onChange={(_, next) => setField(t, next)}
+                renderInput={p => (
+                  <TextField {...p} label={t.label} helperText={t.help ?? ' '} />
+                )}
+                sx={{ minWidth: 280, flexGrow: 1 }}
+              />
+            ))}
           </Stack>
         )}
       </CardContent>
