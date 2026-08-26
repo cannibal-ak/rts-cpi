@@ -172,6 +172,9 @@ export default function PriceDetailCard({
         airline: point.airline,
         dep_date: point.dep_date,
         ...(point.flt_num ? { flt_num: point.flt_num } : {}),
+        // Scope to the pinned point's itinerary type: on a tenant with both
+        // OW and RT rows (5L) the same flight/date carries two fare lines.
+        ...(point.trip_type ? { trip_type: point.trip_type } : {}),
       })
       .then(res => { if (!cancelled) setHistory(res.points); })
       .catch(err => {

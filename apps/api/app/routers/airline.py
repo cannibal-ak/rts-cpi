@@ -788,6 +788,7 @@ def price_point_history(
     airline: str = Query(...),
     dep_date: str = Query(...),
     flt_num: str | None = Query(None),
+    trip_type: str | None = Query(None, description="OW or RT; a row-level itinerary attribute."),
 ):
     """How one flight's fare moved across capture dates.
 
@@ -801,6 +802,7 @@ def price_point_history(
     destination = sanitize_filter(destination, "destination")
     airline = sanitize_filter(airline, "airline")
     flt_num = sanitize_filter(flt_num, "flt_num")
+    trip_type = sanitize_filter(trip_type, "trip_type")
     dep_date = sanitize_date(dep_date, "dep_date")
     if not (origin and destination and airline and dep_date):
         raise HTTPException(
@@ -817,6 +819,8 @@ def price_point_history(
     }
     if flt_num:
         params["flt_num"] = flt_num
+    if trip_type:
+        params["trip_type"] = trip_type
 
     def _side_sql(side: str) -> str:
         clauses = [
@@ -833,6 +837,13 @@ def price_point_history(
         ]
         if flt_num:
             clauses.append(f"{side}_flt_num = :flt_num")
+        if trip_type:
+            # Not side-prefixed, same as list_price_points: one snapshot row
+            # is one itinerary observation, so its trip_type covers the
+            # reference and competitor halves alike. Without this, a tenant
+            # carrying both OW and RT rows (5L) gets a history that mixes the
+            # two fares of the same flight/date into one zigzag line.
+            clauses.append("trip_type = :trip_type")
         return (
             f"SELECT DISTINCT cap_date, cap_time, {side}_tot_fare AS tot_fare, "
             f"{side}_seats AS seats, NULLIF({side}_curr, '') AS curr "
@@ -849,6 +860,7 @@ def price_point_history(
     return PriceHistoryResponse(
         airline=airline.upper(),
         flt_num=flt_num,
+        trip_type=trip_type,
         origin=origin.upper(),
         destination=destination.upper(),
         dep_date=dep_date_obj,

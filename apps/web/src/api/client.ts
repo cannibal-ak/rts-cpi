@@ -346,6 +346,8 @@ export interface PriceHistoryPoint {
 export interface PriceHistoryResponse {
   airline: string;
   flt_num: string | null;
+  /** Echoes the trip_type the query scoped by; null when unscoped. */
+  trip_type: string | null;
   origin: string;
   destination: string;
   dep_date: string;
@@ -359,6 +361,11 @@ export interface PriceHistoryQuery {
   airline: string;
   dep_date: string;
   flt_num?: string;
+  /**
+   * 'OW' | 'RT'. Without it a tenant carrying both itinerary types (5L)
+   * gets OW and RT fares of the same flight/date mixed into one history.
+   */
+  trip_type?: string;
   tenant?: string;
   [key: string]: string | number | undefined;
 }

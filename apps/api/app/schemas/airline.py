@@ -239,6 +239,8 @@ class PriceHistoryPointOut(BaseModel):
 class PriceHistoryResponse(BaseModel):
     airline: str
     flt_num: Optional[str] = None
+    # Echoes the trip_type the caller scoped by; None when unscoped.
+    trip_type: Optional[str] = None
     origin: str
     destination: str
     dep_date: date
