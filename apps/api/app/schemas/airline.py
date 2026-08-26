@@ -147,6 +147,9 @@ class PricePointOut(BaseModel):
     duration_min: Optional[int] = None
     stops: Optional[int] = None
     via: Optional[str] = None
+    # 'OW' | 'RT' where the feed states it; an itinerary-level attribute shared
+    # by the reference and competitor halves of the same snapshot row.
+    trip_type: Optional[str] = None
 
     cab_code: Optional[str] = None
     cab_name: Optional[str] = None

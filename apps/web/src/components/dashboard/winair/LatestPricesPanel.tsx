@@ -50,6 +50,7 @@ interface LatestPricesPanelProps {
   stops: number[];
   fltNums: string[];
   daysLeft: number[];
+  tripTypes: string[];
   /**
    * Departure-time and duration windows, in minutes. Owned by the page
    * because their controls live in the filter bar above this pane.
@@ -95,7 +96,7 @@ function pointKey(p: PricePoint): string {
  * the full flight detail behind that price, and several stay open at once.
  */
 export default function LatestPricesPanel({
-  routes, capDate, stops, fltNums, daysLeft, depTime, duration, routeOptions, active,
+  routes, capDate, stops, fltNums, daysLeft, tripTypes, depTime, duration, routeOptions, active,
 }: LatestPricesPanelProps) {
   const { brandInk, BANNER_BG } = useBrandedChrome();
 
@@ -137,6 +138,7 @@ export default function LatestPricesPanel({
   // structurally impossible rather than a thing to remember.
   const singleStop = stops.length === 1 ? stops[0] : undefined;
   const singleFltNum = fltNums.length === 1 ? fltNums[0] : undefined;
+  const singleTripType = tripTypes.length === 1 ? tripTypes[0] : undefined;
 
   // ── Data ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -159,6 +161,7 @@ export default function LatestPricesPanel({
           ...(capDate ? { cap_date: capDate } : {}),
           ...(singleStop !== undefined ? { stops: singleStop } : {}),
           ...(singleFltNum ? { flt_num: singleFltNum } : {}),
+          ...(singleTripType ? { trip_type: singleTripType } : {}),
         },
         { signal: controller.signal },
       )
@@ -185,7 +188,7 @@ export default function LatestPricesPanel({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [routesKey, capDate, singleStop, singleFltNum]);
+  }, [routesKey, capDate, singleStop, singleFltNum, singleTripType]);
 
   // ── Client-side refinement ──────────────────────────────────────────
   const depNarrowed = isNarrowed(depTime, FULL_DEP_RANGE);
@@ -195,11 +198,13 @@ export default function LatestPricesPanel({
     const stopSet = stops.length ? new Set(stops) : null;
     const fltSet = fltNums.length ? new Set(fltNums) : null;
     const dbdSet = daysLeft.length ? new Set(daysLeft) : null;
-    if (!stopSet && !fltSet && !dbdSet && !depNarrowed && !durNarrowed) return fetched;
+    const tripSet = tripTypes.length ? new Set(tripTypes) : null;
+    if (!stopSet && !fltSet && !dbdSet && !tripSet && !depNarrowed && !durNarrowed) return fetched;
     return fetched.filter(p => {
       if (stopSet && (p.stops === null || !stopSet.has(p.stops))) return false;
       if (fltSet && (!p.flt_num || !fltSet.has(p.flt_num))) return false;
       if (dbdSet && (p.dbd === null || !dbdSet.has(p.dbd))) return false;
+      if (tripSet && (!p.trip_type || !tripSet.has(p.trip_type))) return false;
       if (depNarrowed) {
         // A fare with no departure time cannot be shown to satisfy a
         // narrowed window, so it drops out — and gets counted below rather
@@ -213,7 +218,7 @@ export default function LatestPricesPanel({
       }
       return true;
     });
-  }, [fetched, stops, fltNums, daysLeft, depTime, duration, depNarrowed, durNarrowed]);
+  }, [fetched, stops, fltNums, daysLeft, tripTypes, depTime, duration, depNarrowed, durNarrowed]);
 
   // Fares excluded purely because they carry no time to compare against —
   // a different thing from "outside the window you chose".

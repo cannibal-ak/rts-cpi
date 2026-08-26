@@ -247,6 +247,9 @@ export interface PricePoint {
   duration_min: number | null;
   stops: number | null;
   via: string | null;
+  // 'OW' | 'RT' where the feed states it; shared by the reference and
+  // competitor halves of the same snapshot row.
+  trip_type: string | null;
 
   cab_code: string | null;
   cab_name: string | null;
@@ -321,6 +324,8 @@ export interface PricePointsQuery {
   dep_to?: string;
   stops?: number;
   flt_num?: string;
+  /** 'OW' | 'RT'. Scopes the no-fare markers too, rather than suppressing them. */
+  trip_type?: string;
   /** 1 asks the server to include no_fare_days; omitted = off (back-compat). */
   include_availability?: number;
   // Index signature so this is assignable to the query-param record the
