@@ -199,6 +199,12 @@ export const mockClient: CpiApiClient = {
       return delay({ updated, unread_count: 0 });
     },
 
+    // Distinct routes from the mock events — the real endpoint also folds in
+    // the latest capture's routes, but the mock has no fare data to draw on.
+    listRoutes: () => delay(
+      [...new Set(_mockEvents.map(e => e.payload?.route).filter(Boolean))].sort() as string[],
+    ),
+
     listPresets: () => delay(_mockPresets.map(p => ({ ...p }))),
 
     getPreset: (ruleKey) => {

@@ -14,8 +14,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  Alert, Box, Button, Chip, CircularProgress, FormControlLabel, MenuItem,
-  Paper, Snackbar, Stack, Switch, TablePagination, TextField, Typography,
+  Alert, Autocomplete, Box, Button, Chip, CircularProgress, FormControlLabel,
+  MenuItem, Paper, Snackbar, Stack, Switch, TablePagination, TextField,
+  Typography,
 } from '@mui/material';
 import NotificationsOffOutlined from '@mui/icons-material/NotificationsOffOutlined';
 import SearchOffOutlined from '@mui/icons-material/SearchOffOutlined';
@@ -59,15 +60,23 @@ export default function AlertsPage() {
   const [severity, setSeverity] = useState<AlertSeverity | ''>('');
   const [ruleKey, setRuleKey] = useState('');
   const [route, setRoute] = useState('');
-  const [routeInput, setRouteInput] = useState('');
+  // Every route the tenant can filter by, from /alerts/routes. The backend
+  // matches routes EXACTLY (a GIN-indexed containment, not a LIKE), which is
+  // why this is a pick-list and not free text: a typed partial silently
+  // matches nothing.
+  const [routeOptions, setRouteOptions] = useState<string[]>([]);
 
   const focusRef = useRef<HTMLDivElement | null>(null);
 
-  // Free-text needs a debounce; the selects fire immediately.
   useEffect(() => {
-    const t = setTimeout(() => setRoute(routeInput.trim().toUpperCase()), 300);
-    return () => clearTimeout(t);
-  }, [routeInput]);
+    let cancelled = false;
+    api.alerts.listRoutes()
+      .then(rs => { if (!cancelled) setRouteOptions(rs); })
+      // No options is a degraded but working state — the dropdown still
+      // accepts nothing, and the events list itself is unaffected.
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const filtersActive = Boolean(unreadOnly || severity || ruleKey || route);
 
@@ -104,7 +113,7 @@ export default function AlertsPage() {
 
   const resetFilters = () => {
     setUnreadOnly(false); setSeverity(''); setRuleKey('');
-    setRouteInput(''); setRoute(''); setPage(0);
+    setRoute(''); setPage(0);
   };
 
   const onSelect = (id: string, checked: boolean) =>
@@ -211,10 +220,17 @@ export default function AlertsPage() {
             <MenuItem value="info">Info</MenuItem>
           </TextField>
 
-          <TextField
-            size="small" label="Route" placeholder="ZNZ-NBO" value={routeInput}
-            onChange={e => { setRouteInput(e.target.value); setPage(0); }}
-            sx={{ minWidth: 150 }}
+          <Autocomplete
+            size="small"
+            options={routeOptions}
+            value={route || null}
+            onChange={(_, next) => { setRoute(next ?? ''); setPage(0); }}
+            autoHighlight
+            sx={{ minWidth: 200 }}
+            renderInput={p => (
+              <TextField {...p} label="Route"
+                         placeholder={routeOptions.length ? 'All routes' : 'No routes yet'} />
+            )}
           />
 
           <FormControlLabel

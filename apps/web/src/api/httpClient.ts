@@ -446,6 +446,9 @@ export const httpClient: CpiApiClient = {
       return get<Paginated<AlertEvent>>('/api/v1/alerts/events', params, opts);
     },
 
+    listRoutes: (opts?: RequestOptions) =>
+      get<string[]>('/api/v1/alerts/routes', undefined, opts),
+
     unreadCount: (opts?: RequestOptions) =>
       get<{ unread: number; capped: boolean }>('/api/v1/alerts/events/unread-count', undefined, opts),
 
