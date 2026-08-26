@@ -84,15 +84,20 @@ appears on it only for the committing action (Apply) and brand marks. The
 chosen/scoped state is the **wordmark blue**, NOT red: on a red-branded page
 a red selection would read as brand, not choice. Since 2026-08-26 that blue
 covers both the filter card's chosen state (`FILTER_ACCENT`) and the
-"where you are" chrome (`SCOPE_ACCENT`: the selected section pill and the
-Latest data / Cap date chips, which the red-branded siblings paint in their
-brand via aliased tokens).
+"where you are" chrome (`SCOPE_ACCENT`: the selected section pill, the
+Latest data / Cap date chips, and — same day, per user direction — the
+sidebar menu's on-path labels and selected rows, via the mode-aware
+`scopeInk` = `lighten(#275AA1, 0.3)` ≈ `#688CBD` on dark paper). The
+red-branded siblings paint all of it in their brand via aliased tokens.
+The sidebar's solid rail tile stays `BANNER_BG` red by explicit user
+choice — it is a brand mark, like the app-bar avatar; the logout button
+was never tenant chrome (theme error red) and spinners stay `brandInk`.
 
 | Role | Hex | Contrast on chrome |
 |---|---|---|
 | Chrome surface | `#E6EDF4` | — |
 | Chrome accent (chosen state, active borders, chips, sliders) | `#275AA1` | 5.81:1 (6.86:1 on the white fields) |
-| Scope accent (selected tab pill, date chips) | `#275AA1` | white text on it 6.86:1 |
+| Scope accent (selected tab pill, date chips, sidebar selected rows) | `#275AA1` | white text on it 6.86:1; sidebar row text on its 10% tint 5.91:1, on the 12% hover tint 5.73:1 — both above the red family these alphas were tuned for (4.41:1) |
 | Scope accent, pressed | `#1B3F72` | white text on it 10.50:1; as hover text on a white pill 10.50:1 |
 | Chrome ink | `#12263F` | 12.94:1 |
 | Chrome label ink | `#2F4A6B` | 7.69:1 |
