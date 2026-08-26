@@ -564,6 +564,7 @@ export default function DashboardViewerPage() {
       fltNums: allValuesOf('flt_num'),
       stops: toInts(allValuesOf('stops')),
       daysLeft: toInts(allValuesOf('days_left')),
+      tripTypes: allValuesOf('trip_type'),
       // The panel falls back to the first of these when no route is applied,
       // so Latest Prices opens with a chart instead of an empty box.
       routeOptions: (routeFilter?.values ?? []).map(toRoute).filter(notNull),
@@ -1146,6 +1147,7 @@ export default function DashboardViewerPage() {
             stops={pricesScope.stops}
             fltNums={pricesScope.fltNums}
             daysLeft={pricesScope.daysLeft}
+            tripTypes={pricesScope.tripTypes}
             depTime={depTimeRange}
             duration={durationRange}
             routeOptions={pricesScope.routeOptions}

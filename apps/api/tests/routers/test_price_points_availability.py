@@ -22,6 +22,7 @@ Covers:
   g) include_availability default-off back-compat
   h) stops / flt_num suppression
   i) cap_date + dep window + airlines + multi-market scoping
+  j) trip_type filters points and SCOPES markers (no suppression)
 """
 
 import inspect
@@ -120,6 +121,7 @@ def _call(db, **overrides):
         dep_to=None,
         stops=None,
         flt_num=None,
+        trip_type=None,
         include_availability=True,
     )
     kwargs.update(overrides)
@@ -263,3 +265,41 @@ def test_scoping_dep_window_airlines_markets(db_session, wm_tenant_id):
         ("ZZA-ZZB", "WM", d5, "sold_out", 5),
         ("ZZC-ZZD", "WM", d5, "sold_out", 5),
     ]
+
+
+# ── (j) trip_type filters points and scopes markers ──────────────────────────
+
+def test_trip_type_filters_points(db_session, wm_tenant_id):
+    """trip_type narrows both halves of the union and rides along on points."""
+    _seed(db_session, wm_tenant_id)                       # OW pair (100 / 90)
+    _seed(db_session, wm_tenant_id, trip_type="RT",
+          ref_flt_num="102", ref_tot_fare=120, comp_flt_num="202", comp_tot_fare=110)
+    unfiltered = _call(db_session)
+    assert sorted(p.trip_type for p in unfiltered.points) == ["OW", "OW", "RT", "RT"]
+    ow = _call(db_session, trip_type="OW")
+    assert sorted(p.tot_fare for p in ow.points) == [90, 100]
+    assert all(p.trip_type == "OW" for p in ow.points)
+    rt = _call(db_session, trip_type="RT")
+    assert sorted(p.tot_fare for p in rt.points) == [110, 120]
+    assert all(p.trip_type == "RT" for p in rt.points)
+
+
+def test_trip_type_scopes_markers_not_suppresses(db_session, wm_tenant_id):
+    """trip_type is populated on no-fare rows, so it SCOPES the markers.
+
+    A day whose only purchasable fares are OW is not a no-fare day overall,
+    but it IS one under trip_type=RT — and the flag stays down throughout.
+    """
+    _seed(db_session, wm_tenant_id)                       # OW on sale
+    _seed(db_session, wm_tenant_id, trip_type="RT",       # RT sold out all day
+          ref_tot_fare=0, ref_stops=1, ref_flt_num="102",
+          comp_tot_fare=0, comp_flt_num="202")
+    unfiltered = _call(db_session)
+    assert unfiltered.no_fare_days == []                  # OW fares save the day
+    rt = _call(db_session, trip_type="RT")
+    assert rt.points == []
+    assert _days(rt) == [
+        ("ZZA-ZZB", "WM", CAP_DATE + 10 * DAY, "sold_out", 10),
+        ("ZZA-ZZB", "XX", CAP_DATE + 10 * DAY, "sold_out", 10),
+    ]
+    assert rt.availability_suppressed is False

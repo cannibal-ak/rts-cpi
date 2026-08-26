@@ -442,6 +442,7 @@ _PRICE_POINT_SIDE_SQL = """
         {side}_yq                                        AS yq,
         {side}_yr                                        AS yr,
         {side}_tot_fare                                  AS tot_fare,
+        NULLIF(trip_type, '')                            AS trip_type,
         cap_date,
         cap_time
     FROM {view}
@@ -535,6 +536,7 @@ def list_price_points(
     dep_to: str | None = Query(None),
     stops: int | None = Query(None, ge=0),
     flt_num: str | None = Query(None),
+    trip_type: str | None = Query(None, description="OW or RT; a row-level itinerary attribute."),
     include_availability: bool = Query(
         False, description="Set true to also classify each airline's no-fare days."
     ),
@@ -557,6 +559,7 @@ def list_price_points(
     dep_from = sanitize_date(dep_from, "dep_from")
     dep_to = sanitize_date(dep_to, "dep_to")
     flt_num = sanitize_filter(flt_num, "flt_num")
+    trip_type = sanitize_filter(trip_type, "trip_type")
     airline_list = [
         code for code in
         (sanitize_filter(part.strip(), "airlines") for part in (airlines or "").split(",") if part.strip())
@@ -596,6 +599,8 @@ def list_price_points(
         params["stops"] = stops
     if flt_num:
         params["flt_num"] = flt_num
+    if trip_type:
+        params["trip_type"] = trip_type
 
     def _side_sql(side: str, role: str) -> str:
         # The market predicate is always the REFERENCE O&D, on both halves:
@@ -618,6 +623,10 @@ def list_price_points(
             clauses.append(f"{side}_stops = :stops")
         if flt_num:
             clauses.append(f"{side}_flt_num = :flt_num")
+        if trip_type:
+            # Not side-prefixed: one snapshot row is one itinerary observation,
+            # so its trip_type covers the reference and competitor halves alike.
+            clauses.append("trip_type = :trip_type")
         return _PRICE_POINT_SIDE_SQL.format(
             side=side, role=role, view=view_name, where=" AND ".join(clauses)
         )
@@ -637,7 +646,7 @@ def list_price_points(
     projection = (
         "market, airline, role, flt_num, origin, destination, dep_date, dep_time, "
         "arr_time, stops, via, cab_code, cab_name, bkg_class, ff_code, equip_code, "
-        "seats, curr, base_fare, tax, yq, yr, tot_fare, cap_date, cap_time"
+        "seats, curr, base_fare, tax, yq, yr, tot_fare, trip_type, cap_date, cap_time"
     )
     row_order = "dep_date, dep_time NULLS LAST, airline, tot_fare"
     sql = text(
@@ -705,6 +714,12 @@ def list_price_points(
                     clauses.append(f"{side}_dep_date >= :dep_from")
                 if dep_to:
                     clauses.append(f"{side}_dep_date <= :dep_to")
+                # Unlike stops/flt_num, trip_type is populated on no-fare rows
+                # too (it names the itinerary asked about, not the flight that
+                # answered), so it scopes the markers rather than suppressing
+                # them: "no RT fare all day" is a well-posed statement.
+                if trip_type:
+                    clauses.append("trip_type = :trip_type")
                 return _AVAILABILITY_SIDE_SQL.format(
                     side=side,
                     status_case=_AVAILABILITY_STATUS_CASE[side],
