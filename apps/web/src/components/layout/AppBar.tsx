@@ -224,10 +224,10 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
                 sx={{
                   width: 36,
                   height: 36,
-                  // WinAir's avatar wears its brand red; everyone else keeps
-                  // the app-primary pair.
+                  // Branded tenants wear their banner fill with white
+                  // initials; everyone else keeps the app-primary pair.
                   bgcolor: chrome ? chrome.BANNER_BG : 'primary.light',
-                  color: isWmTenant ? '#ffffff' : 'primary.dark',
+                  color: chrome ? '#ffffff' : 'primary.dark',
                   fontSize: 14,
                   fontWeight: 500,
                   transition: 'opacity 150ms ease',
@@ -268,7 +268,7 @@ export default function AppBar({ onToggleSidebar, sidebarOpen }: AppBarProps) {
                 width: 42,
                 height: 42,
                 bgcolor: chrome ? chrome.BANNER_BG : 'primary.light',
-                color: isWmTenant ? '#ffffff' : 'primary.dark',
+                color: chrome ? '#ffffff' : 'primary.dark',
                 fontSize: 15,
                 fontWeight: 500,
               }}
