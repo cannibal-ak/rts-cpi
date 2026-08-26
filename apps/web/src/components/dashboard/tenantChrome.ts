@@ -44,7 +44,7 @@ export type TenantChrome = {
 export const WINAIR_CHROME: TenantChrome = winair;
 /** DreamAir azure + lilac grey. */
 export const DREAMAIR_CHROME: TenantChrome = dreamair;
-/** Liat Air ocean blue + blue grey with a gold accent. */
+/** Liat Air brand red + blue grey, wordmark-blue chosen/scope accent. */
 export const LIAT_CHROME: TenantChrome = liat;
 
 /**

@@ -145,7 +145,10 @@ export default function DashboardViewerPage() {
   // with comes from the tenant, not from a hardcoded WinAir constant.
   const chrome = getTenantChrome(meta?.tenant?.toLowerCase());
   const isWinair = chrome !== null;
-  const BANNER_BG = chrome?.BANNER_BG;
+  // The date chips wear SCOPE_ACCENT, not BANNER_BG: they state which capture
+  // the page is scoped to, and Liat paints scope in its logo blue while the
+  // other branded tenants alias it to their brand.
+  const SCOPE_ACCENT = chrome?.SCOPE_ACCENT;
   const brandInk = chrome?.brandInk;
   // Dashboards whose Chart view mints a form_data_key overlay so the global
   // filter bar reaches the standalone explore iframe. App-route ids. WM only for
@@ -804,11 +807,12 @@ export default function DashboardViewerPage() {
               // separate it from and the leading gap would read as a stray indent.
               ml: isWinair ? 0 : 2,
               fontWeight: 500,
-              // WinAir's chips follow its brand red, not the app primary.
+              // Branded tenants' chips follow their scope accent (brand red
+              // on WinAir/DreamAir, wordmark blue on Liat), not app primary.
               ...(isWinair && {
-                color: BANNER_BG,
-                borderColor: BANNER_BG,
-                '& .MuiChip-icon': { color: BANNER_BG },
+                color: SCOPE_ACCENT,
+                borderColor: SCOPE_ACCENT,
+                '& .MuiChip-icon': { color: SCOPE_ACCENT },
               }),
             }}
           />
@@ -830,7 +834,7 @@ export default function DashboardViewerPage() {
             // the embed, so it always applies to whatever is on screen.
             appliesToView={isWinair || activeViewMode === 'dashboard'}
             compact={isHeaderTight}
-            accent={BANNER_BG}
+            accent={SCOPE_ACCENT}
           />
         )}
 

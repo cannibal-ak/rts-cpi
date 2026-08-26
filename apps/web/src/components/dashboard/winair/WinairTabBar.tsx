@@ -47,7 +47,7 @@ export default function WinairTabBar({
   tabs, value, onChange, loading, switching, error,
 }: WinairTabBarProps) {
   const {
-    BANNER_BG, BANNER_HEADER_BG, FILTER_BG, FILTER_BORDER, FILTER_ERROR_BG, FILTER_ERROR_INK,
+    SCOPE_ACCENT, SCOPE_ACCENT_PRESSED, FILTER_BG, FILTER_BORDER, FILTER_ERROR_BG, FILTER_ERROR_INK,
     FILTER_FIELD_BG, FILTER_FIELD_LINE, FILTER_LABEL_INK, FILTER_SKELETON,
   } = useBrandedChrome();
 
@@ -96,13 +96,15 @@ export default function WinairTabBar({
             '& .MuiTabs-scrollButtons': { color: FILTER_LABEL_INK },
             // Idle pills reuse the filter fields' tokens, so an untouched tab
             // and an untouched field look the same. The current tab fills with
-            // brand red, NOT the filters' teal: the two say different things —
-            // red is where you are in the dashboard, teal is what you have
-            // filtered — and one accent for both would blur that.
+            // SCOPE_ACCENT — brand red on WinAir/DreamAir, wordmark blue on
+            // Liat — NOT the filters' accent: the two say different things —
+            // scope is where you are in the dashboard, the accent is what you
+            // have filtered — and one colour for both would blur that.
             //
             // Both pill states carry their own text colour rather than
-            // inheriting, so each is legible on its own fill: white on the red
-            // measures 5.5:1, slate on the white 7.6:1.
+            // inheriting, so each is legible on its own fill: white measures
+            // 5.5:1 on the WinAir red and 6.9:1 on the Liat blue, slate on
+            // the white 7.6:1.
             '& .MuiTab-root': {
               minHeight: 32,
               minWidth: 'auto',
@@ -118,13 +120,13 @@ export default function WinairTabBar({
               textTransform: 'none',
               color: FILTER_LABEL_INK,
               gap: 0.75,
-              '&:hover': { borderColor: BANNER_BG, color: BANNER_HEADER_BG },
+              '&:hover': { borderColor: SCOPE_ACCENT, color: SCOPE_ACCENT_PRESSED },
               '&.Mui-selected': {
                 color: '#ffffff',
                 fontWeight: 600,
-                bgcolor: BANNER_BG,
-                borderColor: BANNER_BG,
-                '&:hover': { bgcolor: BANNER_HEADER_BG, borderColor: BANNER_HEADER_BG, color: '#ffffff' },
+                bgcolor: SCOPE_ACCENT,
+                borderColor: SCOPE_ACCENT,
+                '&:hover': { bgcolor: SCOPE_ACCENT_PRESSED, borderColor: SCOPE_ACCENT_PRESSED, color: '#ffffff' },
               },
             },
           }}

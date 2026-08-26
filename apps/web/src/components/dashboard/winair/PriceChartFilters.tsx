@@ -1,4 +1,5 @@
 import { Box, Slider, Typography, Tooltip } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import {
   formatDuration, DEP_TIME_MIN, DEP_TIME_MAX, DURATION_MIN, DURATION_MAX,
 } from './priceChartTheme';
@@ -101,7 +102,10 @@ export default function TimeRangeFilter({
             '& .MuiSlider-thumb': {
               width: 11,
               height: 11,
-              '&:hover, &.Mui-focusVisible': { boxShadow: '0 0 0 6px rgba(47,110,115,0.16)' },
+              // The halo is the accent at the alpha the WinAir teal shipped with,
+              // derived rather than literal so each tenant's sliders glow their
+              // own chosen-state colour (WinAir renders byte-identically).
+              '&:hover, &.Mui-focusVisible': { boxShadow: `0 0 0 6px ${alpha(FILTER_ACCENT, 0.16)}` },
             },
             '& .MuiSlider-valueLabel': { fontSize: 10, py: 0.25, px: 0.5 },
           }}
