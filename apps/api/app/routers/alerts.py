@@ -479,7 +479,7 @@ def update_rule(
             raise HTTPException(422, detail={
                 "message": (
                     f"{preset.name} needs {', '.join(missing)} before it can be "
-                    f"switched on — without it the rule would match every route."
+                    f"switched on - without it the rule would match every route."
                 ),
                 "missing": missing,
             })

@@ -384,7 +384,7 @@ def _eval_price_move(
         message = (
             f"{comp} {verb} its {route} fare {abs(delta_pct):.1f}% "
             f"({_money(p.fare, p.currency)} → {_money(c.fare, c.currency)}) "
-            f"for departures {window.replace('-', '–')} days out."
+            f"for departures {window} days out."
         )
         payload = {
             "route": route, "origin": c.origin, "destination": c.destination,
@@ -465,7 +465,7 @@ def _eval_position(
         # next genuine undercut would then match `previous == state` above and
         # be dropped, and the scope would go permanently silent after its first
         # alert. Measured on the DA backfill: 101 undercut alerts collapse to
-        # 24 � 77 real losses of the cheapest position emitting nothing at all.
+        # 24 - 77 real losses of the cheapest position emitting nothing at all.
         # So record it, and mark it undelivered instead.
         recovery_muted = (state == "cheapest" and not cond["notify_on_recovery"])
 
@@ -473,7 +473,7 @@ def _eval_position(
             severity = rule.severity
             message = (
                 f"We are no longer cheapest on {route} for departures "
-                f"{window.replace('-', '–')} days out — rank {rank} of "
+                f"{window} days out - rank {rank} of "
                 f"{own.competitor_count + 1}. "
                 f"{best_al} at {_money(best_fare, own.currency)} against our "
                 f"{_money(own.fare, own.currency)}."
@@ -482,7 +482,7 @@ def _eval_position(
             severity = "info"
             message = (
                 f"We are cheapest again on {route} for departures "
-                f"{window.replace('-', '–')} days out at "
+                f"{window} days out at "
                 f"{_money(own.fare, own.currency)}."
             )
 
@@ -554,7 +554,7 @@ def _eval_price_threshold(
         message = (
             f"{comp} moved {op} {_money(value, c.currency)} on {route} "
             f"({_money(p.fare, p.currency)} → {_money(c.fare, c.currency)}) "
-            f"for departures {window.replace('-', '–')} days out."
+            f"for departures {window} days out."
         )
         payload = {
             "route": route, "origin": c.origin, "destination": c.destination,
