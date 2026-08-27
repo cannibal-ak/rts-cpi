@@ -17,8 +17,8 @@
 import type { ModuleCode, UserRole } from '../types';
 import type { TenantSession } from '../types';
 
-/** Tenants with the alerts UI switched on: DreamAir, then Liat Air. */
-export const ALERTS_MODULES: ModuleCode[] = ['airline_da', 'airline_5l'];
+/** Tenants with the alerts UI switched on: DreamAir, Liat Air, WinAir. */
+export const ALERTS_MODULES: ModuleCode[] = ['airline_da', 'airline_5l', 'airline_wm'];
 
 export const ALERTS_VIEW_ROLES: UserRole[] = ['TENANT_ADMIN', 'TENANT_USER'];
 export const ALERTS_ADMIN_ROLES: UserRole[] = ['TENANT_ADMIN'];
