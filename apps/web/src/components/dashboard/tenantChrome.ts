@@ -25,6 +25,7 @@ import { useSession } from '../../context/SessionContext';
 import * as winair from './bannerTheme';
 import * as dreamair from './dreamairTheme';
 import * as liat from './liatTheme';
+import * as jy from './jyTheme';
 
 /**
  * The token bundle, with the hex literals widened to `string`.
@@ -46,6 +47,8 @@ export const WINAIR_CHROME: TenantChrome = winair;
 export const DREAMAIR_CHROME: TenantChrome = dreamair;
 /** Liat Air brand red + blue grey, wordmark-blue chosen/scope accent. */
 export const LIAT_CHROME: TenantChrome = liat;
+/** interCaribbean navy + sky blue, ocean-cerulean chosen accent. */
+export const JY_CHROME: TenantChrome = jy;
 
 /**
  * Tenant slugs that have their own chrome. A tenant absent from here is
@@ -56,6 +59,7 @@ const CHROME_BY_TENANT: Record<string, TenantChrome> = {
   wm: WINAIR_CHROME,
   da: DREAMAIR_CHROME,
   '5l': LIAT_CHROME,
+  jy: JY_CHROME,
 };
 
 /** The chrome for a tenant slug, or null if that tenant is unbranded. */
