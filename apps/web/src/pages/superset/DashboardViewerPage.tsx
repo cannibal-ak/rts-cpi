@@ -563,12 +563,17 @@ export default function DashboardViewerPage() {
     const routeFilter = filterConfig.find(f => f.field === 'route');
     // "EIS → SXM" is the label wm_all_airlines_fares builds; the API takes
     // the two stations as ORG-DST. Keep both: the label is what the filter
-    // bar expects back when the panel offers a shortcut.
+    // bar expects back when the panel offers a shortcut. PW's
+    // pw_all_carriers_fares instead builds route as CONCAT(org, dst) —
+    // "DARARK", six chars, no separator — so 3+3 is parsed too; either way
+    // the label stays the dataset's own value, never a prettified one.
     const toRoute = (label: string): { market: string; label: string } | null => {
       const parts = label.split('→').map(s => s.trim());
-      return parts.length === 2 && parts[0] && parts[1]
-        ? { market: `${parts[0]}-${parts[1]}`, label }
-        : null;
+      if (parts.length === 2 && parts[0] && parts[1]) {
+        return { market: `${parts[0]}-${parts[1]}`, label };
+      }
+      const joined = /^([A-Z0-9]{3})([A-Z0-9]{3})$/.exec(label.trim());
+      return joined ? { market: `${joined[1]}-${joined[2]}`, label } : null;
     };
     const notNull = <T,>(v: T | null): v is T => v !== null;
 
