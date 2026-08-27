@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Typography, CircularProgress, Alert, Chip, Tooltip, useTheme, alpha } from '@mui/material';
-import { TravelExplore } from '@mui/icons-material';
+import { TravelExplore, EventAvailable, EventBusy } from '@mui/icons-material';
 import * as echarts from 'echarts/core';
 import { LineChart, ScatterChart } from 'echarts/charts';
 import {
@@ -44,8 +44,24 @@ type ChartOption = ComposeOption<
 interface LatestPricesPanelProps {
   /** Selected markets as "ORG-DST". Empty until the user applies a route. */
   routes: string[];
-  /** Capture date from the page header; null lets the API pin the newest. */
+  /**
+   * Capture date from the page header; null lets the API pin the newest.
+   * In range mode the page resolves this to the newest capture INSIDE the
+   * window — never the raw range end, which may be a day with no capture.
+   */
   capDate: string | null;
+  /**
+   * The header's range holds no capture day at all. A real "nothing to
+   * show": the panel skips fetching and says so, rather than plotting a
+   * day the user did not pick.
+   */
+  noCaptureInRange?: boolean;
+  /**
+   * Name the capture day the dots come from in the context strip. Turned on
+   * in range mode, where the header chip states a window rather than the
+   * one day actually plotted.
+   */
+  showCapDate?: boolean;
   /** Remaining filter-bar selections, all multi-value. */
   stops: number[];
   fltNums: string[];
@@ -96,7 +112,8 @@ function pointKey(p: PricePoint): string {
  * the full flight detail behind that price, and several stay open at once.
  */
 export default function LatestPricesPanel({
-  routes, capDate, stops, fltNums, daysLeft, tripTypes, depTime, duration, routeOptions, active,
+  routes, capDate, noCaptureInRange = false, showCapDate = false,
+  stops, fltNums, daysLeft, tripTypes, depTime, duration, routeOptions, active,
 }: LatestPricesPanelProps) {
   const { brandInk, BANNER_BG } = useBrandedChrome();
 
@@ -106,9 +123,10 @@ export default function LatestPricesPanel({
 
   const [fetched, setFetched] = useState<PricePoint[]>([]);
   const [currency, setCurrency] = useState<string | null>(null);
-  // The capture date the API actually used is not surfaced here — the page
-  // header's Cap date chip already states it, and repeating it inside the
-  // chart was one of the lines cluttering the route strip.
+  // The capture date is surfaced in the context strip only when showCapDate
+  // asks for it (range mode). In single mode the page header's Cap date chip
+  // already states it, and repeating it was one of the lines cluttering the
+  // route strip.
   const [truncatedRoutes, setTruncatedRoutes] = useState<string[]>([]);
   const [noFareDays, setNoFareDays] = useState<NoFareDay[]>([]);
   // The server's own suppression flag: set when a stops/flt_num param made it
@@ -142,12 +160,18 @@ export default function LatestPricesPanel({
 
   // ── Data ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!routesKey) {
+    if (!routesKey || noCaptureInRange) {
       setFetched([]);
       setPinned([]);
       setTruncatedRoutes([]);
       setNoFareDays([]);
       setAvailabilitySuppressed(false);
+      // A leftover error from the previous query would sit above the
+      // no-capture empty state and blame the wrong thing — and a fetch this
+      // bail-out just aborted skips its own finally, which would leave the
+      // spinner up for good.
+      setError(null);
+      setLoading(false);
       return;
     }
     const controller = new AbortController();
@@ -188,7 +212,7 @@ export default function LatestPricesPanel({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [routesKey, capDate, singleStop, singleFltNum, singleTripType]);
+  }, [routesKey, capDate, singleStop, singleFltNum, singleTripType, noCaptureInRange]);
 
   // ── Client-side refinement ──────────────────────────────────────────
   const depNarrowed = isNarrowed(depTime, FULL_DEP_RANGE);
@@ -543,7 +567,8 @@ export default function LatestPricesPanel({
       {/* Context strip — what the chart is currently showing. */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap', mb: 0.5, pt: 0.5 }}>
         <Typography sx={{ fontSize: 12.5, fontWeight: 600 }}>Latest Prices</Typography>
-        {/* Routes only. The capture date is already in the page header, the
+        {/* Routes, plus the capture day when the header names a range. In
+            single mode the header chip already states the day exactly; the
             airline count is readable from the legend, and the explanation of
             the default belonged in a tooltip rather than across the chart. */}
         {markets.map(m => (
@@ -563,6 +588,17 @@ export default function LatestPricesPanel({
             />
           </Tooltip>
         ))}
+        {showCapDate && capDate && (
+          <Tooltip title="The capture day the plotted fares come from — the newest one inside the selected date range. This chart shows one capture at a time.">
+            <Chip
+              size="small"
+              variant="outlined"
+              icon={<EventAvailable sx={{ fontSize: 14 }} />}
+              label={`capture ${capDate}`}
+              sx={{ height: 20, fontSize: 11 }}
+            />
+          </Tooltip>
+        )}
         <Box sx={{ flexGrow: 1 }} />
         {visiblePinned.length > 0 && (
           <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
@@ -618,7 +654,7 @@ export default function LatestPricesPanel({
 
         {/* Only reachable when the dashboard offers no routes at all — with
             any route list the panel falls back to the first one instead. */}
-        {!hasRoutes && !loading && (
+        {!hasRoutes && !loading && !noCaptureInRange && (
           <Box sx={{ position: 'absolute', inset: 0, overflowY: 'auto' }}>
             <EmptyState
               icon={<TravelExplore sx={{ fontSize: 56 }} />}
@@ -632,7 +668,16 @@ export default function LatestPricesPanel({
             <CircularProgress size={28} sx={{ color: brandInk }} />
           </Box>
         )}
-        {hasRoutes && !loading && !error && points.length === 0 && (
+        {noCaptureInRange && !loading && (
+          <Box sx={{ position: 'absolute', inset: 0, overflowY: 'auto' }}>
+            <EmptyState
+              icon={<EventBusy sx={{ fontSize: 56 }} />}
+              title="No captures in the selected date range"
+              description="Data was not captured on any day inside the selected range, so there are no latest prices to plot. Widen or move the range — single-day mode in the Cap date picker lists the days that hold data."
+            />
+          </Box>
+        )}
+        {hasRoutes && !loading && !error && !noCaptureInRange && points.length === 0 && (
           <Box sx={{ position: 'absolute', inset: 0, overflowY: 'auto' }}>
             <EmptyState
               title="No fares match the current filters"
