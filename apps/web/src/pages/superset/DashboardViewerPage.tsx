@@ -235,7 +235,7 @@ export default function DashboardViewerPage() {
       // On Latest Prices the iframe is hidden: the panel refetches from
       // appliedFilters on its own, so re-embedding now would run every chart
       // in a pane nobody is looking at. Defer it to the next Superset tab.
-      if (isWinair && !supersetTabRef.current) embedStaleRef.current = true;
+      if (isWinair && activeTabRef.current === PRICES_TAB) embedStaleRef.current = true;
       else setRefreshKey(k => k + 1);
     } catch (err: any) {
       console.error('[WinairFilters] filter-params failed:', err);
@@ -290,6 +290,12 @@ export default function DashboardViewerPage() {
   const appliedFiltersRef = useRef<DashboardFilterSelections>({});
   useEffect(() => { supersetTabRef.current = supersetTab; }, [supersetTab]);
   useEffect(() => { appliedFiltersRef.current = appliedFilters; }, [appliedFilters]);
+  // Read by the two defer-or-re-embed sites below. They used to test
+  // supersetTabRef, but that is null on BOTH panes without a pinned section —
+  // Latest Prices (iframe hidden, deferring correct) and the Dashboard
+  // fallback tab (iframe in plain view, deferring left its charts stale).
+  const activeTabRef = useRef<string | null>(activeTab);
+  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
 
   // ── WinAir section list ──
   // Fetched only where the bar replaces Superset's own tab row. Everyone else
@@ -397,6 +403,17 @@ export default function DashboardViewerPage() {
     return () => { cancelled = true; };
   }, [id, supersetTab, isWinair]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The Dashboard fallback tab shows the iframe WITHOUT pinning a section, so
+  // the permalink effect above never re-embeds for it — arriving there still
+  // has to pay for anything deferred while Latest Prices was up, or for the
+  // very first embed, which the landing gate skipped. Ordered after that
+  // effect on purpose: it clears permalinkKeyRef first, so the embed this
+  // triggers opens Superset's own default section rather than a stale pin.
+  useEffect(() => {
+    if (!isWinair || activeTab !== DASHBOARD_TAB) return;
+    if (embedStaleRef.current || !embeddedOnceRef.current) setRefreshKey(k => k + 1);
+  }, [isWinair, activeTab]);
+
   /** Move the WinAir bar. `?tab=` is the single source of truth for the selection. */
   const selectTab = (next: string) => {
     const p = new URLSearchParams(searchParams);
@@ -494,7 +511,7 @@ export default function DashboardViewerPage() {
     // capDate prop, so a re-embed here would re-run every chart out of sight.
     // fetchGuestToken reads dateFilterRef, so a deferred embed still picks up
     // the current date whenever it eventually runs.
-    if (isWinair && !supersetTabRef.current) embedStaleRef.current = true;
+    if (isWinair && activeTabRef.current === PRICES_TAB) embedStaleRef.current = true;
     else setRefreshKey(k => k + 1);   // bump → re-embed with new RLS-scoped guest token
   };
 
@@ -575,6 +592,29 @@ export default function DashboardViewerPage() {
       routeOptions: (routeFilter?.values ?? []).map(toRoute).filter(notNull),
     };
   }, [filterConfig, appliedFilters]);
+
+  // ── Latest Prices capture date ──
+  // The price-points endpoint pins ONE capture day (an equality — a range
+  // predicate on the snapshot table is the known slow path), so range mode
+  // resolves to the newest capture INSIDE the window, found against
+  // /available-dates. Resolving here is what makes the panel react to a
+  // custom range at all: it used to key its fetch on the raw range END, a
+  // free calendar value — editing From changed nothing, and a To on a day
+  // with no capture emptied the chart while the window held plenty of data.
+  const pricesCapDate = useMemo(() => {
+    if (dateFilter.mode === 'single') return dateFilter.capDateEq ?? null;
+    const { capDateFrom: from, capDateTo: to } = dateFilter;
+    // availableDates is newest-first, so the first hit is the newest capture
+    // in the window. An end cleared mid-edit leaves that side open rather
+    // than matching nothing.
+    return availableDates.find(d => (!from || d >= from) && (!to || d <= to)) ?? null;
+  }, [dateFilter, availableDates]);
+  // A range that skips every capture day is a real "nothing to show" —
+  // distinct from single mode's null, which means "let the API pin the
+  // newest". The panel needs the difference to say so instead of quietly
+  // plotting a day the user did not pick.
+  const pricesNoCapture =
+    dateFilter.mode === 'range' && availableDates.length > 0 && pricesCapDate === null;
 
   const handleBarPendingChange = (next: DashboardFilterSelections) => {
     if (inChartView) setChartPending(m => ({ ...m, [effectiveSliceId!]: next }));
@@ -1150,7 +1190,11 @@ export default function DashboardViewerPage() {
         }}>
           <LatestPricesPanel
             routes={pricesScope.routes}
-            capDate={(dateFilter.mode === 'single' ? dateFilter.capDateEq : dateFilter.capDateTo) ?? null}
+            capDate={pricesCapDate}
+            noCaptureInRange={pricesNoCapture}
+            // The header chip names a WINDOW in range mode; the chart plots
+            // one capture day out of it, so the panel says which.
+            showCapDate={dateFilter.mode === 'range'}
             stops={pricesScope.stops}
             fltNums={pricesScope.fltNums}
             daysLeft={pricesScope.daysLeft}
