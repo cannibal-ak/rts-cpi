@@ -616,7 +616,13 @@ class SupersetClient:
             "result_format": "json",
             "result_type": "results",
         }
-        data = await self._session_post("/api/v1/chart/data", payload)
+        # 90s rather than the 30s default: on prod (threaded dev-server
+        # Superset, untuned pg) a DISTINCT over JY's 1.09M-row virtual dataset
+        # measures ~13s alone and 30-40s when /filter-config fires its columns
+        # concurrently — the 30s cap made exactly those five filters flap
+        # empty (2026-08-27). The 300s _filter_values_cache absorbs the cost
+        # after the first load; small-tenant fetches are unaffected.
+        data = await self._session_post("/api/v1/chart/data", payload, timeout=90.0)
         rows = (data.get("result") or [{}])[0].get("data") or []
         values = [_display_value(r.get(column)) for r in rows]
         return _sort_filter_values(
