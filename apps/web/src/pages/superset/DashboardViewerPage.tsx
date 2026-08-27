@@ -1085,17 +1085,19 @@ export default function DashboardViewerPage() {
         </Box>
         )}
 
-        {/* KPI row — CPI-rendered tiles + click-to-expand detail (JY + PW + SKY + FJL).
+        {/* KPI row — CPI-rendered tiles + click-to-expand detail (PW + SKY + FJL).
             These replace the Superset big-number tiles so the values and their
             drill-downs share a single source of truth and respond to the Cap
             Date picker above. The KPI set is per-airline (see KPIRow).
             cap_date: single-day uses the picked day; range uses the window's
             end (most recent) day, since the KPI queries are single-day.
-            currency: only meaningful for FJL; JY/PW ignore it server-side.
+            currency: only meaningful for FJL; PW ignores it server-side.
             WM is deliberately excluded — WinAir's page leads with the global
-            filter bar and the dashboard's own charts, with no KPI strip. The
-            /kpi endpoints still serve WM, so this is a one-line reinstate. */}
-        {(meta?.tenant === 'JY' || meta?.tenant === 'PW' || meta?.tenant === 'ALT' || meta?.tenant === 'FJL') && (
+            filter bar and the dashboard's own charts, with no KPI strip — and
+            JY joined it 2026-08-27 when it adopted the same chrome. The
+            /kpi endpoints still serve WM and JY, so this is a one-line
+            reinstate. */}
+        {(meta?.tenant === 'PW' || meta?.tenant === 'ALT' || meta?.tenant === 'FJL') && (
           <KPIRow
             airlineCode={meta.tenant}
             capDate={(dateFilter.mode === 'single' ? dateFilter.capDateEq : dateFilter.capDateTo) ?? ''}

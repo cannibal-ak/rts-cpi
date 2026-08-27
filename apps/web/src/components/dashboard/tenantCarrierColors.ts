@@ -47,9 +47,32 @@ const LIAT_CARRIERS: CarrierColorTable = {
   fallbacks: ['#64748B', '#0F766E'],
 };
 
+/**
+ * interCaribbean (JY): a straight mirror of dashboard 1's live label_colors,
+ * which are the ic_branded scheme slots in carrier order (read from dev
+ * superset.db 2026-08-27) — JY itself wears the logo's ocean blue. Without
+ * this entry the WinAir table would paint JY's host line in WinAir's
+ * `JY: '#2A78D6'`, disagreeing with the embedded charts beside it. Fallbacks
+ * avoid every hue in the known set (S6 already holds slate #64748B).
+ */
+const JY_CARRIERS: CarrierColorTable = {
+  known: {
+    JY: '#049CFC',
+    BW: '#E4049C',
+    WM: '#8CD404',
+    '9Q': '#04049C',
+    '5L': '#F59E0B',
+    PY: '#06B6D4',
+    DO: '#8B5CF6',
+    S6: '#64748B',
+  },
+  fallbacks: ['#A05A2C', '#0F766E'],
+};
+
 /** Tenants with their own carrier tables. Absent tenants get WinAir's. */
 const CARRIERS_BY_TENANT: Record<string, CarrierColorTable> = {
   '5l': LIAT_CARRIERS,
+  jy: JY_CARRIERS,
 };
 
 /** The carrier table for a tenant slug; WinAir's when the tenant has none. */
