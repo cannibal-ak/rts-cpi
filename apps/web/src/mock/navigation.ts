@@ -1,4 +1,5 @@
 import { NavItem } from '../types';
+import { ALERTS_MODULES } from '../alerts/alertsAccess';
 
 export const navigationItems: NavItem[] = [
   {
@@ -44,7 +45,9 @@ export const navigationItems: NavItem[] = [
     label: 'Alerts',
     path: '/alerts',
     icon: 'NotificationsActive',
-    requiredModules: ['airline_da', 'airline_5l'],
+    // Derived from alertsAccess so the menu can never drift from the route
+    // guards and bell gating (WM was missing here when the list was inline).
+    requiredModules: ALERTS_MODULES,
     requiredRoles: ['TENANT_ADMIN', 'TENANT_USER'],
     category: 'Modules',
     hideForSuperAdmin: true,
