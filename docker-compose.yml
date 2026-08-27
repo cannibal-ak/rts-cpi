@@ -97,8 +97,8 @@ services:
       SUPERSET_ADMIN_PASS: ${SUPERSET_ADMIN_PASS:-admin}
       MFA_ENFORCED: ${MFA_ENFORCED:-false}  # Phase 5A DEV cutover (default false; prod compose unaffected)
       # Alerts evaluation targets. Default in code is DA alone (runner.py);
-      # 5L added 2026-08-25 with the Liat Air tenant; WM and JY added 2026-08-27.
-      CPI_ALERTS_TENANT_CODES: ${CPI_ALERTS_TENANT_CODES:-DA,5L,WM,JY}
+      # 5L added 2026-08-25 with the Liat Air tenant; WM, JY and PW added 2026-08-27.
+      CPI_ALERTS_TENANT_CODES: ${CPI_ALERTS_TENANT_CODES:-DA,5L,WM,JY,PW}
     depends_on:
       postgres:
         condition: service_healthy
