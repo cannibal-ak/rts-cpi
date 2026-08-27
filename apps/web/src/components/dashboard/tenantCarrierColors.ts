@@ -69,10 +69,36 @@ const JY_CARRIERS: CarrierColorTable = {
   fallbacks: ['#A05A2C', '#0F766E'],
 };
 
+/**
+ * Precision Air (PW): a straight mirror of dashboard 3's live label_colors
+ * (the precisionAir scheme, read from dev superset.db 2026-08-27) — PW itself
+ * wears the scheme's forest green. Aur/Coa/Fli are legacy name-style carrier
+ * codes that appear only in historical captures; Exp is the late addition
+ * bound by scripts/superset/pw_dash3_exp_keys.py (slate, no green/gold
+ * collision — same reasoning as DA's Exp fix). Fallbacks avoid every hue in
+ * the known set.
+ */
+const PW_CARRIERS: CarrierColorTable = {
+  known: {
+    PW: '#3C5414',
+    TC: '#5C8226',
+    KQ: '#4A6B1C',
+    UI: '#80A83A',
+    YS: '#A8C44E',
+    CQ: '#C49714',
+    Aur: '#FBC31C',
+    Coa: '#6E9930',
+    Fli: '#E0AD18',
+    Exp: '#64748B',
+  },
+  fallbacks: ['#0F766E', '#7C3AED'],
+};
+
 /** Tenants with their own carrier tables. Absent tenants get WinAir's. */
 const CARRIERS_BY_TENANT: Record<string, CarrierColorTable> = {
   '5l': LIAT_CARRIERS,
   jy: JY_CARRIERS,
+  pw: PW_CARRIERS,
 };
 
 /** The carrier table for a tenant slug; WinAir's when the tenant has none. */
