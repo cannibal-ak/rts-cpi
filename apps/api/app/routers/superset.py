@@ -114,6 +114,19 @@ DASHBOARDS = {
         "embedded_uuid": "163e8222-1e54-4ba7-8dab-9c2f60714731",  # embedded_dashboards.uuid (for SDK)
         "domain": "airline",
         "tenant": "JY",
+        # interCaribbean joined the WinAir-family global filter bar 2026-08-27.
+        # Dashboard 1 defines ten filter_select filters; these four are
+        # suppressed, keeping route, trip_type, fare_family, stops, flt_num
+        # and days_left in the bar. Unlike WM/DA/5L, dashboard 1 has no
+        # price_status / recommendation / lowest_competitor filters, so those
+        # columns are NOT listed here — a hidden entry matching no filter
+        # trips the stale-entry log in get_dashboard_filter_config.
+        "hidden_filter_columns": {
+            "airline",              # Airline
+            "dtd_bucket",           # Days to Departure
+            "eqp",                  # Aircraft
+            "legseg_type",          # Leg/Segment
+        },
     },
     "2": {
         "title": "Airline CPI PW Dashboard",
