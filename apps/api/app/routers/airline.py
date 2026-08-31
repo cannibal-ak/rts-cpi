@@ -153,7 +153,15 @@ def list_snapshots(
     # tied rows in a different sequence per page, silently duplicating some
     # rows across pages and dropping others. Appending `id` makes the order
     # deterministic. This is a correctness fix, not just a performance one.
-    order_by = "ORDER BY cap_date DESC, cap_time DESC, id DESC"
+    #
+    # The leading boolean floats complete comparisons to the front: a 0/NULL
+    # fare means sold out / not on sale, never a real price, so only rows
+    # with BOTH fares carry a meaningful Delta/Δ%. The UI renders those two
+    # columns on the same both-sides test — keep the conditions in lockstep.
+    order_by = (
+        "ORDER BY (COALESCE(ref_tot_fare, 0) > 0 AND COALESCE(comp_tot_fare, 0) > 0) DESC, "
+        "cap_date DESC, cap_time DESC, id DESC"
+    )
 
     data_sql = text(f"SELECT * FROM {view_name} {where_str} {order_by} LIMIT :limit OFFSET :offset")
     rows = db.execute(data_sql, params).mappings().all()
@@ -284,7 +292,13 @@ def export_snapshots(
 
     where_str = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-    data_sql = text(f"SELECT * FROM {view_name} {where_str} ORDER BY cap_date DESC, cap_time DESC, id DESC LIMIT 5000")
+    # Same ordering as the grid (complete comparisons first) so the exported
+    # sheet reads in the order the user sees on screen.
+    data_sql = text(
+        f"SELECT * FROM {view_name} {where_str} "
+        "ORDER BY (COALESCE(ref_tot_fare, 0) > 0 AND COALESCE(comp_tot_fare, 0) > 0) DESC, "
+        "cap_date DESC, cap_time DESC, id DESC LIMIT 5000"
+    )
     rows = db.execute(data_sql, params).mappings().all()
 
     wb = Workbook()
