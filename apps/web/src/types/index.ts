@@ -271,7 +271,7 @@ export interface AlertPayload {
   competitor?: string;
   currency?: string;
   metric?: string;
-  state?: 'undercut' | 'cheapest' | string;
+  state?: 'undercut' | 'cheapest' | 'behind' | 'matched' | 'gap' | 'covered' | string;
   prev_value?: number;
   current_value?: number;
   delta_abs?: number;
@@ -287,6 +287,34 @@ export interface AlertPayload {
   best_competitor_fare?: number;
   observations?: number;
   prev_observations?: number;
+
+  // stops_disadvantage. Stops are the WHOLE journey: on a round trip both legs
+  // are counted, because our return leg is nonstop on every row in this feed
+  // while competitors' run to four stops.
+  own_stops?: number;
+  best_comp_stops?: number;
+  /** own_stops - best_comp_stops on the worst day. >= 1 on a fired event. */
+  stop_gap?: number;
+  days_comparable?: number;
+  days_behind?: number;
+
+  // service_gap. Counted over departure DAYS inside the window, not captures.
+  /** Departure days the window actually spans - the denominator in "3 of 8".
+   *  Never assume the window length: this feed samples departure dates at
+   *  fixed offsets, so an 08-14 window can observe a single day. */
+  days_observed?: number;
+  gap_days?: number;
+  /** ISO dates, ascending. Bounded by the window, so at most 15. */
+  gap_dates?: string[];
+  /** True when we sell nothing at all in the window. */
+  total_absence?: boolean;
+  /** Days with no flight of ours at all, versus days we fly with no fare
+   *  loaded or left. Different problems, different owners. */
+  days_no_flight?: number;
+  days_sold_out?: number;
+  competitors_on_sale?: number;
+  competitors_selling?: string[];
+
   evaluated_at?: string;
   rule_key?: string;
   [key: string]: unknown;
@@ -295,7 +323,11 @@ export interface AlertPayload {
 export interface AlertEvent {
   id: string; rule_id: string; rule_name: string; triggered_at: string;
   severity: AlertSeverity;
-  message: string; delivery_status: 'pending' | 'sent' | 'failed';
+  message: string;
+  /** The API filters 'suppressed' out of every feed response, so a client only
+   *  ever sees the first two. Was typed 'pending' | 'sent' | 'failed', which no
+   *  code path has ever written. */
+  delivery_status: 'delivered' | 'pending' | 'suppressed' | string;
 
   // Added with the alerts engine (migration 040).
   rule_key: string;
@@ -326,7 +358,7 @@ export interface AlertTunable {
   key: string;
   label: string;
   type: 'number' | 'enum' | 'bool' | 'multiselect';
-  unit: 'percent' | 'currency' | 'places' | string | null;
+  unit: 'percent' | 'currency' | 'places' | 'stops' | 'days' | 'airlines' | string | null;
   min: number | null;
   max: number | null;
   step: number | null;

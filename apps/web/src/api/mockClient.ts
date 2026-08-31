@@ -235,7 +235,8 @@ export const mockClient: CpiApiClient = {
     run: () => delay({
       tenant_code: 'DA',
       cap_date: '2026-08-12', prev_cap_date: '2026-08-10', cap_date_age_days: 8,
-      rules_evaluated: ['undercut_position', 'comp_price_move'],
+      rules_evaluated: ['undercut_position', 'comp_price_move',
+                        'stops_disadvantage', 'service_gap'],
       groups_evaluated: 95, events_created: 0, events_suppressed_dedupe: 8,
       groups_skipped_currency: 0, captures_skipped_incomplete: 1,
       duration_ms: 42, mode: 'manual', note: null,

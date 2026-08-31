@@ -34,10 +34,17 @@ import AlertsTabs from './AlertsTabs';
 
 const PAGE_SIZE = 25;
 
+// Category nouns, not rule names — this is the Type filter's option list.
+// APPEND to it: the menu renders in Object.entries order. A rule_key missing
+// from here still shows its events (the row renders event.message, never
+// rule_name); it is simply unfilterable, which reads as a broken filter rather
+// than a missing map entry.
 const RULE_LABELS: Record<string, string> = {
   undercut_position: 'Position changes',
   comp_price_move: 'Price moves',
   comp_price_threshold: 'Price lines',
+  stops_disadvantage: 'Connections',
+  service_gap: 'Days we are not selling',
 };
 
 export default function AlertsPage() {
@@ -161,7 +168,7 @@ export default function AlertsPage() {
         <EmptyState
           icon={<NotificationsOffOutlined sx={{ fontSize: 40 }} />}
           title="No alerts yet"
-          description="Alerts appear here when a competitor's fare moves past a threshold you've set, or when we lose the cheapest position on a route."
+          description="Alerts appear here when a competitor's fare moves past a threshold you've set, when we lose the cheapest position, when a competitor reaches a destination in fewer stops, or when we are not selling on days they are."
           actionLabel={canEdit ? 'Configure alerts' : undefined}
           onAction={canEdit ? () => { window.location.href = '/alerts/settings'; } : undefined}
           accent={chrome?.BANNER_BG}
@@ -184,7 +191,7 @@ export default function AlertsPage() {
     <Box>
       <PageHeader
         title="Alerts"
-        subtitle="Competitor price moves and changes to our position"
+        subtitle="Competitor price moves, our position, and where their network beats ours"
         actions={
           <Button
             variant="outlined" size="small" disabled={unreadCount === 0}
