@@ -365,3 +365,59 @@ EXTRA_CATEGORICAL_COLOR_SCHEMES = EXTRA_CATEGORICAL_COLOR_SCHEMES + [
         ],
     },
 ]
+
+# ═══════════════════════════════════════════════════════════════════════
+# Chart result caching  (ported from dev 2026-08-31 — dashboard load perf)
+# ═══════════════════════════════════════════════════════════════════════
+# Same block dev has carried since 2026-08-10. Before it, every dashboard
+# refresh and every native-filter dropdown re-ran its query from scratch —
+# measured 2026-08-31: the JY filter bar's 6 distinct-value queries cost
+# ~39s per cold page load on prod. cpi-redis was already running healthy
+# but Superset was never wired to it.
+#
+# Redis DB choice mirrors dev: db0 = CPI_REDIS_URL (api), db1/db2 in use,
+# so db3 is used here.
+#
+# TTL is deliberately SHORT (5 min). Long TTLs would let a dashboard keep
+# serving pre-ingestion numbers after a new cap_date file lands. The
+# keep-warm cron (scripts/warm_filter_cache.py, /etc/cron.d/cpi-filter-warm)
+# force-refreshes the filter-dropdown entries every 4 min so users never
+# pay the cold cost.
+#
+# NOTE: EXPLORE_FORM_DATA_CACHE_CONFIG above is intentionally NOT changed —
+# its 60s SupersetMetastoreCache TTL is the standalone chart-view staleness
+# fix and must keep its existing behaviour.
+#
+# Rollback: delete this block, then recreate the superset container.
+
+# The running cpi-redis-1 was created without --env-file .env.prod, so its
+# --requirepass arg is an EMPTY string and the server accepts unauthenticated
+# clients only (sending AUTH to a passwordless server is an error — that broke
+# chart-data with 500s on first deploy of this block). api/worker/beat all
+# connect without auth today. Probe at boot so this config keeps working on
+# the day redis IS recreated with requirepass actually in effect.
+def _cpi_redis_url() -> str:
+    try:
+        import redis as _redis
+        _redis.Redis(host="redis", port=6379, socket_connect_timeout=3).ping()
+        return "redis://redis:6379/3"
+    except Exception:
+        return "redis://:%s@redis:6379/3" % os.environ.get("REDIS_PASSWORD", "")
+
+_CPI_CACHE_REDIS = _cpi_redis_url()
+
+# Generic Superset cache (metadata/datasource lookups).
+CACHE_CONFIG = {
+    "CACHE_TYPE": "RedisCache",
+    "CACHE_DEFAULT_TIMEOUT": 300,
+    "CACHE_KEY_PREFIX": "cpi_superset_cache_",
+    "CACHE_REDIS_URL": _CPI_CACHE_REDIS,
+}
+
+# Chart query results — this is the one that drives dashboard load time.
+DATA_CACHE_CONFIG = {
+    "CACHE_TYPE": "RedisCache",
+    "CACHE_DEFAULT_TIMEOUT": 300,
+    "CACHE_KEY_PREFIX": "cpi_superset_data_",
+    "CACHE_REDIS_URL": _CPI_CACHE_REDIS,
+}
