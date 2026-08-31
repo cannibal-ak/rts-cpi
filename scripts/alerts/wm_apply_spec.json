@@ -1,0 +1,17 @@
+[
+  {"label": "patch undercut", "method": "PATCH", "path": "/api/v1/alerts/rules/undercut_position",
+   "body": {"is_active": true, "condition": {"min_gap_pct": 2.0, "windows": ["00-07", "08-14"]}}},
+  {"label": "patch move (BW excluded: availability seesaw)", "method": "PATCH", "path": "/api/v1/alerts/rules/comp_price_move",
+   "body": {"is_active": true, "condition": {"move_pct": 30.0, "min_abs_move": 30.0,
+            "windows": ["00-07", "08-14"], "competitors": ["S6", "JY", "5L", "7Z", "DM"]}}},
+  {"label": "patch+activate service_gap", "method": "PATCH", "path": "/api/v1/alerts/rules/service_gap",
+   "body": {"is_active": true, "condition": {"min_gap_days": 4, "windows": ["00-07"]}}},
+  {"label": "patch+activate stops", "method": "PATCH", "path": "/api/v1/alerts/rules/stops_disadvantage",
+   "body": {"is_active": true, "condition": {"min_days": 4, "min_day_share": 60.0,
+            "windows": ["00-07", "08-14", "15-30", "31-45"]}}},
+  {"label": "patch+activate threshold", "method": "PATCH", "path": "/api/v1/alerts/rules/comp_price_threshold",
+   "body": {"is_active": true, "condition": {"operator": "below", "value": 150.0, "currency": "USD",
+            "routes": ["BON-CUR", "ANU-BGI", "SKB-SXM", "ANU-SKB", "ANU-EIS", "CUR-BON", "ANU-SXM"],
+            "windows": ["00-07"]}}},
+  {"label": "run now", "method": "POST", "path": "/api/v1/alerts/run"}
+]
