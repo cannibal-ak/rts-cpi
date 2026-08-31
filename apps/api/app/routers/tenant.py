@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select, delete
 
 from app.core.config import settings
+from app.core.database import set_tenant_context
 from app.core.deps import get_tenant_db, get_tenant_id, RequirePlatformAdmin
 from app.models.user import AppUser, RoleBinding
 from pydantic import BaseModel
@@ -16,6 +17,20 @@ router = APIRouter(
     prefix="/api/v1/tenant",
     tags=["tenant"],
 )
+
+def _commit(db: Session, tenant_id: str) -> None:
+    """Commit, then re-establish the RLS tenant context.
+
+    `set_tenant_context` issues SET LOCAL, which is scoped to the transaction.
+    `get_tenant_db` sets it once when the request opens, so the FIRST commit
+    inside a handler silently drops it and every subsequent read in that same
+    request is filtered to nothing — the `db.refresh()` below would find no
+    row and raise, and the role writes that follow would hit the app_user /
+    role_binding RLS WITH CHECK. Anything that commits and then reads or
+    writes again must go through here.
+    """
+    db.commit()
+    set_tenant_context(db, tenant_id)
 
 class RolesUpdate(BaseModel):
     tenant_id: str
@@ -91,7 +106,7 @@ def update_user_roles(
             display_name="Demo User"
         )
         db.add(user)
-        db.commit()
+        _commit(db, tenant_id_dep)
         db.refresh(user)
 
     try:

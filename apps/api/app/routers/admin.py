@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
+from app.core.database import set_tenant_context
 from app.core.deps import get_tenant_db, get_tenant_id, RequirePlatformAdmin
 from app.models.admin import ProviderContract
 from app.models.tenant_feature import TenantFeature
@@ -20,6 +21,20 @@ router = APIRouter(
 )
 
 
+def _commit(db: Session, tenant_id: str) -> None:
+    """Commit, then re-establish the RLS tenant context.
+
+    `set_tenant_context` issues SET LOCAL, which is scoped to the transaction.
+    `get_tenant_db` sets it once when the request opens, so the FIRST commit
+    inside a handler silently drops it and every subsequent read in that same
+    request is filtered to nothing — the `db.refresh()` calls below would find
+    no row and raise InvalidRequestError, 500ing a write that had in fact
+    succeeded. Anything that commits and then reads must go through here.
+    """
+    db.commit()
+    set_tenant_context(db, tenant_id)
+
+
 # ── Tenant Features ───────────────────────────
 @router.get(
     "/tenant/features",
@@ -33,12 +48,17 @@ def get_tenant_features(db: Session = Depends(get_tenant_db)):
     "/tenant/features/{code}",
     response_model=TenantFeatureOut,
 )
-def set_tenant_feature(code: str, body: TenantFeatureUpdate, db: Session = Depends(get_tenant_db)):
+def set_tenant_feature(
+    code: str,
+    body: TenantFeatureUpdate,
+    db: Session = Depends(get_tenant_db),
+    tenant_id: str = Depends(get_tenant_id),
+):
     feat = db.scalars(select(TenantFeature).where(TenantFeature.code == code)).first()
     if not feat:
         raise HTTPException(status_code=404, detail="Feature not found")
     feat.enabled = body.enabled
-    db.commit()
+    _commit(db, tenant_id)
     db.refresh(feat)
     return feat
 
@@ -68,7 +88,7 @@ def create_contract(
         optional_fields=body.optional_fields,
     )
     db.add(contract)
-    db.commit()
+    _commit(db, tenant_id)
     db.refresh(contract)
     return contract
 
@@ -77,7 +97,12 @@ def create_contract(
     "/contracts/{contract_id}",
     response_model=ProviderContractOut,
 )
-def update_contract(contract_id: str, body: ProviderContractCreate, db: Session = Depends(get_tenant_db)):
+def update_contract(
+    contract_id: str,
+    body: ProviderContractCreate,
+    db: Session = Depends(get_tenant_db),
+    tenant_id: str = Depends(get_tenant_id),
+):
     c = db.get(ProviderContract, contract_id)
     if not c:
         raise HTTPException(status_code=404, detail="Contract not found")
@@ -89,7 +114,7 @@ def update_contract(contract_id: str, body: ProviderContractCreate, db: Session 
     c.required_fields = body.required_fields
     c.optional_fields = body.optional_fields
     c.updated_at = datetime.now(timezone.utc)
-    db.commit()
+    _commit(db, tenant_id)
     db.refresh(c)
     return c
 
@@ -98,7 +123,11 @@ def update_contract(contract_id: str, body: ProviderContractCreate, db: Session 
     "/contracts/{contract_id}/activate",
     response_model=ProviderContractOut,
 )
-def activate_contract(contract_id: str, db: Session = Depends(get_tenant_db)):
+def activate_contract(
+    contract_id: str,
+    db: Session = Depends(get_tenant_db),
+    tenant_id: str = Depends(get_tenant_id),
+):
     c = db.get(ProviderContract, contract_id)
     if not c:
         raise HTTPException(status_code=404, detail="Contract not found")
@@ -106,7 +135,7 @@ def activate_contract(contract_id: str, db: Session = Depends(get_tenant_db)):
         raise HTTPException(status_code=400, detail="Only draft contracts can be activated")
     c.status = "active"
     c.updated_at = datetime.now(timezone.utc)
-    db.commit()
+    _commit(db, tenant_id)
     db.refresh(c)
     return c
 
@@ -115,7 +144,11 @@ def activate_contract(contract_id: str, db: Session = Depends(get_tenant_db)):
     "/contracts/{contract_id}/deprecate",
     response_model=ProviderContractOut,
 )
-def deprecate_contract(contract_id: str, db: Session = Depends(get_tenant_db)):
+def deprecate_contract(
+    contract_id: str,
+    db: Session = Depends(get_tenant_db),
+    tenant_id: str = Depends(get_tenant_id),
+):
     c = db.get(ProviderContract, contract_id)
     if not c:
         raise HTTPException(status_code=404, detail="Contract not found")
@@ -123,6 +156,6 @@ def deprecate_contract(contract_id: str, db: Session = Depends(get_tenant_db)):
         raise HTTPException(status_code=400, detail="Only active contracts can be deprecated")
     c.status = "deprecated"
     c.updated_at = datetime.now(timezone.utc)
-    db.commit()
+    _commit(db, tenant_id)
     db.refresh(c)
     return c
