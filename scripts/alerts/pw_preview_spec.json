@@ -1,0 +1,13 @@
+[
+  {"label": "preview undercut gap2 w3", "method": "POST", "path": "/api/v1/alerts/rules/undercut_position/preview",
+   "body": {"condition": {"min_gap_pct": 2.0, "windows": ["00-07", "08-14", "15-30"]}}},
+  {"label": "preview move 20/20 w2", "method": "POST", "path": "/api/v1/alerts/rules/comp_price_move/preview",
+   "body": {"condition": {"move_pct": 20.0, "min_abs_move": 20.0, "windows": ["08-14", "15-30"]}}},
+  {"label": "preview service_gap g4 w3", "method": "POST", "path": "/api/v1/alerts/rules/service_gap/preview",
+   "body": {"condition": {"min_gap_days": 4, "windows": ["00-07", "08-14", "15-30"]}}},
+  {"label": "preview stops d4/60 w3", "method": "POST", "path": "/api/v1/alerts/rules/stops_disadvantage/preview",
+   "body": {"condition": {"min_days": 4, "min_day_share": 60.0, "windows": ["00-07", "08-14", "15-30"]}}},
+  {"label": "preview threshold <190 NBO", "method": "POST", "path": "/api/v1/alerts/rules/comp_price_threshold/preview",
+   "body": {"condition": {"operator": "below", "value": 190.0, "currency": "USD",
+            "routes": ["DAR-NBO", "JRO-NBO", "ZNZ-NBO"], "windows": ["00-07"]}}}
+]
