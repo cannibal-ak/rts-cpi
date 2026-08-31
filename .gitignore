@@ -147,3 +147,4 @@ _restore/
 
 # DreamAir demo build artefacts (regenerate with scripts/relabel_pw_files_as_da.py)
 apps/api/data/da_demo/
+audits/
