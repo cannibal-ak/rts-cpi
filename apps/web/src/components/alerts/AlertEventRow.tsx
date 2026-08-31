@@ -14,6 +14,7 @@ import { useTenantChrome } from '../dashboard/tenantChrome';
 import { accentColor, severityStyle } from '../../alerts/alertTheme';
 import {
   comparisonLabel, detailParts, provenanceLabel, timeAgo,
+  gapDatesFull,
 } from '../../alerts/formatAlert';
 import type { AlertEvent } from '../../types';
 import SeverityChip from './SeverityChip';
@@ -95,6 +96,10 @@ export default function AlertEventRow({
         {details.length > 0 && (
           <Typography
             variant="caption"
+            // The detail line folds a gap's dates into ranges to stay inside
+            // one nowrap caption; the full list lives here rather than in a
+            // Tooltip, which would need a popper inside an already-dense row.
+            title={gapDatesFull(event.payload?.gap_dates as string[] | undefined) || undefined}
             sx={{
               display: 'block', mt: 0.25, color: 'text.secondary',
               fontVariantNumeric: 'tabular-nums',

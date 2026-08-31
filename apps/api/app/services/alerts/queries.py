@@ -27,6 +27,7 @@ from datetime import date
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.services.alerts.presets import MAX_WINDOW_DTD, WINDOW_BOUNDS
 from app.services.alerts.views import resolve_view
 
 # Departure-horizon buckets, as a SQL expression. Postgres date - date yields a
@@ -38,11 +39,17 @@ from app.services.alerts.views import resolve_view
 # every alert message, and it is baked into scope_key and dedupe_key), so an
 # off-by-one silently files a departure 7 days out under "08–14 days out".
 # An earlier version used < 7 / < 14, which shifted every bucket a day early.
-_BUCKET_SQL = """
-        CASE WHEN ref_dep_date - cap_date < 8  THEN '00-07'
-             WHEN ref_dep_date - cap_date < 15 THEN '08-14'
-             ELSE                                   '15-30' END
-"""
+# Generated from the ladder so the labels and the SQL cannot drift. The bounds
+# are ascending and contiguous, so testing `<= hi` in order assigns each day to
+# exactly one bucket. The final branch is an ELSE rather than another WHEN for
+# the same reason the hand-written version used one: the WHERE clause already
+# bounds the scan at MAX_WINDOW_DTD, so nothing can fall past it.
+_BUCKET_SQL = "\n".join(
+    ["        CASE"]
+    + [f"             WHEN ref_dep_date - cap_date <= {hi} THEN '{label}'"
+       for label, _, hi in WINDOW_BOUNDS[:-1]]
+    + [f"             ELSE '{WINDOW_BOUNDS[-1][0]}' END"]
+)
 
 
 @dataclass(frozen=True)
@@ -77,10 +84,89 @@ class OwnFare:
 
 
 @dataclass(frozen=True)
+class ServiceCompetitorDay:
+    """One competitor's cheapest product on one departure day."""
+    competitor: str
+    stops: int | None          # outbound + return for RT, outbound for OW
+    fare: float | None
+    currency: str | None
+
+
+@dataclass(frozen=True)
+class ServiceDay:
+    """What we and the market offer on ONE departure day of a route x window.
+
+    The three-state service model this feed actually encodes:
+
+        ref_flt_num <> '' and ref_tot_fare > 0   we are selling
+        ref_flt_num <> '' and ref_tot_fare = 0   we fly it, no fare loaded/left
+        ref_flt_num =  ''                        no flight at all
+
+    `ref_flt_num` is varchar NOT NULL and its no-flight marker is the EMPTY
+    STRING, never NULL -- 426,487 of JY's 1,096,690 rows, and zero NULLs in the
+    whole table. Written as `IS NOT NULL` this reads true for every row and the
+    gap rule reports nothing, silently, forever.
+
+    Note this deliberately does NOT reuse routers.airline._AVAILABILITY_STATUS_CASE,
+    which tests `ref_stops IS NULL` for the same distinction. That proxy is fine
+    for the Latest Prices panel, which only ever renders recent captures, but it
+    drifts on history: `ref_stops` went unpopulated for whole months, so in July
+    2026 it calls 17,972 JY rows "sold out" that carry no flight number at all.
+    Alerts backfill over that history, so they read the schedule column direct.
+    The two agree to within 61 rows a month wherever stops are populated.
+
+    `own_stops_complete` is false when any itinerary we have on sale that day
+    publishes no stop count. min() ignores NULLs, and ignoring them on OUR side
+    biases toward a higher own-stop count -- that is, toward a false "we are
+    disadvantaged". ref_stops is populated in 32% of JY rows overall and in ZERO
+    of April 2026's 251,233.
+    """
+    dep_date: date
+    own_scheduled: bool
+    own_on_sale: bool
+    own_stops: int | None
+    own_stops_complete: bool
+    own_fare: float | None
+    currency: str | None
+    competitors: tuple[ServiceCompetitorDay, ...]
+
+
+@dataclass(frozen=True)
+class ServiceCell:
+    """One route x trip type x departure window, at day resolution."""
+    route: str
+    origin: str
+    destination: str
+    trip_type: str
+    window: str
+    days: tuple[ServiceDay, ...]          # ascending by dep_date
+
+
+@dataclass(frozen=True)
+class ServiceAggregate:
+    """Availability and itinerary shape for ONE capture, at departure-day grain.
+
+    Kept out of load_capture on purpose: its natural grain is the departure DAY,
+    and both rules that read it need per-day counts a window-level aggregate
+    cannot reconstruct. Folding it into that UNION would also change a row shape
+    three shipped handlers already read.
+    """
+    cap_date: date
+    cells: dict[tuple[str, str, str], ServiceCell]   # (route, window, trip_type)
+
+    @property
+    def group_count(self) -> int:
+        return len(self.cells)
+
+
+@dataclass(frozen=True)
 class CaptureAggregate:
     cap_date: date
     competitors: dict[tuple[str, str, str], CompetitorFare]  # (route, window, comp)
     own: dict[tuple[str, str], OwnFare]                      # (route, window)
+    # Attached by the evaluator only when a rule that reads it is active, so a
+    # tenant running just the three price rules pays nothing for it.
+    service: "ServiceAggregate | None" = None
 
     @property
     def group_count(self) -> int:
@@ -207,7 +293,7 @@ def load_capture(db: Session, tenant_code: str, cap_date: date) -> CaptureAggreg
               FROM {view}
              WHERE cap_date = :cap
                AND ref_dep_date >= cap_date
-               AND ref_dep_date <  cap_date + 30
+               AND ref_dep_date <= cap_date + :horizon
         ),
         comp_agg AS (
             SELECT ref_org, ref_dst, bkt, comp_al,
@@ -236,7 +322,7 @@ def load_capture(db: Session, tenant_code: str, cap_date: date) -> CaptureAggreg
                fare, curr, competitor_count, obs
           FROM da_agg
     """
-    rows = db.execute(text(sql), {"cap": cap_date}).all()
+    rows = db.execute(text(sql), {"cap": cap_date, "horizon": MAX_WINDOW_DTD}).all()
 
     competitors: dict[tuple[str, str, str], CompetitorFare] = {}
     own: dict[tuple[str, str], OwnFare] = {}
@@ -257,6 +343,136 @@ def load_capture(db: Session, tenant_code: str, cap_date: date) -> CaptureAggreg
             )
 
     return CaptureAggregate(cap_date=cap_date, competitors=competitors, own=own)
+
+
+def load_service_capture(db: Session, tenant_code: str, cap_date: date) -> ServiceAggregate:
+    """Availability + itinerary shape for ONE pinned capture, at day grain.
+
+    Same invariant as load_capture, for the same measured reason: cap_date is an
+    equality and nothing else. Same 30-day departure horizon, so a day count
+    here means the same span a window means there.
+
+    Two row kinds unioned with a discriminator rather than joined, because they
+    have different cardinality -- ours is per departure day, theirs is per
+    departure day per carrier.
+
+    ROUND-TRIP STOPS ARE THE SUM OF BOTH LEGS. On JY, our return leg is nonstop
+    on every single round-trip row (max(ref_ret_stops) = 0) while competitors'
+    run to four stops, so comparing outbound only understates our own advantage
+    and suppresses genuine recoveries: six of thirty round-trip cells change
+    verdict once the return leg counts.
+
+    trip_type is part of the grain, not a filter. Mixing the products collapses
+    min(stops) onto the one-way value -- measured on JY, mixed OW+RT scores
+    identically to one-way alone, with every round-trip row invisible.
+
+    Competitor presence is a PRICED fare, never a flight number: 13,642 JY rows
+    carry a blank comp_flt_num and a real fare.
+
+    Measured 46 ms warm on JY (776 rows out, HashAggregate, no sort, no spill).
+    """
+    view = resolve_view(tenant_code)
+    sql = f"""
+        WITH base AS MATERIALIZED (
+            SELECT ref_org, ref_dst, trip_type,
+                   {_BUCKET_SQL} AS bkt,
+                   ref_dep_date, comp_al,
+                   ref_flt_num, ref_tot_fare, ref_curr,
+                   comp_tot_fare, comp_curr,
+                   CASE WHEN trip_type = 'RT'
+                        THEN ref_stops  + COALESCE(ref_ret_stops, 0)
+                        ELSE ref_stops  END AS own_legs,
+                   CASE WHEN trip_type = 'RT'
+                        THEN comp_stops + COALESCE(comp_ret_stops, 0)
+                        ELSE comp_stops END AS comp_legs
+              FROM {view}
+             WHERE cap_date = :cap
+               AND ref_dep_date >= cap_date
+               AND ref_dep_date <= cap_date + :horizon
+        ),
+        own_day AS (
+            SELECT ref_org, ref_dst, trip_type, bkt, ref_dep_date,
+                   bool_or(ref_flt_num <> '')                        AS scheduled,
+                   bool_or(ref_flt_num <> '' AND ref_tot_fare > 0)   AS on_sale,
+                   min(own_legs)     FILTER (WHERE ref_tot_fare > 0) AS stops,
+                   bool_and(own_legs IS NOT NULL)
+                                     FILTER (WHERE ref_tot_fare > 0) AS stops_complete,
+                   min(ref_tot_fare) FILTER (WHERE ref_tot_fare > 0) AS fare,
+                   min(ref_curr)     FILTER (WHERE ref_tot_fare > 0) AS curr
+              FROM base
+             GROUP BY 1, 2, 3, 4, 5
+        ),
+        comp_day AS (
+            SELECT ref_org, ref_dst, trip_type, bkt, ref_dep_date, comp_al,
+                   min(comp_legs)     FILTER (WHERE comp_tot_fare > 0) AS stops,
+                   min(comp_tot_fare) FILTER (WHERE comp_tot_fare > 0) AS fare,
+                   min(comp_curr)     FILTER (WHERE comp_tot_fare > 0) AS curr
+              FROM base
+             WHERE comp_al <> ''
+             GROUP BY 1, 2, 3, 4, 5, 6
+            HAVING count(*) FILTER (WHERE comp_tot_fare > 0) > 0
+        )
+        SELECT 'own'::text AS kind, ref_org, ref_dst, trip_type, bkt, ref_dep_date,
+               NULL::varchar AS comp_al,
+               scheduled, on_sale, stops_complete, stops, fare, curr
+          FROM own_day
+        UNION ALL
+        SELECT 'comp', ref_org, ref_dst, trip_type, bkt, ref_dep_date,
+               comp_al,
+               NULL::boolean, NULL::boolean, NULL::boolean, stops, fare, curr
+          FROM comp_day
+    """
+    rows = db.execute(text(sql), {"cap": cap_date, "horizon": MAX_WINDOW_DTD}).all()
+
+    # Our rows define the day set; competitor rows attach to it. A departure day
+    # nobody quoted for us simply does not exist as far as these rules are
+    # concerned -- it is absence of data, not absence of service.
+    own: dict[tuple[str, str, str], dict] = {}
+    comps: dict[tuple[str, str, str], dict] = {}
+    meta: dict[tuple[str, str, str], tuple[str, str]] = {}
+
+    for r in rows:
+        route = f"{r.ref_org}-{r.ref_dst}"
+        key = (route, r.bkt, r.trip_type)
+        meta.setdefault(key, (r.ref_org, r.ref_dst))
+        if r.kind == "own":
+            own.setdefault(key, {})[r.ref_dep_date] = {
+                "own_scheduled": bool(r.scheduled),
+                "own_on_sale": bool(r.on_sale),
+                "own_stops": None if r.stops is None else int(r.stops),
+                "own_stops_complete": bool(r.stops_complete),
+                "own_fare": _f(r.fare),
+                "currency": r.curr,
+            }
+        else:
+            comps.setdefault(key, {}).setdefault(r.ref_dep_date, []).append(
+                ServiceCompetitorDay(
+                    competitor=r.comp_al,
+                    stops=None if r.stops is None else int(r.stops),
+                    fare=_f(r.fare), currency=r.curr,
+                )
+            )
+
+    cells: dict[tuple[str, str, str], ServiceCell] = {}
+    for key, day_map in own.items():
+        route, window, trip = key
+        origin, destination = meta[key]
+        by_day = comps.get(key, {})
+        cells[key] = ServiceCell(
+            route=route, origin=origin, destination=destination,
+            trip_type=trip, window=window,
+            days=tuple(
+                ServiceDay(
+                    dep_date=d,
+                    competitors=tuple(sorted(by_day.get(d, ()),
+                                             key=lambda c: c.competitor)),
+                    **day_map[d],
+                )
+                for d in sorted(day_map)
+            ),
+        )
+
+    return ServiceAggregate(cap_date=cap_date, cells=cells)
 
 
 def last_emitted_state(

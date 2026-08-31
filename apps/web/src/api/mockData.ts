@@ -222,6 +222,34 @@ export function generateAlertEvents(): AlertEvent[] {
   ];
 }
 
+// The server fills the routes and competitors pickers per request from the
+// tenant's own captures. The mock has no capture table, so it names the routes
+// and carriers its own fixtures use. Without these, every `options` here is
+// null and the settings screen in mock mode shows NO multiselects at all —
+// which looks exactly like the bug it took months to notice in production.
+const _MOCK_ROUTES = ['ARK-ZNZ', 'DAR-ARK', 'DAR-JRO', 'DAR-MWZ', 'DAR-NBO',
+                      'JRO-DAR', 'JRO-MWZ', 'JRO-NBO', 'JRO-ZNZ', 'ZNZ-NBO'];
+const _MOCK_COMPETITORS = ['Coa', 'Fli', 'KQ', 'TC', 'UI', 'YS'];
+
+const _ROUTES_TUNABLE = {
+  key: 'routes', label: 'Routes', type: 'multiselect' as const,
+  unit: null, min: null, max: null, step: null,
+  options: _MOCK_ROUTES, help: 'Leave empty to watch every route.',
+};
+
+const _COMPETITORS_TUNABLE = {
+  key: 'competitors', label: 'Competitors', type: 'multiselect' as const,
+  unit: null, min: null, max: null, step: null,
+  options: _MOCK_COMPETITORS, help: 'Leave empty to watch every competitor.',
+};
+
+const _TRIP_TYPE_TUNABLE = {
+  key: 'trip_types', label: 'Trip types', type: 'multiselect' as const,
+  unit: null, min: null, max: null, step: null,
+  options: ['OW', 'RT'],
+  help: 'Leave empty to watch every product the feed carries.',
+};
+
 const _WINDOW_TUNABLE = {
   key: 'windows', label: 'Departure windows', type: 'multiselect' as const,
   unit: null, min: null, max: null, step: null,
@@ -249,9 +277,7 @@ export function generateAlertPresets(): AlertPreset[] {
         { key: 'notify_on_recovery', label: 'Also tell me when we recover',
           type: 'bool', unit: null, min: null, max: null, step: null,
           options: null, help: null },
-        { key: 'routes', label: 'Routes', type: 'multiselect', unit: null,
-          min: null, max: null, step: null, options: null,
-          help: 'Leave empty to watch every route.' },
+        _ROUTES_TUNABLE,
         _WINDOW_TUNABLE,
       ],
       missing_requirements: [], created_at: null, updated_at: null, updated_by: null,
@@ -303,6 +329,63 @@ export function generateAlertPresets(): AlertPreset[] {
       ],
       missing_requirements: ['value', 'routes'],
       created_at: null, updated_at: null, updated_by: null,
+    },
+    {
+      id: 'ar-stops_disadvantage', rule_key: 'stops_disadvantage',
+      name: 'A competitor flies it in fewer stops',
+      description: 'The best itinerary we have on sale for a route and departure window makes more stops than the best a competitor is selling.',
+      domain: 'airline', rule_type: 'threshold', is_active: false,
+      is_preset: true, severity_default: 'warning',
+      condition: { min_stop_gap: 1, min_days: 3, min_day_share: 50.0,
+                   notify_on_recovery: true,
+                   windows: ['00-07', '08-14', '15-30'],
+                   trip_types: null, routes: null, competitors: null },
+      tunables: [
+        { key: 'min_stop_gap', label: 'Alert when they are ahead by at least',
+          type: 'number', unit: 'stops', min: 1, max: 3, step: 1, options: null,
+          help: '1 means alert as soon as anyone offers a shorter itinerary.' },
+        { key: 'min_days', label: 'over at least this many departure days',
+          type: 'number', unit: 'days', min: 1, max: 15, step: 1, options: null,
+          help: 'Only days where both sides publish a stop count.' },
+        { key: 'min_day_share', label: 'on at least this share of them',
+          type: 'number', unit: 'percent', min: 1, max: 100, step: 5,
+          options: null, help: null },
+        { key: 'notify_on_recovery', label: 'Also tell me when we match them again',
+          type: 'bool', unit: null, min: null, max: null, step: null,
+          options: null, help: null },
+        _ROUTES_TUNABLE, _COMPETITORS_TUNABLE, _TRIP_TYPE_TUNABLE, _WINDOW_TUNABLE,
+      ],
+      missing_requirements: [], created_at: null, updated_at: null, updated_by: null,
+    },
+    {
+      id: 'ar-service_gap', rule_key: 'service_gap',
+      name: 'Nothing of ours on sale while they sell',
+      description: 'On several departure days in a window we have no fare on sale -- no flight at all, or a flight with no fare -- while competitors do.',
+      domain: 'airline', rule_type: 'threshold', is_active: false,
+      is_preset: true, severity_default: 'warning',
+      condition: { min_gap_days: 3, min_days_observed: 4, min_competitors: 1,
+                   include_sold_out: true, notify_on_recovery: true,
+                   windows: ['00-07'],
+                   trip_types: null, routes: null, competitors: null },
+      tunables: [
+        { key: 'min_gap_days', label: 'Alert when we are off sale for',
+          type: 'number', unit: 'days', min: 1, max: 30, step: 1, options: null,
+          help: 'Clears only when we are back on sale on every observed day.' },
+        { key: 'min_days_observed', label: 'Ignore windows with fewer than',
+          type: 'number', unit: 'days', min: 1, max: 30, step: 1, options: null,
+          help: 'Some feeds sample only a few departure dates per window.' },
+        { key: 'min_competitors', label: 'and at least this many competitors selling',
+          type: 'number', unit: 'airlines', min: 1, max: 10, step: 1,
+          options: null, help: null },
+        { key: 'include_sold_out', label: 'Count days we fly but have no fare',
+          type: 'bool', unit: null, min: null, max: null, step: null,
+          options: null, help: null },
+        { key: 'notify_on_recovery', label: 'Also tell me when we are back on sale',
+          type: 'bool', unit: null, min: null, max: null, step: null,
+          options: null, help: null },
+        _ROUTES_TUNABLE, _COMPETITORS_TUNABLE, _TRIP_TYPE_TUNABLE, _WINDOW_TUNABLE,
+      ],
+      missing_requirements: [], created_at: null, updated_at: null, updated_by: null,
     },
   ];
 }

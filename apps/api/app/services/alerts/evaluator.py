@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 from datetime import date, datetime, time, timezone
 from typing import Any
 
@@ -251,6 +251,47 @@ def _money(value: float | None, currency: str | None) -> str:
     if value is None:
         return "n/a"
     return f"{currency or ''} {value:,.2f}".strip()
+
+
+def _stops(n: int | None) -> str:
+    if n is None:
+        return "unknown"
+    return "nonstop" if n == 0 else f"{n} stop{'' if n == 1 else 's'}"
+
+
+def _dates_phrase(iso_dates: list[str], limit: int = 3) -> str:
+    """'27 Aug, 28 Aug, 30 Aug and 3 more' - the message's share of the list.
+
+    Formatted from the ISO STRING, never through a date parser and never
+    localised: these are departure dates, and a timezone shift would name the
+    wrong flight day. The full list travels in the payload.
+    """
+    months = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+    def _one(iso: str) -> str:
+        y, m, d = iso.split("-")
+        return f"{int(d)} {months[int(m) - 1]}"
+
+    shown = [_one(x) for x in iso_dates[:limit]]
+    more = len(iso_dates) - len(shown)
+    text_ = ", ".join(shown)
+    return f"{text_} and {more} more" if more > 0 else text_
+
+
+def _sellers_phrase(carriers: list[str]) -> str:
+    if not carriers:
+        return "Competitors are"
+    if len(carriers) == 1:
+        return f"{carriers[0]} is"
+    if len(carriers) == 2:
+        return f"{carriers[0]} and {carriers[1]} are"
+    return f"{len(carriers)} competitors are"
+
+
+def _ceil_share(n: int, pct: float) -> int:
+    """How many of n, at pct percent, rounded up - and never fewer than one."""
+    return max(1, -(-int(round(n * pct * 100)) // 10000))
 
 
 def _insert_event(
@@ -572,11 +613,326 @@ def _eval_price_threshold(
         )
 
 
+# ─────────────────────────────────────────────────────────────
+# Rule family 4 — itinerary shape (stops)
+# ─────────────────────────────────────────────────────────────
+
+def _eval_stops(
+    db, tenant_id, rule, cur, prev, summary, mode, dry_run
+) -> None:
+    cond = PRESETS["stops_disadvantage"].model(**rule.condition).model_dump()
+    if cur.service is None:
+        summary.note = "stops_disadvantage active but no service aggregate loaded"
+        return
+
+    windows = set(cond["windows"])
+    only_routes = set(cond["routes"] or [])
+    only_comps = set(cond["competitors"] or [])
+    only_trips = set(cond["trip_types"] or [])
+    min_gap = cond["min_stop_gap"]
+
+    for (route, window, trip), cell in sorted(cur.service.cells.items()):
+        if window not in windows:
+            continue
+        if only_routes and route not in only_routes:
+            continue
+        if only_trips and trip not in only_trips:
+            continue
+
+        comparable = behind = 0
+        worst_gap, worst_comp, worst_day = 0, None, None
+        worst_own, worst_them, worst_curr = None, None, None
+        own_fare_at_worst, comp_fare_at_worst = None, None
+
+        for day in cell.days:
+            # Both sides must publish a COMPLETE stop count for the day to
+            # count. own_stops_complete is the load-bearing half: min() over a
+            # partly-NULL own side reads high and manufactures a disadvantage
+            # that is really just missing data.
+            if day.own_stops is None or not day.own_stops_complete:
+                continue
+            best = best_al = best_fare = None
+            for c in day.competitors:
+                if only_comps and c.competitor not in only_comps:
+                    continue
+                if c.stops is None:
+                    continue
+                if best is None or (c.stops, c.competitor) < (best, best_al):
+                    best, best_al, best_fare = c.stops, c.competitor, c.fare
+            if best is None:
+                continue
+            comparable += 1
+            gap = day.own_stops - best
+            if gap >= min_gap:
+                behind += 1
+                if gap > worst_gap:
+                    worst_gap, worst_comp, worst_day = gap, best_al, day.dep_date
+                    worst_own, worst_them = day.own_stops, best
+                    own_fare_at_worst, comp_fare_at_worst = day.own_fare, best_fare
+                    worst_curr = day.currency
+
+        # A verdict resting on one or two departure days is noise: both JY cells
+        # that ever scored "disadvantaged" had exactly one comparable day out of
+        # the eight to ten their window observed.
+        if comparable < cond["min_days"]:
+            continue
+
+        summary.groups_evaluated += 1
+        needed = _ceil_share(comparable, cond["min_day_share"])
+        state = "behind" if behind >= needed else "matched"
+        scope_key = f"stops|{route}|{trip}|{window}"
+
+        previous = q.last_emitted_state(db, tenant_id, scope_key, cur.cap_date)
+        if previous == state:
+            continue
+        # First sight of a scope: only the bad state is news.
+        if previous is None and state == "matched":
+            continue
+        # Muted, but still WRITTEN — same ledger rule as _eval_position.
+        recovery_muted = (state == "matched" and not cond["notify_on_recovery"])
+
+        trip_label = " round trips" if trip == "RT" else ""
+        if state == "behind":
+            severity = rule.severity
+            message = (
+                f"{worst_comp} flies {route}{trip_label} in {_stops(worst_them)} "
+                f"against our {_stops(worst_own)}, on {behind} of {comparable} "
+                f"departure days {window} days out."
+            )
+            # Only when both sides are priced in the same currency: quoting a
+            # fare of 0.00, or one currency against another, would be a lie.
+            if (own_fare_at_worst and comp_fare_at_worst
+                    and worst_curr is not None):
+                message += (
+                    f" {worst_comp} at {_money(comp_fare_at_worst, worst_curr)} "
+                    f"against our {_money(own_fare_at_worst, worst_curr)}."
+                )
+        else:
+            severity = "info"
+            message = (
+                f"We match or beat the competition on stops for "
+                f"{route}{trip_label}, departures {window} days out."
+            )
+
+        payload = {
+            "route": route, "origin": cell.origin, "destination": cell.destination,
+            "window": window, "trip_type": trip,
+            "metric": "min_stops_on_sale", "state": state,
+            "days_comparable": comparable, "days_behind": behind,
+            "days_required": needed,
+            "stop_gap": worst_gap or None,
+            "competitor": worst_comp,
+            "worst_dep_date": worst_day.isoformat() if worst_day else None,
+            "own_stops": worst_own, "best_comp_stops": worst_them,
+            "currency": worst_curr,
+            "min_stop_gap": min_gap, "min_days": cond["min_days"],
+            "min_day_share": cond["min_day_share"],
+        }
+        _emit(
+            db, summary, dry_run,
+            tenant_id=tenant_id, rule=rule, severity=severity,
+            delivery_status="suppressed" if recovery_muted else "delivered",
+            scope_key=scope_key,
+            dedupe_key=f"stops|{route}|{trip}|{window}|{cur.cap_date}|{state}",
+            message=message, payload=payload,
+            observed_at=cur.cap_date, prev_observed_at=prev.cap_date, mode=mode,
+        )
+
+
+# ─────────────────────────────────────────────────────────────
+# Rule family 5 — service coverage
+# ─────────────────────────────────────────────────────────────
+
+# TWO states, deliberately — not three.
+#
+# An earlier build made "nothing at all on sale" ('blackout') its own rung above
+# 'gap', on the reasoning that total absence is a categorically different fact.
+# It is, but it cannot be a STATE, because its test (gap_days == days_observed)
+# compares against a denominator that moves: the 00-07 window covers a different
+# set of departure days on every capture, so a route we never sell flips
+# blackout -> gap -> blackout as days_observed ticks between 7 and 8. Measured
+# over a 40-pair JY backfill that produced 192 events, 4.8 per capture, on
+# scopes whose real-world state never changed once.
+#
+# The distinction is worth keeping, so it survives where it does no harm: the
+# message says "any of the 8 departure days" rather than "6 of 8", and the
+# payload carries gap_days and days_observed for anything that wants to compute
+# it. It just does not get a vote in the edge detector.
+
+
+def _eval_service_gap(
+    db, tenant_id, rule, cur, prev, summary, mode, dry_run
+) -> None:
+    cond = PRESETS["service_gap"].model(**rule.condition).model_dump()
+    if cur.service is None:
+        summary.note = "service_gap active but no service aggregate loaded"
+        return
+
+    windows = set(cond["windows"])
+    only_routes = set(cond["routes"] or [])
+    only_comps = set(cond["competitors"] or [])
+    only_trips = set(cond["trip_types"] or [])
+    min_gap_days = cond["min_gap_days"]
+    min_comps = cond["min_competitors"]
+    include_sold_out = cond["include_sold_out"]
+
+    for (route, window, trip), cell in sorted(cur.service.cells.items()):
+        if window not in windows:
+            continue
+        if only_routes and route not in only_routes:
+            continue
+        if only_trips and trip not in only_trips:
+            continue
+
+        # The denominator guard. JY samples departure offsets {0..7,10,15,20,25},
+        # so its 08-14 window observes 1.4 days on average: a cell that thin
+        # cannot carry a day count. Unguarded it flips like a coin (66 flips
+        # over four captures, against 2 with this guard), and with
+        # min_gap_days > 1 it can never reach 'gap' at all and goes silently
+        # blind. Skip it rather than report from it.
+        days_observed = len(cell.days)
+        if days_observed < cond["min_days_observed"]:
+            continue
+
+        gap_dates: list[str] = []
+        no_flight = sold_out = 0
+        best_fare = best_comp = best_curr = None
+        sellers: set[str] = set()
+
+        for day in cell.days:
+            selling = [c for c in day.competitors
+                       if c.fare is not None
+                       and (not only_comps or c.competitor in only_comps)]
+            if day.own_on_sale or len(selling) < min_comps:
+                continue
+            # A scheduled flight with no fare is a different fact from no
+            # flight at all — inventory or fare loading, versus the network.
+            if day.own_scheduled and not include_sold_out:
+                continue
+            gap_dates.append(day.dep_date.isoformat())
+            if day.own_scheduled:
+                sold_out += 1
+            else:
+                no_flight += 1
+            for c in selling:
+                sellers.add(c.competitor)
+                if best_fare is None or c.fare < best_fare:
+                    best_fare, best_comp, best_curr = c.fare, c.competitor, c.currency
+
+        summary.groups_evaluated += 1
+        gap_days = len(gap_dates)
+
+        if gap_days == 0:
+            state = "covered"
+        elif gap_days >= min_gap_days:
+            state = "gap"
+        else:
+            # The dead band: not a state and not an event. The cell keeps
+            # whatever it last reported. Without this, edge triggering buys
+            # nothing — JY flips 66 cells over four captures.
+            continue
+
+        scope_key = f"svc|{route}|{trip}|{window}"
+        previous = q.last_emitted_state(db, tenant_id, scope_key, cur.cap_date)
+        if previous == state:
+            continue
+        if previous is None and state == "covered":
+            continue
+
+        # Muted, but still WRITTEN — the ledger IS the event table, and a
+        # skipped write would leave this scope's stored state stale and silence
+        # its next genuine transition forever (see _eval_position above).
+        recovery_muted = (state == "covered" and not cond["notify_on_recovery"])
+
+        trip_label = " (round trip)" if trip == "RT" else ""
+        kind = ("all unscheduled" if sold_out == 0 else
+                "all scheduled with no fare" if no_flight == 0 else
+                f"{no_flight} unscheduled, {sold_out} with no fare")
+        tail = (f" {_sellers_phrase(sorted(sellers))} selling"
+                f"{' from ' + _money(best_fare, best_curr) if best_fare else ''}.")
+
+        if state == "gap":
+            severity = rule.severity
+            if gap_days >= days_observed:
+                message = (
+                    f"We have nothing on sale on {route}{trip_label} on any of "
+                    f"the {days_observed} departure days {window} days out "
+                    f"({kind})." + tail
+                )
+            else:
+                message = (
+                    f"We are not on sale on {route}{trip_label} on {gap_days} of "
+                    f"{days_observed} departure days {window} days out - "
+                    f"{_dates_phrase(gap_dates)} ({kind})." + tail
+                )
+        else:
+            severity = "info"
+            message = (
+                f"We are back on sale on {route}{trip_label} on every one of the "
+                f"{days_observed} departure days {window} days out."
+            )
+
+        payload = {
+            "route": route, "origin": cell.origin, "destination": cell.destination,
+            "window": window, "trip_type": trip,
+            "metric": "days_not_on_sale", "state": state,
+            "days_observed": days_observed, "gap_days": gap_days,
+            # True when we sell nothing at all in this window. Reported, not
+            # used as a state — see the comment on the two-state model above.
+            "total_absence": bool(gap_days and gap_days >= days_observed),
+            "days_no_flight": no_flight, "days_sold_out": sold_out,
+            # The full list, not the three the message names — this is what a
+            # revenue manager opens the schedule with.
+            "gap_dates": gap_dates,
+            "competitors_on_sale": len(sellers),
+            "competitors_selling": sorted(sellers),
+            "best_competitor": best_comp, "best_competitor_fare": best_fare,
+            "currency": best_curr,
+            "min_gap_days": min_gap_days,
+            "min_days_observed": cond["min_days_observed"],
+            "min_competitors": min_comps, "include_sold_out": include_sold_out,
+        }
+        _emit(
+            db, summary, dry_run,
+            tenant_id=tenant_id, rule=rule, severity=severity,
+            delivery_status="suppressed" if recovery_muted else "delivered",
+            scope_key=scope_key,
+            dedupe_key=f"svc|{route}|{trip}|{window}|{cur.cap_date}|{state}",
+            message=message, payload=payload,
+            observed_at=cur.cap_date, prev_observed_at=prev.cap_date, mode=mode,
+        )
+
+
 _DISPATCH = {
     "comp_price_move": _eval_price_move,
     "undercut_position": _eval_position,
     "comp_price_threshold": _eval_price_threshold,
+    "stops_disadvantage": _eval_stops,
+    "service_gap": _eval_service_gap,
 }
+
+# Rules that read the day-grain service aggregate. Held here rather than as a
+# flag on Preset so queries.py never has to import presets.py.
+_SERVICE_RULES = frozenset({"stops_disadvantage", "service_gap"})
+
+
+def _load_pair(db, tenant_code, cur_cap, prev_cap, rule_keys):
+    """The capture pair every entry point evaluates, service data included.
+
+    Both evaluate_pair and preview_rule route through here. They loaded the pair
+    independently before, and putting the lazy service load in only one of them
+    would leave the settings card's Preview button reporting "no matches" for
+    both new rules — indistinguishable, from the outside, from a broken rule.
+
+    Only `cur` gets the service aggregate. Neither new rule reads `prev`: they
+    are edge-triggered off q.last_emitted_state, exactly as undercut_position
+    is, and it touches prev only for the prev_observed_at column.
+    """
+    cur = q.load_capture(db, tenant_code, cur_cap)
+    prev = q.load_capture(db, tenant_code, prev_cap)
+    if _SERVICE_RULES & set(rule_keys):
+        cur = replace(cur, service=q.load_service_capture(db, tenant_code, cur_cap))
+    return cur, prev
 
 
 # ─────────────────────────────────────────────────────────────
@@ -616,8 +972,8 @@ def evaluate_pair(
         summary.note = "no active preset rules"
         return summary
 
-    cur = q.load_capture(db, tenant_code, cur_cap)
-    prev = q.load_capture(db, tenant_code, prev_cap)
+    cur, prev = _load_pair(db, tenant_code, cur_cap, prev_cap,
+                           [r.rule_key for r in rules])
 
     for rule in rules:
         handler = _DISPATCH.get(rule.rule_key)
@@ -665,8 +1021,7 @@ def preview_rule(
 
     rule = LoadedRule(id=rule_id, rule_key=rule_key, name=rule_name,
                       severity=severity, condition=condition)
-    cur = q.load_capture(db, tenant_code, cur_cap)
-    prev = q.load_capture(db, tenant_code, prev_cap)
+    cur, prev = _load_pair(db, tenant_code, cur_cap, prev_cap, [rule_key])
     handler(db, tenant_id, rule, cur, prev, summary, "preview", True)
     summary.rules_evaluated = [rule_key]
     return summary

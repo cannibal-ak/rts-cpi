@@ -32,10 +32,13 @@ interface Props {
 }
 
 function unitAdornment(unit: string | null): string | null {
+  if (!unit) return null;
   if (unit === 'percent') return '%';
   if (unit === 'currency') return 'USD';
-  if (unit === 'places') return 'places';
-  return null;
+  // Anything else prints as itself — 'places', 'stops', 'days'. Returning null
+  // for an unrecognised unit left a bare "3" with nothing beside it, which is a
+  // question rather than a setting, and made every new unit a frontend change.
+  return unit;
 }
 
 export default function AlertPresetCard({ preset, onSave, onError }: Props) {
@@ -162,17 +165,25 @@ export default function AlertPresetCard({ preset, onSave, onError }: Props) {
           </Stack>
         </Stack>
 
-        {(scalar.length > 0 || multi.length > 0) && (
+        {scalar.length > 0 && (
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
             {scalar.map(t => {
               const value = condition[t.key];
+              // A field the server demands BEFORE activation has to stay
+              // editable while the rule is off, or the requirement can never be
+              // met. The multiselects already had this escape hatch; the
+              // scalars did not, which deadlocked comp_price_threshold
+              // completely: it ships off, requires `value` (a number), and that
+              // number is disabled until it is on. Flipping the switch 422s and
+              // the card reverts. It is is_active=false for every tenant.
+              const required = preset.missing_requirements.includes(t.key);
               if (t.type === 'bool') {
                 return (
                   <FormControlLabel
                     key={t.key}
                     control={
                       <Switch
-                        size="small" disabled={!active}
+                        size="small" disabled={!active && !required}
                         checked={Boolean(value)}
                         onChange={e => setField(t, e.target.checked)}
                       />
@@ -185,7 +196,7 @@ export default function AlertPresetCard({ preset, onSave, onError }: Props) {
                 return (
                   <TextField
                     key={t.key} select size="small" label={t.label}
-                    disabled={!active}
+                    disabled={!active && !required}
                     value={(value as string) ?? ''}
                     onChange={e => setField(t, e.target.value)}
                     sx={{ minWidth: 140 }}
@@ -202,7 +213,7 @@ export default function AlertPresetCard({ preset, onSave, onError }: Props) {
                   key={t.key} size="small" type="number" label={t.label}
                   // Greyed rather than hidden when off: the numbers are still
                   // worth seeing, they just are not doing anything.
-                  disabled={!active}
+                  disabled={!active && !required}
                   value={value ?? ''}
                   onChange={e => setField(t, e.target.value)}
                   error={Boolean(fieldError[t.key])}
@@ -215,6 +226,13 @@ export default function AlertPresetCard({ preset, onSave, onError }: Props) {
                 />
               );
             })}
+          </Stack>
+        )}
+        {/* Scope pickers on their own line. They are flexGrow:1, so mixed in
+            with the fixed-width thresholds they stretch to fill whatever gap
+            the numbers happen to leave, and every card wraps differently. */}
+        {multi.length > 0 && (
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
             {multi.map(t => (
               <Autocomplete
                 key={t.key}

@@ -46,6 +46,7 @@ from app.schemas.alerts import (
 from app.schemas.common import PageInfo, PaginatedResponse
 from app.services.alerts import evaluator, read_state, runner
 from app.services.alerts.presets import (
+    windows_for_horizon,
     PRESETS, PRESET_ORDER, get_preset, missing_requirements, tunables_payload,
 )
 from app.services.alerts.views import is_alertable, resolve_view
@@ -235,6 +236,67 @@ def unread_count(
 _ROUTES_TTL = 300.0
 
 
+def _available_options(db: Session, identity: str) -> dict[str, list[str]]:
+    """Tenant DATA that fills the settings multiselects: routes and carriers.
+
+    ONE producer, deliberately, not one per picker. The first statement here is
+    `SELECT max(cap_date) FROM {view}`, which costs 0.062 ms on DA but 769 ms on
+    JY and 818 ms on PW: those partitions have no ix_air_snap_<tenant>_grid, so
+    it degenerates into a full scan of the whole table. A second producer would
+    double the settings page's cold-miss cost on exactly the tenants that can
+    least afford it.
+
+    Same union rule as the routes list always had — what is in the latest
+    capture, plus anything an event has already fired for, so an old alert's
+    route or carrier stays pickable after it leaves the feed. Cached per
+    identity, which is also what resolves the view, so the cache can never hand
+    one tenant another tenant's data.
+    """
+    view = resolve_view(identity)
+
+    def _produce() -> dict[str, list[str]]:
+        routes: set[str] = set()
+        comps: set[str] = set()
+        horizon: int | None = None
+        cap = db.execute(text(f"SELECT max(cap_date) FROM {view}")).scalar()
+        if cap is not None:
+            rows = db.execute(
+                text(f"SELECT DISTINCT ref_org || '-' || ref_dst AS route,"
+                     f"       comp_al"
+                     f"  FROM {view} WHERE cap_date = :cap"),
+                {"cap": cap},
+            ).all()
+            routes.update(r.route for r in rows if r.route)
+            comps.update(r.comp_al for r in rows if r.comp_al)
+            # How far ahead this feed quotes, which decides which departure
+            # buckets the tenant can actually populate. Read from the same
+            # pinned capture as the rest, so it costs no extra scan: DA, PW and
+            # ALT come back 29 and see three buckets; JY and 5L 45 and see
+            # four; WM 85 and sees all six.
+            horizon = db.execute(
+                text(f"SELECT max(ref_dep_date - cap_date) FROM {view}"
+                     f" WHERE cap_date = :cap"),
+                {"cap": cap},
+            ).scalar()
+        rows = db.execute(text(
+            "SELECT DISTINCT payload->>'route' AS route,"
+            "       payload->>'competitor' AS competitor"
+            "  FROM alert_event")).all()
+        routes.update(r.route for r in rows if r.route)
+        comps.update(r.competitor for r in rows if r.competitor)
+        # Sorted because the Autocomplete renders them in the order given —
+        # except windows, which are already in ladder order and must stay that
+        # way: "00-07, 08-14, 15-30" reads as a horizon, sorted() would too but
+        # only by accident of the zero padding.
+        return {
+            "routes": sorted(routes),
+            "competitors": sorted(comps),
+            "windows": windows_for_horizon(horizon),
+        }
+
+    return cached(("alert_options", identity), _ROUTES_TTL, _produce)
+
+
 def _available_routes(db: Session, identity: str) -> list[str]:
     """Every ORG-DST route the tenant can meaningfully filter alerts by.
 
@@ -250,25 +312,7 @@ def _available_routes(db: Session, identity: str) -> list[str]:
     Cached per identity, which is also what resolves the view — so the cache
     can never hand one tenant another tenant's routes.
     """
-    view = resolve_view(identity)
-
-    def _produce() -> list[str]:
-        routes: set[str] = set()
-        cap = db.execute(text(f"SELECT max(cap_date) FROM {view}")).scalar()
-        if cap is not None:
-            rows = db.execute(
-                text(f"SELECT DISTINCT ref_org || '-' || ref_dst"
-                     f"  FROM {view} WHERE cap_date = :cap"),
-                {"cap": cap},
-            )
-            routes.update(r[0] for r in rows if r[0])
-        rows = db.execute(text(
-            "SELECT DISTINCT payload->>'route' FROM alert_event"
-            " WHERE payload->>'route' IS NOT NULL"))
-        routes.update(r[0] for r in rows if r[0])
-        return sorted(routes)
-
-    return cached(("alert_routes", identity), _ROUTES_TTL, _produce)
+    return _available_options(db, identity)["routes"]
 
 
 @router.get("/routes", response_model=list[str])
@@ -338,17 +382,24 @@ def mark_all_read(
 # Rules
 # ─────────────────────────────────────────────────────────────
 
-def _rule_out(row, preset, route_options: list[str] | None = None) -> AlertRuleOut:
+def _rule_out(row, preset, options: dict[str, list[str]] | None = None) -> AlertRuleOut:
     condition = row.condition_json if isinstance(row.condition_json, dict) else {}
     tunables = tunables_payload(preset) if preset else []
-    if route_options is not None:
-        # The routes multiselect ships with options=None in the preset — which
-        # routes exist is tenant DATA, not preset shape. Filled per request
-        # from the same cached list GET /routes serves, so the settings screen
-        # and the feed's dropdown can never disagree.
+    if options is not None and preset is not None:
+        # A tenant-data multiselect ships with options=None in the preset —
+        # which routes and carriers exist is DATA, not preset shape — and is
+        # filled per request from the same cached lists GET /routes serves, so
+        # the settings screen and the feed's dropdown can never disagree.
+        #
+        # Keyed off Tunable.options_source rather than the tunable's name. The
+        # name test this replaced only ever matched "routes", which is why the
+        # competitors picker declared on two presets has never once rendered:
+        # the settings card hides any multiselect whose option list is empty.
+        source = {t.key: t.options_source for t in preset.tunables}
         for t in tunables:
-            if t["key"] == "routes" and t["options"] is None:
-                t["options"] = route_options
+            src = source.get(t["key"])
+            if src and t["options"] is None:
+                t["options"] = options.get(src, [])
     return AlertRuleOut(
         id=row.id, rule_key=row.rule_key, name=row.name,
         description=row.description, domain=row.domain, rule_type=row.rule_type,
@@ -416,8 +467,8 @@ def list_rules(
     rows = db.execute(text(f"{_RULE_SELECT} ORDER BY r.is_preset DESC, r.name")).all()
     order = {k: i for i, k in enumerate(PRESET_ORDER)}
     rows = sorted(rows, key=lambda r: order.get(r.rule_key, 99))
-    routes = _available_routes(db, user_identity) if is_alertable(user_identity) else None
-    return [_rule_out(r, get_preset(r.rule_key), routes) for r in rows]
+    options = _available_options(db, user_identity) if is_alertable(user_identity) else None
+    return [_rule_out(r, get_preset(r.rule_key), options) for r in rows]
 
 
 @router.get("/rules/{rule_key}", response_model=AlertRuleOut)
@@ -432,8 +483,8 @@ def get_rule(
                      {"k": rule_key}).first()
     if row is None:
         raise HTTPException(404, f"no rule {rule_key}")
-    routes = _available_routes(db, user_identity) if is_alertable(user_identity) else None
-    return _rule_out(row, get_preset(row.rule_key), routes)
+    options = _available_options(db, user_identity) if is_alertable(user_identity) else None
+    return _rule_out(row, get_preset(row.rule_key), options)
 
 
 @router.patch("/rules/{rule_key}", response_model=AlertRuleOut,
@@ -507,8 +558,8 @@ def update_rule(
     # Same options injection as the GET paths: the settings screen replaces
     # its card state with THIS response, so serving options=None here would
     # blank the routes picker after every save.
-    routes = _available_routes(db, user_identity) if is_alertable(user_identity) else None
-    return _rule_out(row, preset, routes)
+    options = _available_options(db, user_identity) if is_alertable(user_identity) else None
+    return _rule_out(row, preset, options)
 
 
 @router.post("/rules/{rule_key}/preview", response_model=AlertPreviewOut,
