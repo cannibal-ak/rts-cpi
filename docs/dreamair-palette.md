@@ -104,20 +104,88 @@ data rather than from arrival order.
 | 3 | KQ | `#D6208F` | 4.71:1 | | 7 | Coa | `#9B4FD8` | 4.66:1 |
 | 4 | Fli | `#C08A00` | 3.05:1 | | 8 | UI | `#2E7D32` | 5.13:1 |
 
-The competitors actually present in the DreamAir data, by volume over Jan–Jun
-2026: TC (1.36M rows), KQ (790k), Fli (190k), Aur (86k), YS (73k), Coa (44k),
-UI (32k), CQ (24k). That is **eight** competitors for **seven** identity slots.
+The competitors actually present in the DreamAir data. The first figures are
+the Jan–Jun 2026 window the slots were assigned from; the second are the whole
+PW archive, which DreamAir was widened to on 2026-08-19 (b1cd1e0):
 
-**CQ, the smallest, takes the neutral fallback rather than a ninth hue.** This
-is deliberate, not an oversight: no ninth hue exists that keeps the set
-separable (see the note below), and the documented remedy for an overflowing
-categorical scale is to fold the smallest series into "Other", never to
-generate another colour.
+| Carrier | Jan–Jun 2026 | Full archive | Slot |
+|---|---|---|---|
+| TC | 1.36M | 2.30M | 2 |
+| KQ | 790k | 1.21M | 3 |
+| Fli | 190k | 303k | 4 |
+| Aur | 86k | 163k | 5 |
+| YS | 73k | 97.7k | 6 |
+| Coa | 44k | 97.5k | 7 |
+| UI | 32k | 47.0k | 8 |
+| **Exp** | — | **32.6k** | neutral fallback #2 |
+| CQ | 24k | 30.7k | neutral fallback #1 |
+
+That is **nine** competitors for **seven** identity slots.
+
+**CQ takes the neutral fallback rather than a ninth hue.** This is deliberate,
+not an oversight: no ninth hue exists that keeps the set separable (see the note
+below), and the documented remedy for an overflowing categorical scale is to
+fold the smallest series into "Other", never to generate another colour.
 
 Fallbacks for unnamed carriers, CQ first: `#64748B`, `#0F766E`, `#B45309`,
 `#7C3AED`. **No azure-family fallback** — nothing may impersonate the host
 carrier. (This is the same rule as WinAir's "no red-family fallback", moved to
 the new brand hue.)
+
+### Exp — the tenth carrier the widening brought in (fixed 2026-08-19, dev)
+
+`CARRIER_COLORS` was written against the Jan–Jun 2026 window, which has no Exp
+rows at all. The 2026-08-19 widening to PW's whole archive added 32,557 Exp rows
+at cap_date 2025-09-03..2025-09-15, and nothing regenerated `label_colors` — so
+dashboard 7 kept the 94 keys the nine-carrier run produced and Exp had none of
+them. WinAir hit the same gap the same day for the same carrier, from a
+different cause (its `CARRIERS` loops were one short); see
+`docs/winair-palette.md`.
+
+**Exp takes neutral fallback #2, `#0F766E`** — not a ninth hue, and not a new
+value: it was already slot 10 of `DA_DOMAIN` in the provisioning script.
+CQ keeps `#64748B` even though the widened archive now puts Exp marginally ahead
+of it on volume (32.6k vs 30.7k): re-basing CQ would be a *modification* under
+the additive-only rule, and this document pins CQ to the first fallback by name.
+So the fallback list is consumed in list order, not re-derived from volume.
+
+**Why `#0F766E` is acceptable, measured.** On the full ten-slot set the
+validator's worst all-pairs normal-vision pair becomes `#0F766E` ↔ UI `#2E7D32`
+at ΔE 9.2, under the 15 floor — but **that pair cannot render.** On the
+cap_dates where Exp has rows, only TC, KQ, Aur, Fli and Coa appear; UI, CQ and
+YS all start 2026-05-09 and never co-occur with Exp. The worst pair Exp can
+actually be seen beside is Aur:
+
+```
+#0F766E vs #0E9DA8 (Aur)     normal ΔE 12.9   CVD ΔE 12.6 (deutan)
+#C08A00 vs #E8632A (Fli/TC)  normal ΔE 11.4   CVD ΔE  1.1 (deutan)   <- already shipped
+```
+
+Exp's worst *realisable* neighbour beats the palette's own existing worst
+realisable pair on both axes, so this adds no separation problem that the
+palette had not already accepted. `#0F766E`'s chroma (0.086) sits under the 0.10
+floor; that is the point of a neutral overflow slot, exactly as with CQ's
+`#64748B` (0.041) — do not saturate it. The other two fallbacks were measured
+and rejected: `#B45309` vs YS `#A05A2C` is normal ΔE 3.9 / CVD 2.2, and
+`#7C3AED` vs Coa `#9B4FD8` is normal ΔE 8.0 / CVD 4.1.
+
+**Why the dashboard looked fine.** The date picker reads `vw_da_dashboard_dates`,
+whose INTERSECT of the fares and velocity feeds starts 2025-12-12 — after Exp's
+last date. With a cap_date-scoped guest token all 12 slices pass. Only a request
+with **no** cap_date clause reaches Exp, and it built six unbindable series:
+`Exp` (slices 121/122/123), `Max Fare, Exp` + `Min Fare, Exp` (113),
+`Lowest Available Fare, Exp` (118), `Sold out, Exp (1)` + `Not on sale, Exp (1)`
+(121). So **verify with an unscoped token** — a scoped PASS is necessary, not
+sufficient. This is the same lesson WinAir's doc records from the other
+direction (dev passed, prod's wider data did not).
+
+Applied additively by `scripts/superset/da_dash7_exp_keys.py` (key-level backup
+and `--revert`, single transaction), which writes the nine spellings
+`build_label_colors()` emits per carrier — the six above plus `Avg Fare, Exp`,
+`Sold out, Exp` and `Not on sale, Exp`, which nothing builds today but which
+keep Exp from being the one carrier with a partial key set. Dashboard 7 went
+94 → 103 keys, and the patched provisioning script regenerates that dict
+byte-for-byte.
 
 Validated on white, in the order above:
 
@@ -159,9 +227,15 @@ with: `#159467` is a blue-green and sat ΔE 9.4 from the `#0E9DA8` teal, the
 worst pair in the set. A true forest green moves that to 11.4 while keeping
 every adjacent check and the ≥3:1 floor intact.
 
-This set is mirrored in three places that must stay identical:
-`apps/web/src/components/dashboard/dreamair/priceChartTheme.ts`,
-`scripts/superset_provision_dreamair.py`, `scripts/superset/da_recolor_dash7.py`.
+This set currently lives in **one** place, plus the patch script that extends
+it: `scripts/superset_provision_dreamair.py` (`CARRIER_COLORS`) and
+`scripts/superset/da_dash7_exp_keys.py` (Exp only). Earlier revisions of this
+document named `apps/web/src/components/dashboard/dreamair/priceChartTheme.ts`
+and `scripts/superset/da_recolor_dash7.py` as mirrors; **neither file was ever
+created** (checked 2026-08-19). `dreamairTheme.ts` exists but carries only the
+brand and chrome tokens from section 1, no carrier hexes. If a native
+per-carrier chart is built later, it must mirror `CARRIER_COLORS` including
+Exp — and this list must be updated to say so.
 
 ---
 
@@ -336,10 +410,13 @@ These are **carried over from WinAir unchanged** — they are semantic, not bran
 Amber-vs-gold tension with the Palette A gold slot `#C08A00` is accepted
 deliberately, exactly as on WinAir.
 
-> **Data note.** The DreamAir dataset (re-ingested PW Jan–Jun 2026) contains no
-> `ref_seats = 0` rows, so the **sold-out** marker never fires — only "not on
-> sale" appears. The amber is specified so the chart is correct if seat-zero data
-> ever arrives, not because it is currently reachable.
+> **Data note.** The DreamAir dataset contains no `ref_seats = 0` rows, so the
+> **sold-out** marker never fires — only "not on sale" appears. The amber is
+> specified so the chart is correct if seat-zero data ever arrives, not because
+> it is currently reachable. Re-checked after the 2026-08-19 widening to the
+> full PW archive: still 0 of 4,285,228 rows, so this holds. Note the sold-out
+> *series* is still built by the mixed_timeseries query even with no data in it,
+> which is why it needs a `label_colors` key regardless.
 
 ### Palette C — recommendation semantics
 

@@ -36,11 +36,14 @@ SQL substitution is mechanical and asserted, never assumed:
   wm_price                   -> da_price   (a column name, so table_columns too)
 
 label_colors is REBUILT rather than substituted. DreamAir's competitors
-(TC, KQ, Fli, Aur, YS, Coa, UI, CQ) share nothing with WinAir's
-(5L, 7Z, BW, DM, Exp, JY, S6), so a string swap would leave dead keys that
-silently fall through to the scheme default. See docs/dreamair-palette.md for
-why the key spellings below are what they are -- a key that does not match the
-series name Superset builds is ignored without any error.
+(TC, KQ, Fli, Aur, YS, Coa, UI, CQ, Exp) overlap WinAir's
+(5L, 7Z, BW, DM, Exp, JY, S6) in exactly one code -- Exp, and only since the
+2026-08-19 widening to PW's full archive -- so a string swap would leave dead
+keys that silently fall through to the scheme default, and would additionally
+import WinAir's Exp hex #A05A2C, which is YS's colour here. See
+docs/dreamair-palette.md for why the key spellings below are what they are --
+a key that does not match the series name Superset builds is ignored
+without any error.
 """
 import sqlite3
 import json
@@ -78,7 +81,15 @@ CARRIER_COLORS = {
     "YS":  "#A05A2C",   # slot 6
     "Coa": "#9B4FD8",   # slot 7
     "UI":  "#2E7D32",   # slot 8
-    "CQ":  "#64748B",   # overflow -> neutral fallback, see the doc
+    "CQ":  "#64748B",   # overflow -> neutral fallback #1, see the doc
+    # Exp arrived with the 2026-08-19 widening to PW's whole archive (b1cd1e0):
+    # its rows are all cap_date 2025-09-03..09-15, outside the Jan-Jun 2026
+    # window this dict was written for. Overflow like CQ, so it takes neutral
+    # fallback #2 -- already DA_DOMAIN slot 10, not a new hue (the doc forbids
+    # a ninth carrier hue). Deliberately NOT re-ordered above CQ even though
+    # the widened data puts it ahead on volume (32,557 vs 30,675): re-basing
+    # CQ would be a modification, and the doc pins CQ to the first fallback.
+    "Exp": "#0F766E",   # overflow -> neutral fallback #2
 }
 DA_DOMAIN = ["#1268E3", "#E8632A", "#D6208F", "#C08A00", "#0E9DA8",
              "#A05A2C", "#9B4FD8", "#2E7D32", "#64748B", "#0F766E"]
