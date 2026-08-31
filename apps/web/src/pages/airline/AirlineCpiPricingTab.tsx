@@ -46,28 +46,23 @@ const fmtTime = (v: unknown): string => {
 };
 
 // ── Fare delta computation ──────────────────────────────────────────────
+// Delta/Δ% are comparison metrics, so they exist only when BOTH fares are
+// real (> 0 — the feeds write 0 for sold out / not on sale, never a price).
+// One-sided rows render a dash in both columns. The /snapshots ORDER BY
+// floats rows past this same both-sides test to the top of the grid — keep
+// the conditions in lockstep.
 function getFareDelta(row: AirlineSnapshot): number | null {
-  if (row.fare_delta != null) {
-    const n = Number(row.fare_delta);
-    if (!Number.isNaN(n)) return n;
-  }
-  if (row.ref_tot_fare != null && row.comp_tot_fare != null) {
-    const a = Number(row.ref_tot_fare);
-    const b = Number(row.comp_tot_fare);
-    if (!Number.isNaN(a) && !Number.isNaN(b)) return a - b;
-  }
-  return null;
+  if (row.ref_tot_fare == null || row.comp_tot_fare == null) return null;
+  const a = Number(row.ref_tot_fare);
+  const b = Number(row.comp_tot_fare);
+  if (Number.isNaN(a) || Number.isNaN(b) || a <= 0 || b <= 0) return null;
+  return a - b;
 }
 
 function getFareDeltaPct(row: AirlineSnapshot): number | null {
-  if (row.fare_delta_pct != null) {
-    const n = Number(row.fare_delta_pct);
-    if (!Number.isNaN(n)) return n;
-  }
   const d = getFareDelta(row);
-  const c = row.comp_tot_fare == null ? null : Number(row.comp_tot_fare);
-  if (d == null || c == null || c === 0 || Number.isNaN(c)) return null;
-  return (d / c) * 100;
+  if (d == null) return null;
+  return (d / Number(row.comp_tot_fare)) * 100;
 }
 
 function deltaColor(d: number | null): 'success.main' | 'error.main' | 'text.primary' {
