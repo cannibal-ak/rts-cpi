@@ -93,3 +93,10 @@ export const FILTER_ERROR_INK = '#9A2A22';
 export const FILTER_ERROR_BG = 'rgba(154,42,34,0.09)';
 /** Unfilled part of a range slider. */
 export const FILTER_SLIDER_RAIL = 'rgba(30,52,56,0.28)';
+
+/** Loading-skeleton field count for the top filter bar: the tenant's visible
+ *  filter count after suppression, so the grid does not reflow on load
+ *  (route, flight number, days left, stops, trip type). Annotated `number`
+ *  so sibling themes may differ (tenantChrome's mapped type would otherwise
+ *  pin the literal). */
+export const FILTER_SKELETON_COUNT: number = 5;

@@ -8,11 +8,8 @@
  * looked up per tenant at render time, exactly the way tenantChrome.ts made
  * the chrome tokens tenant-pluggable.
  *
- * The default is the WinAir table, so WM (and DreamAir, which has no entry
- * yet) render byte-identically to before this file existed. DreamAir's
- * native panel currently hands its carriers WinAir fallbacks — a known,
- * pre-existing gap; when it is fixed, its table goes here, mirrored from
- * `CARRIER_COLORS` in scripts/superset_provision_dreamair.py.
+ * The default is the WinAir table, so WM renders byte-identically to before
+ * this file existed. Every other branded tenant has its own entry below.
  *
  * THE TABLE MUST AGREE WITH THE TENANT'S SUPERSET label_colors — the native
  * chart sits beside the embedded dashboard, and a carrier that changes
@@ -94,11 +91,36 @@ const PW_CARRIERS: CarrierColorTable = {
   fallbacks: ['#0F766E', '#7C3AED'],
 };
 
+/**
+ * DreamAir (DA): a straight mirror of `CARRIER_COLORS` in
+ * scripts/superset_provision_dreamair.py (= dashboard 7's live label_colors,
+ * docs/dreamair-palette.md §2) — DA itself wears the brand azure. CQ and Exp
+ * sit on the doc's two neutral fallback hues by design (the palette forbids a
+ * ninth carrier hue), so this table's own fallbacks pick fresh hues outside
+ * the known set; overflow beyond ten carriers would be brand-new data.
+ */
+const DA_CARRIERS: CarrierColorTable = {
+  known: {
+    DA: '#1268E3',
+    TC: '#E8632A',
+    KQ: '#D6208F',
+    Fli: '#C08A00',
+    Aur: '#0E9DA8',
+    YS: '#A05A2C',
+    Coa: '#9B4FD8',
+    UI: '#2E7D32',
+    CQ: '#64748B',
+    Exp: '#0F766E',
+  },
+  fallbacks: ['#7C3AED', '#B45309'],
+};
+
 /** Tenants with their own carrier tables. Absent tenants get WinAir's. */
 const CARRIERS_BY_TENANT: Record<string, CarrierColorTable> = {
   '5l': LIAT_CARRIERS,
   jy: JY_CARRIERS,
   pw: PW_CARRIERS,
+  da: DA_CARRIERS,
 };
 
 /** The carrier table for a tenant slug; WinAir's when the tenant has none. */

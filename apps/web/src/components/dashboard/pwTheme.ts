@@ -106,3 +106,7 @@ export const FILTER_ERROR_INK = '#9A2A22';
 export const FILTER_ERROR_BG = 'rgba(154,42,34,0.09)';
 /** Unfilled part of a range slider. */
 export const FILTER_SLIDER_RAIL = 'rgba(23,48,26,0.28)';
+
+/** Visible-filter count after suppression (route, flt num, days left, stops,
+ *  trip type) — drives the filter bar's loading skeleton. */
+export const FILTER_SKELETON_COUNT: number = 5;
