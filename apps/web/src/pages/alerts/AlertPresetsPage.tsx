@@ -9,8 +9,10 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import {
-  Alert, Box, Button, CircularProgress, Snackbar, Stack, Typography,
+  Alert, Box, Button, CircularProgress, Dialog, DialogActions, DialogContent,
+  DialogContentText, DialogTitle, Snackbar, Stack, Typography,
 } from '@mui/material';
+import AddOutlined from '@mui/icons-material/AddOutlined';
 import PlayArrowOutlined from '@mui/icons-material/PlayArrowOutlined';
 
 import { api } from '../../api';
@@ -19,6 +21,7 @@ import { useAlerts } from '../../context/AlertsContext';
 import type { AlertPreset, AlertRunSummary } from '../../types';
 import AlertPresetCard from './AlertPresetCard';
 import AlertsTabs from './AlertsTabs';
+import CreateAlertRuleDialog from './CreateAlertRuleDialog';
 
 export default function AlertPresetsPage() {
   const { refresh } = useAlerts();
@@ -28,6 +31,9 @@ export default function AlertPresetsPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<AlertRunSummary | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AlertPreset | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -44,13 +50,32 @@ export default function AlertPresetsPage() {
   useEffect(() => { void load(); }, [load]);
 
   const save = useCallback(
-    async (ruleKey: string, patch: { is_active?: boolean; condition?: Record<string, unknown> }) => {
+    async (
+      ruleKey: string,
+      patch: { is_active?: boolean; condition?: Record<string, unknown>; name?: string },
+    ) => {
       const saved = await api.alerts.updatePreset(ruleKey, patch);
       setPresets(ps => ps.map(p => (p.rule_key === ruleKey ? saved : p)));
       return saved;
     },
     [],
   );
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await api.alerts.deleteRule(deleteTarget.rule_key);
+      setPresets(ps => ps.filter(p => p.rule_key !== deleteTarget.rule_key));
+      setDeleteTarget(null);
+      // The rule's events went with it, so the badge and feed need a refetch.
+      await refresh();
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : 'Could not delete the rule');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const runNow = async () => {
     setRunning(true);
@@ -71,13 +96,22 @@ export default function AlertPresetsPage() {
         title="Alert settings"
         subtitle="Choose which changes raise an alert, and how big a change has to be."
         actions={
-          <Button
-            variant="outlined" size="small" disabled={running}
-            startIcon={running ? <CircularProgress size={14} /> : <PlayArrowOutlined />}
-            onClick={() => void runNow()}
-          >
-            Run evaluation now
-          </Button>
+          <Stack direction="row" spacing={1}>
+            <Button
+              variant="outlined" size="small" disabled={loading}
+              startIcon={<AddOutlined />}
+              onClick={() => setCreateOpen(true)}
+            >
+              Add rule
+            </Button>
+            <Button
+              variant="outlined" size="small" disabled={running}
+              startIcon={running ? <CircularProgress size={14} /> : <PlayArrowOutlined />}
+              onClick={() => void runNow()}
+            >
+              Run evaluation now
+            </Button>
+          </Stack>
         }
       />
       <AlertsTabs />
@@ -127,10 +161,42 @@ export default function AlertPresetsPage() {
           {presets.map(p => (
             <AlertPresetCard
               key={p.rule_key} preset={p} onSave={save} onError={setToast}
+              onDelete={setDeleteTarget}
             />
           ))}
         </Stack>
       )}
+
+      <CreateAlertRuleDialog
+        open={createOpen}
+        families={presets.filter(p => p.is_preset)}
+        onClose={() => setCreateOpen(false)}
+        onCreated={() => {
+          // Reload rather than splice: the server owns the ordering (built-ins
+          // first, then instances grouped by family).
+          void load();
+          setToast('Rule created');
+        }}
+      />
+
+      <Dialog open={deleteTarget !== null} onClose={deleting ? undefined : () => setDeleteTarget(null)}>
+        <DialogTitle>Delete rule?</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            This permanently deletes “{deleteTarget?.name}” and every alert it
+            has ever raised. Built-in rules are unaffected.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+          <Button
+            color="error" variant="contained" disabled={deleting}
+            onClick={() => void confirmDelete()}
+          >
+            {deleting ? 'Deleting…' : 'Delete'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Snackbar
         open={Boolean(toast)} autoHideDuration={5000}

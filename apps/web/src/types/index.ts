@@ -369,6 +369,9 @@ export interface AlertTunable {
 export interface AlertPreset {
   id: string;
   rule_key: string;
+  /** The catalogue family this rule evaluates as: rule_key itself on built-in
+   *  rows, the family key on user-created instances, null on legacy rows. */
+  preset_key: string | null;
   name: string;
   description: string | null;
   domain: string;
@@ -388,6 +391,17 @@ export interface AlertPreset {
 export interface AlertPresetUpdate {
   is_active?: boolean;
   condition?: Record<string, unknown>;
+  /** Instances only — the server refuses to rename a built-in rule. */
+  name?: string;
+}
+
+/** A user-created instance of one of the catalogue rule types. */
+export interface AlertPresetCreate {
+  preset_key: string;
+  name: string;
+  /** Partial — merged over the family's defaults server-side. */
+  condition?: Record<string, unknown>;
+  is_active?: boolean;
 }
 
 export interface AlertRunSummary {

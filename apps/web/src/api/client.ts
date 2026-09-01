@@ -5,6 +5,7 @@
 import type {
   Paginated, AirlineSnapshot, VelocitySnapshot, CflSnapshot, FilterMetadata,
   AlertRule, AlertEvent, AlertSummary, AlertPreset, AlertPresetUpdate,
+  AlertPresetCreate,
   AlertPreview, AlertRunSummary, AlertEventQuery, MarkReadResult,
   TenantFeature, DataFreshness,
   SftpConnection, SftpConnectionCreate, SftpConnectionUpdate,
@@ -414,6 +415,10 @@ export interface CpiApiClient {
     getPreset(ruleKey: string): Promise<AlertPreset>;
     updatePreset(ruleKey: string, body: AlertPresetUpdate): Promise<AlertPreset>;
     previewPreset(ruleKey: string, body: AlertPresetUpdate): Promise<AlertPreview>;
+    /** Create a user-owned instance of a catalogue rule type. */
+    createRule(body: AlertPresetCreate): Promise<AlertPreset>;
+    /** Delete a user-created rule instance — its alert history goes with it. */
+    deleteRule(ruleKey: string): Promise<void>;
     run(dryRun?: boolean): Promise<AlertRunSummary>;
   };
 

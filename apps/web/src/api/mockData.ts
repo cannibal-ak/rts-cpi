@@ -258,7 +258,9 @@ const _WINDOW_TUNABLE = {
 };
 
 export function generateAlertPresets(): AlertPreset[] {
-  return [
+  // preset_key mirrors rule_key on every built-in row, exactly as the real
+  // API reports it; missing it here would break the feed's Type filter labels.
+  const presets: Omit<AlertPreset, 'preset_key'>[] = [
     {
       id: 'ar-undercut_position', rule_key: 'undercut_position',
       name: 'Lost the cheapest position',
@@ -388,6 +390,7 @@ export function generateAlertPresets(): AlertPreset[] {
       missing_requirements: [], created_at: null, updated_at: null, updated_by: null,
     },
   ];
+  return presets.map(p => ({ ...p, preset_key: p.rule_key }));
 }
 
 
