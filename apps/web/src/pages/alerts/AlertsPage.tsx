@@ -34,11 +34,10 @@ import AlertsTabs from './AlertsTabs';
 
 const PAGE_SIZE = 25;
 
-// Category nouns, not rule names — this is the Type filter's option list.
-// APPEND to it: the menu renders in Object.entries order. A rule_key missing
-// from here still shows its events (the row renders event.message, never
-// rule_name); it is simply unfilterable, which reads as a broken filter rather
-// than a missing map entry.
+// Category nouns for the BUILT-IN rules — friendlier in a filter menu than
+// their card titles. The menu itself is built from /alerts/rules so
+// user-created rules are filterable under their own names; this map only
+// relabels the five built-ins and is the fallback while that request loads.
 const RULE_LABELS: Record<string, string> = {
   undercut_position: 'Position changes',
   comp_price_move: 'Price moves',
@@ -46,6 +45,9 @@ const RULE_LABELS: Record<string, string> = {
   stops_disadvantage: 'Connections',
   service_gap: 'Days we are not selling',
 };
+
+const FALLBACK_TYPE_OPTIONS = Object.entries(RULE_LABELS)
+  .map(([key, label]) => ({ key, label }));
 
 export default function AlertsPage() {
   const [params, setParams] = useSearchParams();
@@ -72,6 +74,10 @@ export default function AlertsPage() {
   // why this is a pick-list and not free text: a typed partial silently
   // matches nothing.
   const [routeOptions, setRouteOptions] = useState<string[]>([]);
+  // The Type filter's options, from /alerts/rules (open to every tenant
+  // user): built-ins keep their category nouns, user-created rules appear
+  // under their own names and drop out again when deleted.
+  const [typeOptions, setTypeOptions] = useState(FALLBACK_TYPE_OPTIONS);
 
   const focusRef = useRef<HTMLDivElement | null>(null);
 
@@ -81,6 +87,16 @@ export default function AlertsPage() {
       .then(rs => { if (!cancelled) setRouteOptions(rs); })
       // No options is a degraded but working state — the dropdown still
       // accepts nothing, and the events list itself is unaffected.
+      .catch(() => {});
+    api.alerts.listPresets()
+      .then(rules => {
+        if (cancelled) return;
+        setTypeOptions(rules.map(r => ({
+          key: r.rule_key,
+          label: r.is_preset ? (RULE_LABELS[r.rule_key] ?? r.name) : r.name,
+        })));
+      })
+      // On failure the static built-in list stands — degraded, not broken.
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
@@ -211,8 +227,8 @@ export default function AlertsPage() {
             sx={{ minWidth: 170 }}
           >
             <MenuItem value="">All types</MenuItem>
-            {Object.entries(RULE_LABELS).map(([k, v]) => (
-              <MenuItem key={k} value={k}>{v}</MenuItem>
+            {typeOptions.map(o => (
+              <MenuItem key={o.key} value={o.key}>{o.label}</MenuItem>
             ))}
           </TextField>
 

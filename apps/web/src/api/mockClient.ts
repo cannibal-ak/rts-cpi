@@ -215,10 +215,44 @@ export const mockClient: CpiApiClient = {
     updatePreset: (ruleKey, body) => {
       const p = _mockPresets.find(x => x.rule_key === ruleKey);
       if (!p) return Promise.reject(new Error(`no preset ${ruleKey}`));
+      if (body.name !== undefined) {
+        if (p.is_preset) return Promise.reject(new Error('built-in rules cannot be renamed'));
+        p.name = body.name;
+      }
       if (body.is_active !== undefined) p.is_active = body.is_active;
       if (body.condition) p.condition = { ...p.condition, ...body.condition };
       p.updated_at = new Date().toISOString();
       return delay({ ...p });
+    },
+
+    createRule: (body) => {
+      const family = _mockPresets.find(
+        x => x.is_preset && x.rule_key === body.preset_key);
+      if (!family) return Promise.reject(new Error(`unknown rule type ${body.preset_key}`));
+      const instance: AlertPreset = {
+        ...family,
+        id: `mock-rule-${_mockPresets.length + 1}`,
+        rule_key: `${body.preset_key}__mock${_mockPresets.length + 1}`,
+        preset_key: body.preset_key,
+        is_preset: false,
+        name: body.name,
+        is_active: body.is_active ?? false,
+        condition: { ...family.condition, ...(body.condition ?? {}) },
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      _mockPresets.push(instance);
+      return delay({ ...instance });
+    },
+
+    deleteRule: (ruleKey) => {
+      const i = _mockPresets.findIndex(x => x.rule_key === ruleKey);
+      if (i < 0) return Promise.reject(new Error(`no rule ${ruleKey}`));
+      if (_mockPresets[i].is_preset) {
+        return Promise.reject(new Error('built-in rules cannot be deleted'));
+      }
+      _mockPresets.splice(i, 1);
+      return delay(undefined);
     },
 
     previewPreset: (ruleKey) => delay({

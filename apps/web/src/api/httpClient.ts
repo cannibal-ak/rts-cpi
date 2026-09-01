@@ -6,6 +6,7 @@ import type { CpiApiClient, SnapshotQuery, JobQuery, ChartFormDataKeyResponse, D
 import type {
   Paginated, AirlineSnapshot, VelocitySnapshot, CflSnapshot, FilterMetadata,
   AlertRule, AlertEvent, AlertSummary, AlertPreset, AlertPresetUpdate,
+  AlertPresetCreate,
   AlertPreview, AlertRunSummary, AlertEventQuery, MarkReadResult,
   TenantFeature, DataFreshness,
   SftpConnection, SftpConnectionCreate, SftpConnectionUpdate,
@@ -466,6 +467,10 @@ export const httpClient: CpiApiClient = {
       patch<AlertPreset>(`/api/v1/alerts/rules/${encodeURIComponent(ruleKey)}`, body),
     previewPreset: (ruleKey: string, body: AlertPresetUpdate) =>
       post<AlertPreview>(`/api/v1/alerts/rules/${encodeURIComponent(ruleKey)}/preview`, body),
+    createRule: (body: AlertPresetCreate) =>
+      post<AlertPreset>('/api/v1/alerts/rules', body),
+    deleteRule: (ruleKey: string) =>
+      del<void>(`/api/v1/alerts/rules/${encodeURIComponent(ruleKey)}`),
     run: (dryRun = false) =>
       post<AlertRunSummary>(`/api/v1/alerts/run?dry_run=${dryRun}`, {}),
   },
