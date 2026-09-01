@@ -17,8 +17,8 @@
 import type { ModuleCode, UserRole } from '../types';
 import type { TenantSession } from '../types';
 
-/** Tenants with the alerts UI switched on: DreamAir, Liat Air, WinAir, interCaribbean, Precision Air. */
-export const ALERTS_MODULES: ModuleCode[] = ['airline_da', 'airline_5l', 'airline_wm', 'airline_jy', 'airline_pw'];
+/** Tenants with the alerts UI switched on: DreamAir, Liat Air, WinAir, interCaribbean, Precision Air, Sky Airways (Altitude demo). */
+export const ALERTS_MODULES: ModuleCode[] = ['airline_da', 'airline_5l', 'airline_wm', 'airline_jy', 'airline_pw', 'airline_alt'];
 
 export const ALERTS_VIEW_ROLES: UserRole[] = ['TENANT_ADMIN', 'TENANT_USER'];
 export const ALERTS_ADMIN_ROLES: UserRole[] = ['TENANT_ADMIN'];
