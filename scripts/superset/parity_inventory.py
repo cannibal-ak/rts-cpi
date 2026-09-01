@@ -234,8 +234,13 @@ def main():
                 "query_context_md5": md5(s["query_context"]),
                 "in_layout": in_layout,
                 "tab_label": tab_label,
+                "layout_header": layout_name,
+                # meta.sliceName is the DISPLAYED header and legitimately carries
+                # view-type suffixes ("<name> — Line/Bar/Table"); stale means the
+                # header no longer starts with the slice's actual name.
                 "layout_slice_name_stale": bool(
-                    in_layout and layout_name and layout_name != s["slice_name"]),
+                    in_layout and layout_name
+                    and not layout_name.startswith(s["slice_name"])),
             })
         d["slices"] = slices
 
