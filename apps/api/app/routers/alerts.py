@@ -6,12 +6,13 @@
     POST   /api/v1/alerts/events/read          mark specific events read
     POST   /api/v1/alerts/events/unread        mark them unread again
     POST   /api/v1/alerts/events/read-all      mark everything read
-    GET    /api/v1/alerts/rules                presets + current settings
+    GET    /api/v1/alerts/rules                catalogue presets + user instances
     GET    /api/v1/alerts/rules/{rule_key}
     PATCH  /api/v1/alerts/rules/{rule_key}     TENANT_ADMIN
     POST   /api/v1/alerts/rules/{rule_key}/preview   TENANT_ADMIN
+    POST   /api/v1/alerts/rules                TENANT_ADMIN — create an instance
+    DELETE /api/v1/alerts/rules/{rule_key}     TENANT_ADMIN — instances only
     POST   /api/v1/alerts/run                  TENANT_ADMIN
-    POST   /api/v1/alerts/rules                DEPRECATED free-form create
 
 AUTH MODEL. Reading and marking-read are personal actions, open to any
 authenticated user of the tenant. Editing a rule changes what every user in the
@@ -401,7 +402,8 @@ def _rule_out(row, preset, options: dict[str, list[str]] | None = None) -> Alert
             if src and t["options"] is None:
                 t["options"] = options.get(src, [])
     return AlertRuleOut(
-        id=row.id, rule_key=row.rule_key, name=row.name,
+        id=row.id, rule_key=row.rule_key, preset_key=row.preset_key,
+        name=row.name,
         description=row.description, domain=row.domain, rule_type=row.rule_type,
         is_active=row.is_active, is_preset=row.is_preset,
         severity_default=row.severity_default, condition=condition,
@@ -413,9 +415,9 @@ def _rule_out(row, preset, options: dict[str, list[str]] | None = None) -> Alert
 
 
 _RULE_SELECT = """
-    SELECT r.id, r.rule_key, r.name, r.description, r.domain, r.rule_type,
-           r.is_active, r.is_preset, r.severity_default, r.condition_json,
-           r.created_at, r.updated_at, u.email AS updated_by
+    SELECT r.id, r.rule_key, r.preset_key, r.name, r.description, r.domain,
+           r.rule_type, r.is_active, r.is_preset, r.severity_default,
+           r.condition_json, r.created_at, r.updated_at, u.email AS updated_by
       FROM alert_rule r
       LEFT JOIN app_user u ON u.id = r.updated_by_user_id
 """
@@ -442,10 +444,11 @@ def _ensure_presets(db: Session, tenant_id: str) -> None:
                 INSERT INTO alert_rule (
                     tenant_id, name, description, domain, rule_type,
                     condition_json, is_active, owner, rule_key, is_preset,
-                    severity_default
+                    preset_key, severity_default
                 ) VALUES (
                     CAST(:t AS uuid), :name, :desc, :domain, :rtype,
-                    CAST(:cond AS jsonb), :active, 'system', :key, true, :sev
+                    CAST(:cond AS jsonb), :active, 'system', :key, true,
+                    :key, :sev
                 )
                 ON CONFLICT (tenant_id, rule_key) DO NOTHING
             """),
@@ -465,10 +468,17 @@ def list_rules(
 ):
     _ensure_presets(db, tenant_id)
     rows = db.execute(text(f"{_RULE_SELECT} ORDER BY r.is_preset DESC, r.name")).all()
+    # Presets first in catalogue order — the shape existing tenants already
+    # see — then user instances grouped under the same family order, oldest
+    # first, so a new rule lands in a predictable place.
     order = {k: i for i, k in enumerate(PRESET_ORDER)}
-    rows = sorted(rows, key=lambda r: order.get(r.rule_key, 99))
+    rows = sorted(rows, key=lambda r: (
+        0 if r.is_preset else 1,
+        order.get(r.preset_key or r.rule_key, 99),
+        r.created_at.timestamp() if r.created_at else 0.0,
+    ))
     options = _available_options(db, user_identity) if is_alertable(user_identity) else None
-    return [_rule_out(r, get_preset(r.rule_key), options) for r in rows]
+    return [_rule_out(r, get_preset(r.preset_key), options) for r in rows]
 
 
 @router.get("/rules/{rule_key}", response_model=AlertRuleOut)
@@ -484,7 +494,7 @@ def get_rule(
     if row is None:
         raise HTTPException(404, f"no rule {rule_key}")
     options = _available_options(db, user_identity) if is_alertable(user_identity) else None
-    return _rule_out(row, get_preset(row.rule_key), options)
+    return _rule_out(row, get_preset(row.preset_key), options)
 
 
 @router.patch("/rules/{rule_key}", response_model=AlertRuleOut,
@@ -504,9 +514,21 @@ def update_rule(
                      {"k": rule_key}).first()
     if row is None:
         raise HTTPException(404, f"no rule {rule_key}")
-    preset = get_preset(rule_key)
+    preset = get_preset(row.preset_key)
     if preset is None:
-        raise HTTPException(400, f"{rule_key} is not a preset rule and cannot be edited")
+        # Legacy free-form rows: no catalogue type, nothing to validate against.
+        raise HTTPException(400, f"{rule_key} has no catalogue rule type and cannot be edited")
+
+    name = None
+    if body.name is not None:
+        if row.is_preset:
+            raise HTTPException(400, "built-in rules cannot be renamed")
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(422, detail={
+                "message": "invalid name",
+                "errors": [{"field": "name", "error": "name cannot be blank"}],
+            })
 
     stored = row.condition_json if isinstance(row.condition_json, dict) else {}
     merged = {**stored, **(body.condition or {})}
@@ -540,17 +562,18 @@ def update_rule(
             UPDATE alert_rule
                SET condition_json = CAST(:cond AS jsonb),
                    is_active = :active,
+                   name = COALESCE(:name, name),
                    updated_at = now(),
                    updated_by_user_id = CAST(:uid AS uuid)
              WHERE rule_key = :k
         """),
-        {"cond": json.dumps(condition), "active": is_active,
+        {"cond": json.dumps(condition), "active": is_active, "name": name,
          "uid": _user_id(current_user), "k": rule_key},
     )
     _commit(db, tenant_id)
     logger.info(
-        "ALERT_RULE_UPDATED actor=%s rule_key=%s active=%s changed=%s",
-        current_user.get("email"), rule_key, is_active,
+        "ALERT_RULE_UPDATED actor=%s rule_key=%s active=%s renamed=%s changed=%s",
+        current_user.get("email"), rule_key, is_active, name is not None,
         sorted((body.condition or {}).keys()),
     )
     row = db.execute(text(f"{_RULE_SELECT} WHERE r.rule_key = :k"),
@@ -572,14 +595,18 @@ def preview_rule(
     user_identity: str = Depends(get_user_identity),
 ):
     """What this condition WOULD fire on the newest capture pair. Writes nothing."""
-    preset = get_preset(rule_key)
-    if preset is None:
-        raise HTTPException(404, f"no preset {rule_key}")
     if not is_alertable(user_identity):
         raise HTTPException(400, f"alerting is not available for {user_identity}")
 
+    # Resolve the row FIRST: for an instance the family comes from its
+    # preset_key, not the URL. A bare family key with no row yet (a preset the
+    # self-heal has not materialised) still previews against its defaults.
     row = db.execute(text(f"{_RULE_SELECT} WHERE r.rule_key = :k"),
                      {"k": rule_key}).first()
+    preset = get_preset(row.preset_key) if row is not None else get_preset(rule_key)
+    if preset is None:
+        raise HTTPException(404, f"no preset {rule_key}")
+
     stored = (row.condition_json if row is not None
               and isinstance(row.condition_json, dict) else preset.defaults())
     try:
@@ -592,7 +619,9 @@ def preview_rule(
     summary = evaluator.preview_rule(
         db, tenant_id, user_identity, rule_key, condition,
         rule_id=str(row.id) if row else "00000000-0000-0000-0000-000000000000",
-        rule_name=preset.name, severity=preset.severity_default,
+        rule_name=row.name if row is not None else preset.name,
+        severity=preset.severity_default,
+        preset_key=row.preset_key if row is not None else rule_key,
     )
     db.rollback()
     return AlertPreviewOut(
@@ -634,41 +663,152 @@ def run_now(
 
 
 # ─────────────────────────────────────────────────────────────
-# Deprecated
+# Create / delete user rule instances
 # ─────────────────────────────────────────────────────────────
 
+# Guards the 15-minute sweep: every active instance is a full handler pass over
+# the capture pair, so an unbounded list would let one tenant slow everyone's
+# evaluation tick.
+MAX_INSTANCES = 20
+
+
 @router.post("/rules", response_model=AlertRuleOut, status_code=201,
-             deprecated=True, dependencies=[_ADMIN])
+             dependencies=[_ADMIN])
 def create_rule(
     body: AlertRuleCreate,
     db: Session = Depends(get_tenant_db),
     tenant_id: str = Depends(get_tenant_id),
+    current_user: dict = Depends(get_current_user),
+    user_identity: str = Depends(get_user_identity),
 ):
-    """DEPRECATED. Free-form rules carry condition JSON the engine has no
-    definition for, so the evaluator ignores them (is_preset=false). Use
-    PATCH /rules/{rule_key} to configure a preset instead.
+    """Create a user-owned INSTANCE of a catalogue rule type.
+
+    The instance runs the same evaluator function as its family preset under
+    its own minted rule_key, so its events, dedupe space and edge-trigger
+    ledger stay fully separate from the preset's. Free-form conditions remain
+    impossible: the merged condition is validated by the family's model with
+    extra="forbid", so the evaluator still only ever runs conditions it
+    defined itself.
     """
-    import json
     import uuid as _uuid
 
-    rule_key = f"custom_{_uuid.uuid4().hex[:8]}"
-    condition = body.condition_json if isinstance(body.condition_json, dict) else {}
-    db.execute(
-        text("""
-            INSERT INTO alert_rule (
-                tenant_id, name, domain, rule_type, condition_json,
-                is_active, owner, rule_key, is_preset, severity_default
-            ) VALUES (
-                CAST(:t AS uuid), :name, :domain, :rtype, CAST(:cond AS jsonb),
-                :active, :owner, :key, false, 'info'
-            )
-        """),
-        {"t": tenant_id, "name": body.name, "domain": body.domain,
-         "rtype": body.rule_type, "cond": json.dumps(condition),
-         "active": body.is_active, "owner": body.owner or "system",
-         "key": rule_key},
-    )
+    preset = get_preset(body.preset_key)
+    if preset is None:
+        raise HTTPException(422, detail={
+            "message": f"unknown rule type {body.preset_key}",
+            "errors": [{"field": "preset_key", "error": "unknown rule type"}],
+        })
+
+    count = db.execute(text(
+        "SELECT count(*) FROM alert_rule WHERE is_preset = false AND preset_key IS NOT NULL"
+    )).scalar() or 0
+    if count >= MAX_INSTANCES:
+        raise HTTPException(422, detail={
+            "message": (f"this tenant already has {MAX_INSTANCES} custom rules; "
+                        "delete one before adding another"),
+        })
+
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(422, detail={
+            "message": "invalid name",
+            "errors": [{"field": "name", "error": "name cannot be blank"}],
+        })
+
+    try:
+        condition = preset.validate_condition(
+            {**preset.defaults(), **(body.condition or {})})
+    except ValidationError as exc:
+        raise HTTPException(422, detail={
+            "message": "invalid condition",
+            "errors": [
+                {"field": ".".join(str(p) for p in e["loc"]), "error": e["msg"]}
+                for e in exc.errors()
+            ],
+        })
+
+    if body.is_active:
+        missing = missing_requirements(preset, condition)
+        if missing:
+            raise HTTPException(422, detail={
+                "message": (
+                    f"{preset.name} needs {', '.join(missing)} before it can be "
+                    f"switched on - without it the rule would match every route."
+                ),
+                "missing": missing,
+            })
+
+    for _ in range(3):
+        rule_key = f"{body.preset_key}__{_uuid.uuid4().hex[:8]}"
+        inserted = db.execute(
+            text("""
+                INSERT INTO alert_rule (
+                    tenant_id, name, description, domain, rule_type,
+                    condition_json, is_active, owner, rule_key, is_preset,
+                    preset_key, severity_default, updated_by_user_id
+                ) VALUES (
+                    CAST(:t AS uuid), :name, :desc, :domain, :rtype,
+                    CAST(:cond AS jsonb), :active, :owner, :key, false,
+                    :preset, :sev, CAST(:uid AS uuid)
+                )
+                ON CONFLICT (tenant_id, rule_key) DO NOTHING
+                RETURNING id
+            """),
+            {"t": tenant_id, "name": name, "desc": preset.description,
+             "domain": preset.domain, "rtype": preset.rule_type,
+             "cond": json.dumps(condition), "active": body.is_active,
+             "owner": current_user.get("email") or "user",
+             "key": rule_key, "preset": body.preset_key,
+             "sev": preset.severity_default, "uid": _user_id(current_user)},
+        ).first()
+        if inserted is not None:
+            break
+    else:
+        raise HTTPException(500, "could not mint a unique rule key")
+
     _commit(db, tenant_id)
+    logger.info(
+        "ALERT_RULE_CREATED actor=%s preset_key=%s rule_key=%s active=%s",
+        current_user.get("email"), body.preset_key, rule_key, body.is_active,
+    )
     row = db.execute(text(f"{_RULE_SELECT} WHERE r.rule_key = :k"),
                      {"k": rule_key}).first()
-    return _rule_out(row, None)
+    options = _available_options(db, user_identity) if is_alertable(user_identity) else None
+    return _rule_out(row, preset, options)
+
+
+@router.delete("/rules/{rule_key}", status_code=204, dependencies=[_ADMIN])
+def delete_rule(
+    rule_key: str,
+    db: Session = Depends(get_tenant_db),
+    tenant_id: str = Depends(get_tenant_id),
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete a user-created rule instance, and with it its alert history.
+
+    alert_event.rule_id cascades, and for the edge-triggered families the event
+    rows ARE the state ledger — which is exactly why this is allowed only for
+    instances: their rule_keys are minted once and never reused, so a deleted
+    ledger can never be half-resurrected under the same key. A sweep evaluating
+    this tenant concurrently may FK-abort once; the next tick is idempotent.
+    """
+    row = db.execute(
+        text("SELECT id, is_preset, name FROM alert_rule WHERE rule_key = :k"),
+        {"k": rule_key},
+    ).first()
+    if row is None:
+        raise HTTPException(404, f"no rule {rule_key}")
+    if row.is_preset:
+        raise HTTPException(
+            400, "built-in rules cannot be deleted; switch them off instead")
+
+    events = db.execute(
+        text("SELECT count(*) FROM alert_event WHERE rule_id = :rid"),
+        {"rid": str(row.id)},
+    ).scalar() or 0
+    db.execute(text("DELETE FROM alert_rule WHERE rule_key = :k"), {"k": rule_key})
+    _commit(db, tenant_id)
+    logger.info(
+        "ALERT_RULE_DELETED actor=%s rule_key=%s name=%r events_cascaded=%s",
+        current_user.get("email"), rule_key, row.name, events,
+    )

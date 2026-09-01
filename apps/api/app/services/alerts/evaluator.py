@@ -96,38 +96,65 @@ SAMPLE_CAP = 20
 class LoadedRule:
     id: str
     rule_key: str
+    # The catalogue family this rule evaluates as. Equal to rule_key for the
+    # tenant's canonical preset rows; the family key for user-created instances.
+    preset_key: str
     name: str
     severity: str
     condition: dict[str, Any]
+    is_instance: bool = False
+
+    def scoped(self, key: str) -> str:
+        """Namespace a scope/dedupe key per rule instance.
+
+        MUST be identity for preset rows — their historical events carry the
+        bare keys, and changing them would re-fire every alert once. Instances
+        get their rule_key prefixed, which keeps their dedupe space and their
+        edge-trigger state ledger (last_emitted_state probes scope_key) fully
+        separate from the preset's and from each other's. Apply this where the
+        key STRING is built, never inside _emit: the ledger handlers probe
+        last_emitted_state with the same local scope_key they later write, and
+        prefixing only the write would make instances read the preset's ledger.
+        """
+        return f"{self.rule_key}|{key}" if self.is_instance else key
 
 
 def load_active_rules(db: Session, tenant_id: str, rule_keys: list[str] | None = None) -> list[LoadedRule]:
-    """Active preset rules for a tenant, in evaluation order.
+    """Active catalogue rules for a tenant — presets and user-created instances
+    of them — in evaluation order.
 
-    Non-preset rules are ignored on purpose: they carry free-form condition JSON
-    the engine has no definition for, so running them would mean guessing.
+    Rows with preset_key NULL (the old free-form POST /rules rules) are ignored
+    on purpose: they carry condition JSON the engine has no definition for, so
+    running them would mean guessing. `rule_keys` filters by either the row's
+    own key or its family, so callers can say "just this rule" or "this family".
     """
     rows = db.execute(
         text("""
-            SELECT id, rule_key, name, severity_default, condition_json
+            SELECT id, rule_key, preset_key, is_preset, name,
+                   severity_default, condition_json, created_at
               FROM alert_rule
              WHERE tenant_id = CAST(:tid AS uuid)
                AND is_active
-               AND is_preset
+               AND preset_key IS NOT NULL
         """),
         {"tid": tenant_id},
     ).all()
 
-    loaded = {
-        r.rule_key: LoadedRule(
-            id=str(r.id), rule_key=r.rule_key, name=r.name,
-            severity=r.severity_default,
+    order = {k: i for i, k in enumerate(PRESET_ORDER)}
+    loaded = [
+        LoadedRule(
+            id=str(r.id), rule_key=r.rule_key, preset_key=r.preset_key,
+            name=r.name, severity=r.severity_default,
             condition=r.condition_json if isinstance(r.condition_json, dict) else {},
+            is_instance=not r.is_preset,
         )
-        for r in rows
-        if r.rule_key in PRESETS and (rule_keys is None or r.rule_key in rule_keys)
-    }
-    return [loaded[k] for k in PRESET_ORDER if k in loaded]
+        for r in sorted(rows, key=lambda r: (order.get(r.preset_key, 99),
+                                             r.is_preset is not True,
+                                             r.created_at or datetime.min.replace(tzinfo=timezone.utc)))
+        if r.preset_key in PRESETS
+        and (rule_keys is None or r.rule_key in rule_keys or r.preset_key in rule_keys)
+    ]
+    return loaded
 
 
 # ─────────────────────────────────────────────────────────────
@@ -439,8 +466,8 @@ def _eval_price_move(
         _emit(
             db, summary, dry_run,
             tenant_id=tenant_id, rule=rule, severity=rule.severity,
-            scope_key=f"move|{route}|{comp}|{window}",
-            dedupe_key=f"move|{route}|{comp}|{window}|{cur.cap_date}",
+            scope_key=rule.scoped(f"move|{route}|{comp}|{window}"),
+            dedupe_key=rule.scoped(f"move|{route}|{comp}|{window}|{cur.cap_date}"),
             message=message, payload=payload,
             observed_at=cur.cap_date, prev_observed_at=prev.cap_date, mode=mode,
         )
@@ -491,7 +518,7 @@ def _eval_position(
         rank, cheaper, best_al, best_fare = _rank_for(
             own, cur.competitors, route, window, min_gap)
         state = "cheapest" if rank <= max_rank else "undercut"
-        scope_key = f"rank|{route}|{window}"
+        scope_key = rule.scoped(f"rank|{route}|{window}")
 
         previous = q.last_emitted_state(db, tenant_id, scope_key, cur.cap_date)
         if previous == state:
@@ -545,7 +572,7 @@ def _eval_position(
             tenant_id=tenant_id, rule=rule, severity=severity,
             delivery_status="suppressed" if recovery_muted else "delivered",
             scope_key=scope_key,
-            dedupe_key=f"rank|{route}|{window}|{cur.cap_date}|{state}",
+            dedupe_key=rule.scoped(f"rank|{route}|{window}|{cur.cap_date}|{state}"),
             message=message, payload=payload,
             observed_at=cur.cap_date, prev_observed_at=prev.cap_date, mode=mode,
         )
@@ -606,8 +633,8 @@ def _eval_price_threshold(
         _emit(
             db, summary, dry_run,
             tenant_id=tenant_id, rule=rule, severity=rule.severity,
-            scope_key=f"cross|{route}|{comp}|{window}",
-            dedupe_key=f"cross|{route}|{comp}|{window}|{cur.cap_date}|{cur_state}",
+            scope_key=rule.scoped(f"cross|{route}|{comp}|{window}"),
+            dedupe_key=rule.scoped(f"cross|{route}|{comp}|{window}|{cur.cap_date}|{cur_state}"),
             message=message, payload=payload,
             observed_at=cur.cap_date, prev_observed_at=prev.cap_date, mode=mode,
         )
@@ -680,7 +707,7 @@ def _eval_stops(
         summary.groups_evaluated += 1
         needed = _ceil_share(comparable, cond["min_day_share"])
         state = "behind" if behind >= needed else "matched"
-        scope_key = f"stops|{route}|{trip}|{window}"
+        scope_key = rule.scoped(f"stops|{route}|{trip}|{window}")
 
         previous = q.last_emitted_state(db, tenant_id, scope_key, cur.cap_date)
         if previous == state:
@@ -733,7 +760,7 @@ def _eval_stops(
             tenant_id=tenant_id, rule=rule, severity=severity,
             delivery_status="suppressed" if recovery_muted else "delivered",
             scope_key=scope_key,
-            dedupe_key=f"stops|{route}|{trip}|{window}|{cur.cap_date}|{state}",
+            dedupe_key=rule.scoped(f"stops|{route}|{trip}|{window}|{cur.cap_date}|{state}"),
             message=message, payload=payload,
             observed_at=cur.cap_date, prev_observed_at=prev.cap_date, mode=mode,
         )
@@ -832,7 +859,7 @@ def _eval_service_gap(
             # nothing — JY flips 66 cells over four captures.
             continue
 
-        scope_key = f"svc|{route}|{trip}|{window}"
+        scope_key = rule.scoped(f"svc|{route}|{trip}|{window}")
         previous = q.last_emitted_state(db, tenant_id, scope_key, cur.cap_date)
         if previous == state:
             continue
@@ -897,7 +924,7 @@ def _eval_service_gap(
             tenant_id=tenant_id, rule=rule, severity=severity,
             delivery_status="suppressed" if recovery_muted else "delivered",
             scope_key=scope_key,
-            dedupe_key=f"svc|{route}|{trip}|{window}|{cur.cap_date}|{state}",
+            dedupe_key=rule.scoped(f"svc|{route}|{trip}|{window}|{cur.cap_date}|{state}"),
             message=message, payload=payload,
             observed_at=cur.cap_date, prev_observed_at=prev.cap_date, mode=mode,
         )
@@ -973,10 +1000,10 @@ def evaluate_pair(
         return summary
 
     cur, prev = _load_pair(db, tenant_code, cur_cap, prev_cap,
-                           [r.rule_key for r in rules])
+                           [r.preset_key for r in rules])
 
     for rule in rules:
-        handler = _DISPATCH.get(rule.rule_key)
+        handler = _DISPATCH.get(rule.preset_key)
         if handler is None:
             continue
         handler(db, tenant_id, rule, cur, prev, summary, mode, dry_run)
@@ -996,13 +1023,18 @@ def preview_rule(
     rule_id: str,
     rule_name: str,
     severity: str,
+    preset_key: str | None = None,
 ) -> EvalSummary:
     """What an UNSAVED condition would fire on the newest capture pair.
 
     The honest form of "test fire": it shows real rows that really match, rather
     than injecting a synthetic event to prove the pipe is connected. Writes
-    nothing — the caller rolls back regardless.
+    nothing — the caller rolls back regardless. `preset_key` names the family to
+    evaluate as when previewing an instance; it defaults to rule_key so preset
+    previews are unchanged. Instances preview against their own namespaced
+    ledger, exactly as a live run would read it.
     """
+    preset_key = preset_key or rule_key
     summary = EvalSummary(tenant_code=tenant_code, mode="preview")
     cur_cap = q.latest_cap_date(db, tenant_code)
     if cur_cap is None:
@@ -1014,14 +1046,15 @@ def preview_rule(
         return summary
 
     summary.cap_date, summary.prev_cap_date = cur_cap, prev_cap
-    handler = _DISPATCH.get(rule_key)
+    handler = _DISPATCH.get(preset_key)
     if handler is None:
-        summary.note = f"unknown rule {rule_key}"
+        summary.note = f"unknown rule {preset_key}"
         return summary
 
-    rule = LoadedRule(id=rule_id, rule_key=rule_key, name=rule_name,
-                      severity=severity, condition=condition)
-    cur, prev = _load_pair(db, tenant_code, cur_cap, prev_cap, [rule_key])
+    rule = LoadedRule(id=rule_id, rule_key=rule_key, preset_key=preset_key,
+                      name=rule_name, severity=severity, condition=condition,
+                      is_instance=(rule_key != preset_key))
+    cur, prev = _load_pair(db, tenant_code, cur_cap, prev_cap, [preset_key])
     handler(db, tenant_id, rule, cur, prev, summary, "preview", True)
     summary.rules_evaluated = [rule_key]
     return summary

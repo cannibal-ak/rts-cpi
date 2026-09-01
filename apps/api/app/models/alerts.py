@@ -30,9 +30,12 @@ class AlertRule(Base):
     rule_type = Column(String(16), nullable=False)
     condition_json = Column(JSONB, nullable=False, server_default="{}")
     is_active = Column(Boolean, nullable=False, server_default="true")
-    # False for anything created through the deprecated free-form POST /rules.
-    # The evaluator only ever runs presets.
+    # False for user-created rows: catalogue-preset INSTANCES (preset_key set)
+    # and the old free-form POST /rules rules (preset_key NULL).
     is_preset = Column(Boolean, nullable=False, server_default="true")
+    # Which catalogue family this rule evaluates as. Equal to rule_key on
+    # preset rows, the family key on instances. NULL = evaluator-invisible.
+    preset_key = Column(String(64), nullable=True)
     severity_default = Column(String(16), nullable=False, server_default="warning")
     owner = Column(String(128), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

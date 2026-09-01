@@ -53,8 +53,8 @@ def main():
     db = SessionLocal()
     try:
         rules = db.execute(text(
-            "SELECT t.slug AS tenant, r.rule_key, r.is_active, r.is_preset, "
-            "       r.severity_default, r.name, r.condition_json, "
+            "SELECT t.slug AS tenant, r.rule_key, r.preset_key, r.is_active, "
+            "       r.is_preset, r.severity_default, r.name, r.condition_json, "
             "       r.updated_at::text AS updated_at "
             "FROM alert_rule r JOIN tenant t ON t.id = r.tenant_id "
             "WHERE t.slug = ANY(:slugs) ORDER BY t.slug, r.rule_key"
@@ -68,12 +68,18 @@ def main():
     finally:
         db.close()
 
-    tenants = {slug: {"rules": {}, "alerts_feature": None} for slug in TENANT_SLUGS}
+    # "rules" holds preset rows only, so the cross-tenant structure diff stays
+    # clean; user-created instances are per-tenant by nature and land under
+    # "instances", visible to the audit without registering as drift.
+    tenants = {slug: {"rules": {}, "instances": {}, "alerts_feature": None}
+               for slug in TENANT_SLUGS}
     for row in rules:
         structure, tuned = split_condition(row["condition_json"])
-        tenants[row["tenant"]]["rules"][row["rule_key"]] = {
+        bucket = "rules" if row["is_preset"] else "instances"
+        tenants[row["tenant"]][bucket][row["rule_key"]] = {
             "is_active": row["is_active"],
             "is_preset": row["is_preset"],
+            "preset_key": row["preset_key"],
             "severity_default": row["severity_default"],
             "name": row["name"],
             "condition_structure": structure,
