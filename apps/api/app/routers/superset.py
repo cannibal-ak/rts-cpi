@@ -135,16 +135,20 @@ DASHBOARDS = {
         "embedded_uuid": "900e298e-d8f9-40c0-9a72-b10517d7a8b9",
         "domain": "airline",
         "tenant": "PW",
-        # Precision Air joined the WinAir-family global filter bar 2026-08-27.
-        # Dashboard 3 defines eight filter_select filters; these four are
-        # suppressed, keeping trip_type, route, flt_num and days_left in the
-        # bar. PW's host-carrier column is 'carrier' (NOT 'airline'), and
-        # dashboard 3 has no fare_family / stops / price_status /
-        # recommendation / lowest_competitor filters — listing any of those
-        # would trip the stale-entry log in get_dashboard_filter_config.
+        # Precision Air joined the WinAir-family global filter bar 2026-08-27,
+        # and dashboard 3 was rebuilt to the canonical WinAir shape 2026-09-01
+        # (parity_pw_rebuild.py; docs/tenant-parity-spec.md). It now defines
+        # the same twelve filter_select filters as dashboards 6/7/8 — the
+        # canonical seven are suppressed, keeping Route (O&D), Flight Number,
+        # Days Left, Stops and Trip Type in the bar. The old 'carrier' column
+        # went with the old filter config; PW's rebuilt fares dataset aliases
+        # the host carrier to 'airline' like every other tenant's.
         "hidden_filter_columns": {
-            "carrier",              # Carrier
+            "airline",              # Airline
             "dtd_bucket",           # Days to Departure
+            "price_status",         # Price Position
+            "recommendation",       # Pricing Action
+            "lowest_competitor",    # Cheapest Competitor
             "eqp",                  # Aircraft
             "legseg_type",          # Leg/Segment
         },
