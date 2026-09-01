@@ -6,7 +6,7 @@ stays even though delivery is in-app only today; it is the seam email plugs into
 """
 
 from datetime import date, datetime
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -74,6 +74,10 @@ class TunableFieldOut(BaseModel):
 class AlertRuleOut(BaseModel):
     id: UUID
     rule_key: str
+    # The catalogue family this rule evaluates as: rule_key itself on preset
+    # rows, the family key on user-created instances, None on legacy free-form
+    # rows the evaluator ignores.
+    preset_key: Optional[str] = None
     name: str
     description: Optional[str] = None
     domain: str
@@ -100,16 +104,20 @@ class AlertRuleUpdate(BaseModel):
     # validated against the preset's model with extra="forbid", so an unknown
     # or non-tunable key is a 422 naming the field rather than a silent no-op.
     condition: Optional[dict[str, Any]] = None
+    # Instances only — renaming a preset would desync it from the catalogue
+    # and the cross-env parity report, so the router refuses it with a 400.
+    name: Optional[str] = Field(None, min_length=1, max_length=128)
 
 
-# Retained for the deprecated free-form create path.
 class AlertRuleCreate(BaseModel):
-    name: str
-    domain: str
-    rule_type: str = "threshold"
-    condition_json: Union[dict, str] = {}
-    is_active: bool = True
-    owner: Optional[str] = "system"
+    """A user-created INSTANCE of a catalogue rule type."""
+    preset_key: str
+    name: str = Field(min_length=1, max_length=128)
+    # Partial — merged over the family's defaults, then validated whole.
+    condition: Optional[dict[str, Any]] = None
+    # Off by default: a new rule should be tuned (or previewed) before its
+    # first sweep, not fire on whatever the defaults happen to match.
+    is_active: bool = False
 
 
 # ── Evaluation ───────────────────────────────────────────────

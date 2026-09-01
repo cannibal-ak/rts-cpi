@@ -1,10 +1,11 @@
 """The preset rule catalogue — the single source of truth for what a user may tune.
 
-Users do not author rules here; they switch presets on and off and adjust a
-handful of numbers. That constraint is what makes the evaluator safe: it only
-ever runs conditions it defined itself, so there is no free-form JSON to
-interpret and no way for a client to describe something the engine cannot
-compute.
+Users do not author rule TYPES here; they switch presets on and off, adjust a
+handful of numbers, and may create additional INSTANCES of these same families
+(rows with is_preset=false and preset_key naming the family). That constraint
+is what makes the evaluator safe: it only ever runs conditions it defined
+itself, so there is no free-form JSON to interpret and no way for a client to
+describe something the engine cannot compute.
 
 Each preset declares its `tunables`. The API validates a PATCH by merging the
 submitted keys over the stored condition and validating the MERGED WHOLE against
