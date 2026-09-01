@@ -13,11 +13,15 @@ interface AirlineCpiPageProps {
   tenantCode: 'JY' | 'PW' | 'ALT' | 'WM' | 'DA' | '5L';
 }
 
+// One pattern for every tenant (parity spec: docs/tenant-parity-spec.md).
+// WM's old odd-one-out label 'Airline CPI Data' was standardized 2026-09-01.
 const TENANT_LABELS: Record<string, string> = {
   JY: 'Airline CPI – JY',
   PW: 'Airline CPI – PW',
   ALT: 'Airline CPI – SKY',
-  WM: 'Airline CPI Data',
+  WM: 'Airline CPI – WM',
+  DA: 'Airline CPI – DA',
+  '5L': 'Airline CPI – 5L',
 };
 
 export default function AirlineCpiPage({ tenantCode }: AirlineCpiPageProps) {

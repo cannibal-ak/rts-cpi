@@ -109,3 +109,7 @@ export const FILTER_ERROR_INK = '#9A2A22';
 export const FILTER_ERROR_BG = 'rgba(154,42,34,0.09)';
 /** Unfilled part of a range slider. */
 export const FILTER_SLIDER_RAIL = 'rgba(15,42,64,0.28)';
+
+/** Visible-filter count after suppression — JY additionally shows the
+ *  data-driven Fare Family filter (parity-spec exception), hence six. */
+export const FILTER_SKELETON_COUNT: number = 6;

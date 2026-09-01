@@ -82,7 +82,7 @@ export default function WinairTopFilterBar({
   const {
     BANNER_BG, BANNER_HEADER_BG, FILTER_ACCENT, FILTER_BG, FILTER_BORDER, FILTER_DISABLED_BG,
     FILTER_DISABLED_INK, FILTER_ERROR_INK, FILTER_HOVER_BG, FILTER_INK, FILTER_LABEL_INK,
-    FILTER_MUTED_INK, FILTER_SKELETON, FILTER_SKELETON_TEXT,
+    FILTER_MUTED_INK, FILTER_SKELETON, FILTER_SKELETON_COUNT, FILTER_SKELETON_TEXT,
   } = useBrandedChrome();
 
   // Count only what is on screen: a stale selection for a filter this dashboard
@@ -219,9 +219,9 @@ export default function WinairTopFilterBar({
           alignItems: 'end',
         }}
       >
-        {/* Four, matching WM's filter count after suppression — a skeleton
-            count that overshoots reflows the grid on every load. */}
-        {filtersLoading && [0, 1, 2, 3].map(i => (
+        {/* The tenant's own visible-filter count (theme token) — a skeleton
+            count that misses reflows the grid on every load. */}
+        {filtersLoading && Array.from({ length: FILTER_SKELETON_COUNT }, (_, i) => i).map(i => (
           <Box key={i}>
             <Skeleton
               variant="text"
