@@ -7,9 +7,11 @@
  *
  * Every control is built from the server's `tunables` — ranges, units and
  * option lists all come down with the rule, so the client never hard-codes
- * what a threshold is allowed to be. Built-in rules render exactly as before;
- * user-created instances (is_preset=false) additionally get inline rename and
- * a Delete action, which built-ins deliberately never show.
+ * what a threshold is allowed to be. Every rule gets a Delete action — for a
+ * built-in it tombstones the rule (restorable from the strip the settings
+ * page renders), for a user-created instance (is_preset=false) it is
+ * permanent. Instances additionally get inline rename; built-in names come
+ * from the catalogue and stay fixed.
  */
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -36,7 +38,8 @@ interface Props {
     patch: { is_active?: boolean; condition?: Record<string, unknown>; name?: string },
   ) => Promise<AlertPreset>;
   onError: (message: string) => void;
-  /** Instances only — built-in rules never render the Delete action. */
+  /** Every rule renders Delete when provided; the page's confirm dialog
+   *  explains the built-in vs custom difference. */
   onDelete?: (preset: AlertPreset) => void;
 }
 
@@ -182,7 +185,7 @@ export default function AlertPresetCard({ preset, onSave, onError, onDelete }: P
 
           <Stack alignItems="flex-end" spacing={0.5}>
             <Stack direction="row" alignItems="center" spacing={0.5}>
-              {isInstance && onDelete && (
+              {onDelete && (
                 <Tooltip title="Delete rule">
                   <IconButton size="small" onClick={() => onDelete(preset)}>
                     <DeleteOutline sx={{ fontSize: 18 }} />

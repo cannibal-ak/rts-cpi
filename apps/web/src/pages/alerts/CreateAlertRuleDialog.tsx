@@ -42,7 +42,14 @@ export default function CreateAlertRuleDialog({ open, families, onClose, onCreat
   const [preview, setPreview] = useState<AlertPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const family = families.find(f => f.rule_key === familyKey) ?? null;
+  // Active built-ins first; a deleted built-in stays usable as a template
+  // (the admin removed the built-in, not the rule TYPE — they may well want
+  // their own variant of it) but is labelled and never the default seed.
+  const ordered = [
+    ...families.filter(f => !f.deleted_at),
+    ...families.filter(f => f.deleted_at),
+  ];
+  const family = ordered.find(f => f.rule_key === familyKey) ?? null;
 
   const seedFrom = (f: AlertPreset) => {
     setFamilyKey(f.rule_key);
@@ -54,8 +61,8 @@ export default function CreateAlertRuleDialog({ open, families, onClose, onCreat
   };
 
   useEffect(() => {
-    if (open && families.length > 0) {
-      seedFrom(families[0]);
+    if (open && ordered.length > 0) {
+      seedFrom(ordered[0]);
       setIsActive(false);
       setSubmitting(false);
     }
@@ -126,13 +133,15 @@ export default function CreateAlertRuleDialog({ open, families, onClose, onCreat
           <TextField
             select size="small" label="Rule type" value={familyKey}
             onChange={e => {
-              const f = families.find(x => x.rule_key === e.target.value);
+              const f = ordered.find(x => x.rule_key === e.target.value);
               if (f) seedFrom(f);
             }}
             sx={{ maxWidth: 420 }}
           >
-            {families.map(f => (
-              <MenuItem key={f.rule_key} value={f.rule_key}>{f.name}</MenuItem>
+            {ordered.map(f => (
+              <MenuItem key={f.rule_key} value={f.rule_key}>
+                {f.deleted_at ? `${f.name} (built-in deleted)` : f.name}
+              </MenuItem>
             ))}
           </TextField>
           {family?.description && (

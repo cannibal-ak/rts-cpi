@@ -11,7 +11,8 @@
     PATCH  /api/v1/alerts/rules/{rule_key}     TENANT_ADMIN
     POST   /api/v1/alerts/rules/{rule_key}/preview   TENANT_ADMIN
     POST   /api/v1/alerts/rules                TENANT_ADMIN — create an instance
-    DELETE /api/v1/alerts/rules/{rule_key}     TENANT_ADMIN — instances only
+    DELETE /api/v1/alerts/rules/{rule_key}     TENANT_ADMIN — any rule
+    POST   /api/v1/alerts/rules/{rule_key}/restore  TENANT_ADMIN — built-ins
     POST   /api/v1/alerts/run                  TENANT_ADMIN
 
 AUTH MODEL. Reading and marking-read are personal actions, open to any
@@ -410,6 +411,7 @@ def _rule_out(row, preset, options: dict[str, list[str]] | None = None) -> Alert
         tunables=[TunableFieldOut(**t) for t in tunables],
         missing_requirements=missing_requirements(preset, condition) if preset else [],
         created_at=row.created_at, updated_at=row.updated_at,
+        deleted_at=getattr(row, "deleted_at", None),
         updated_by=getattr(row, "updated_by", None),
     )
 
@@ -417,7 +419,8 @@ def _rule_out(row, preset, options: dict[str, list[str]] | None = None) -> Alert
 _RULE_SELECT = """
     SELECT r.id, r.rule_key, r.preset_key, r.name, r.description, r.domain,
            r.rule_type, r.is_active, r.is_preset, r.severity_default,
-           r.condition_json, r.created_at, r.updated_at, u.email AS updated_by
+           r.condition_json, r.created_at, r.updated_at, r.deleted_at,
+           u.email AS updated_by
       FROM alert_rule r
       LEFT JOIN app_user u ON u.id = r.updated_by_user_id
 """
@@ -514,6 +517,8 @@ def update_rule(
                      {"k": rule_key}).first()
     if row is None:
         raise HTTPException(404, f"no rule {rule_key}")
+    if row.deleted_at is not None:
+        raise HTTPException(400, f"{rule_key} is deleted; restore it before editing")
     preset = get_preset(row.preset_key)
     if preset is None:
         # Legacy free-form rows: no catalogue type, nothing to validate against.
@@ -784,31 +789,106 @@ def delete_rule(
     tenant_id: str = Depends(get_tenant_id),
     current_user: dict = Depends(get_current_user),
 ):
-    """Delete a user-created rule instance, and with it its alert history.
+    """Delete any rule, and with it its alert history.
 
-    alert_event.rule_id cascades, and for the edge-triggered families the event
-    rows ARE the state ledger — which is exactly why this is allowed only for
-    instances: their rule_keys are minted once and never reused, so a deleted
-    ledger can never be half-resurrected under the same key. A sweep evaluating
-    this tenant concurrently may FK-abort once; the next tick is idempotent.
+    Two mechanisms behind one verb, because resurrection risk differs:
+
+    - Instances: hard DELETE. alert_event.rule_id cascades, and their minted
+      rule_keys are never reused, so a deleted edge-trigger ledger can never be
+      half-resurrected under the same key. A sweep evaluating this tenant
+      concurrently FK-aborts once and the next tick is idempotent.
+    - Built-ins: soft delete (deleted_at tombstone) with an explicit event
+      purge. The row must survive, or _ensure_presets would quietly re-seed the
+      rule with defaults on the next settings visit — a delete that undoes
+      itself. Restore brings it back switched off with its last-tuned settings;
+      because the purge emptied its state ledger, an edge-triggered built-in
+      re-announces currently-bad states after restore, which is honest if noisy.
+
+    The built-in path has no FK backstop: a sweep that loaded the rule before
+    the tombstone landed can insert events AFTER the purge (the row survives,
+    so the insert succeeds where an instance's would abort). That is why the
+    purge runs on EVERY delete of a built-in, tombstoned already or not —
+    retrying the DELETE is the documented way to clear such orphans. Deleting
+    an already-deleted built-in therefore stays a 204, purge included.
     """
     row = db.execute(
-        text("SELECT id, is_preset, name FROM alert_rule WHERE rule_key = :k"),
+        text("SELECT id, is_preset, deleted_at, name FROM alert_rule WHERE rule_key = :k"),
         {"k": rule_key},
     ).first()
     if row is None:
         raise HTTPException(404, f"no rule {rule_key}")
-    if row.is_preset:
-        raise HTTPException(
-            400, "built-in rules cannot be deleted; switch them off instead")
 
     events = db.execute(
         text("SELECT count(*) FROM alert_event WHERE rule_id = :rid"),
         {"rid": str(row.id)},
     ).scalar() or 0
-    db.execute(text("DELETE FROM alert_rule WHERE rule_key = :k"), {"k": rule_key})
+
+    if row.is_preset:
+        db.execute(
+            text("DELETE FROM alert_event WHERE rule_id = :rid"),
+            {"rid": str(row.id)})
+        if row.deleted_at is None:
+            db.execute(
+                text("""
+                    UPDATE alert_rule
+                       SET deleted_at = now(), is_active = false,
+                           updated_at = now(),
+                           updated_by_user_id = CAST(:uid AS uuid)
+                     WHERE rule_key = :k
+                """),
+                {"uid": _user_id(current_user), "k": rule_key})
+    else:
+        db.execute(text("DELETE FROM alert_rule WHERE rule_key = :k"),
+                   {"k": rule_key})
+
     _commit(db, tenant_id)
     logger.info(
-        "ALERT_RULE_DELETED actor=%s rule_key=%s name=%r events_cascaded=%s",
-        current_user.get("email"), rule_key, row.name, events,
+        "ALERT_RULE_DELETED actor=%s rule_key=%s name=%r builtin=%s events_removed=%s",
+        current_user.get("email"), rule_key, row.name, row.is_preset, events,
     )
+
+
+@router.post("/rules/{rule_key}/restore", response_model=AlertRuleOut,
+             dependencies=[_ADMIN])
+def restore_rule(
+    rule_key: str,
+    db: Session = Depends(get_tenant_db),
+    tenant_id: str = Depends(get_tenant_id),
+    current_user: dict = Depends(get_current_user),
+    user_identity: str = Depends(get_user_identity),
+):
+    """Bring a deleted built-in rule back — switched off, last settings kept.
+
+    Only built-ins are restorable: instances are hard-deleted and gone. Comes
+    back inactive deliberately, so the admin re-tunes (or at least re-reads)
+    the rule before it fires again — its event ledger was purged on delete, so
+    an edge-triggered family will re-announce currently-bad states on its
+    first evaluation after re-activation.
+    """
+    row = db.execute(
+        text("SELECT id, is_preset, deleted_at FROM alert_rule WHERE rule_key = :k"),
+        {"k": rule_key},
+    ).first()
+    if row is None:
+        raise HTTPException(404, f"no rule {rule_key}")
+    if not row.is_preset:
+        raise HTTPException(400, "only built-in rules can be restored")
+
+    if row.deleted_at is not None:
+        db.execute(
+            text("""
+                UPDATE alert_rule
+                   SET deleted_at = NULL, is_active = false,
+                       updated_at = now(),
+                       updated_by_user_id = CAST(:uid AS uuid)
+                 WHERE rule_key = :k
+            """),
+            {"uid": _user_id(current_user), "k": rule_key})
+        _commit(db, tenant_id)
+        logger.info("ALERT_RULE_RESTORED actor=%s rule_key=%s",
+                    current_user.get("email"), rule_key)
+
+    row = db.execute(text(f"{_RULE_SELECT} WHERE r.rule_key = :k"),
+                     {"k": rule_key}).first()
+    options = _available_options(db, user_identity) if is_alertable(user_identity) else None
+    return _rule_out(row, get_preset(row.preset_key), options)

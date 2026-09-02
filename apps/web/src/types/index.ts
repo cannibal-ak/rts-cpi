@@ -385,6 +385,8 @@ export interface AlertPreset {
   missing_requirements: string[];
   created_at: string | null;
   updated_at: string | null;
+  /** Tombstone on a deleted built-in: card hidden, Restore offered instead. */
+  deleted_at: string | null;
   updated_by: string | null;
 }
 

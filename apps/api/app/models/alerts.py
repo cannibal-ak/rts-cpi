@@ -36,6 +36,10 @@ class AlertRule(Base):
     # Which catalogue family this rule evaluates as. Equal to rule_key on
     # preset rows, the family key on instances. NULL = evaluator-invisible.
     preset_key = Column(String(64), nullable=True)
+    # Tombstone for deleted BUILT-IN rules. The row must survive so
+    # _ensure_presets does not resurrect the rule with defaults; restore
+    # clears it. Instances are hard-deleted instead (keys never reused).
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
     severity_default = Column(String(16), nullable=False, server_default="warning")
     owner = Column(String(128), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

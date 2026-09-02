@@ -18,7 +18,9 @@ Covers:
   b) create: 201 shape, defaults merged, minted key, preset_key stamped
   c) create: unknown preset_key 422; missing-requirements activation 422
   d) rename: instance ok, built-in 400
-  e) delete: instance row gone, built-in 400
+  e) delete: instance hard-deleted; built-in tombstoned with events purged,
+     immune to the self-heal, edit-refusing, idempotent, and restorable
+     (comes back switched off); restore refuses instances
   f) _ensure_presets: recreated preset rows carry preset_key; a deleted
      instance is NOT resurrected
   g) load_active_rules: instances load beside their preset, family-ordered,
@@ -30,7 +32,7 @@ from fastapi import HTTPException
 from sqlalchemy import text
 
 from app.routers.alerts import (
-    _ensure_presets, create_rule, delete_rule, update_rule,
+    _ensure_presets, create_rule, delete_rule, restore_rule, update_rule,
 )
 from app.schemas.alerts import AlertRuleCreate, AlertRuleUpdate
 from app.services.alerts.evaluator import LoadedRule, load_active_rules
@@ -153,12 +155,74 @@ def test_delete_instance(db_session, da_tenant):
     assert left == 0
 
 
-def test_delete_preset_400(db_session, da_tenant):
-    _ensure_presets(db_session, da_tenant["tenant_id"])
+def test_delete_builtin_soft_deletes_and_purges(db_session, da_tenant):
+    """Built-in delete = tombstone + event purge; restore brings it back off.
+
+    The tombstone (not a hard delete) is what stops _ensure_presets quietly
+    re-seeding the rule with defaults — a delete that undoes itself.
+    """
+    tid = da_tenant["tenant_id"]
+    _ensure_presets(db_session, tid)
+    # The handlers look rows up by bare rule_key, trusting RLS to scope them —
+    # but this test session is the RLS-bypassing superuser, so the shared key
+    # 'comp_price_move' matches EVERY tenant's row and .first() picks an
+    # arbitrary one. Clear the other tenants' rows (rolled back at test end,
+    # their events cascade) so the shared key is unambiguous here.
+    db_session.execute(text(
+        "DELETE FROM alert_rule WHERE rule_key = 'comp_price_move' "
+        "AND tenant_id != CAST(:t AS uuid)"), {"t": tid})
+    rid = db_session.execute(text(
+        "SELECT id FROM alert_rule WHERE tenant_id = CAST(:t AS uuid) "
+        "AND rule_key = 'comp_price_move'"), {"t": tid}).scalar()
+    # One synthetic event so the purge has something to prove itself on.
+    db_session.execute(text(
+        "INSERT INTO alert_event (tenant_id, rule_id, rule_key, rule_name, "
+        "scope_key, dedupe_key, severity, message) VALUES "
+        "(CAST(:t AS uuid), :rid, 'comp_price_move', 'x', "
+        "'move|ZZT-ZZT|XX|00-07', 'test-tombstone-purge', 'warning', 'test')"),
+        {"t": tid, "rid": str(rid)})
+
+    delete_rule("comp_price_move", db=db_session, tenant_id=tid,
+                current_user=da_tenant["user"])
+
+    row = db_session.execute(text(
+        "SELECT deleted_at, is_active FROM alert_rule "
+        "WHERE tenant_id = CAST(:t AS uuid) AND rule_key = 'comp_price_move'"),
+        {"t": tid}).first()
+    assert row is not None and row.deleted_at is not None and row.is_active is False
+    events_left = db_session.execute(text(
+        "SELECT count(*) FROM alert_event WHERE rule_id = :rid"),
+        {"rid": str(rid)}).scalar()
+    assert events_left == 0
+
+    # Tombstoned rule: invisible to the evaluator, immune to self-heal,
+    # refuses edits, second delete is a no-op.
+    assert "comp_price_move" not in {
+        r.rule_key for r in load_active_rules(db_session, tid)}
+    _ensure_presets(db_session, tid)
+    still = db_session.execute(text(
+        "SELECT deleted_at FROM alert_rule WHERE tenant_id = CAST(:t AS uuid) "
+        "AND rule_key = 'comp_price_move'"), {"t": tid}).scalar()
+    assert still is not None, "_ensure_presets must not resurrect a tombstone"
     with pytest.raises(HTTPException) as e:
-        delete_rule("comp_price_move", db=db_session,
-                    tenant_id=da_tenant["tenant_id"],
-                    current_user=da_tenant["user"])
+        update_rule("comp_price_move", AlertRuleUpdate(is_active=True),
+                    db=db_session, tenant_id=tid,
+                    current_user=da_tenant["user"], user_identity="DA")
+    assert e.value.status_code == 400
+    delete_rule("comp_price_move", db=db_session, tenant_id=tid,
+                current_user=da_tenant["user"])  # idempotent 204
+
+    restored = restore_rule("comp_price_move", db=db_session, tenant_id=tid,
+                            current_user=da_tenant["user"], user_identity="DA")
+    assert restored.deleted_at is None and restored.is_active is False
+
+
+def test_restore_instance_400(db_session, da_tenant):
+    out = _create(db_session, da_tenant)
+    with pytest.raises(HTTPException) as e:
+        restore_rule(out.rule_key, db=db_session,
+                     tenant_id=da_tenant["tenant_id"],
+                     current_user=da_tenant["user"], user_identity="DA")
     assert e.value.status_code == 400
 
 

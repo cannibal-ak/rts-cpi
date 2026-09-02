@@ -93,6 +93,9 @@ class AlertRuleOut(BaseModel):
     missing_requirements: list[str] = Field(default_factory=list)
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Tombstone: set on a deleted built-in. The settings page hides the card
+    # and offers Restore instead; the evaluator skips it.
+    deleted_at: Optional[datetime] = None
     updated_by: Optional[str] = None
 
     model_config = {"from_attributes": True}

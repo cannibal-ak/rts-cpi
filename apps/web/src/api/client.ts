@@ -417,8 +417,11 @@ export interface CpiApiClient {
     previewPreset(ruleKey: string, body: AlertPresetUpdate): Promise<AlertPreview>;
     /** Create a user-owned instance of a catalogue rule type. */
     createRule(body: AlertPresetCreate): Promise<AlertPreset>;
-    /** Delete a user-created rule instance — its alert history goes with it. */
+    /** Delete any rule — its alert history goes with it. Custom rules are
+     *  removed permanently; built-ins are tombstoned and restorable. */
     deleteRule(ruleKey: string): Promise<void>;
+    /** Bring a deleted built-in back — switched off, last settings kept. */
+    restoreRule(ruleKey: string): Promise<AlertPreset>;
     run(dryRun?: boolean): Promise<AlertRunSummary>;
   };
 

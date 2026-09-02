@@ -471,6 +471,8 @@ export const httpClient: CpiApiClient = {
       post<AlertPreset>('/api/v1/alerts/rules', body),
     deleteRule: (ruleKey: string) =>
       del<void>(`/api/v1/alerts/rules/${encodeURIComponent(ruleKey)}`),
+    restoreRule: (ruleKey: string) =>
+      post<AlertPreset>(`/api/v1/alerts/rules/${encodeURIComponent(ruleKey)}/restore`, {}),
     run: (dryRun = false) =>
       post<AlertRunSummary>(`/api/v1/alerts/run?dry_run=${dryRun}`, {}),
   },
