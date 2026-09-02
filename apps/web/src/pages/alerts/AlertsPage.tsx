@@ -91,7 +91,9 @@ export default function AlertsPage() {
     api.alerts.listPresets()
       .then(rules => {
         if (cancelled) return;
-        setTypeOptions(rules.map(r => ({
+        // Deleted rules have no events left (delete purges them), so they
+        // would only be dead menu entries.
+        setTypeOptions(rules.filter(r => !r.deleted_at).map(r => ({
           key: r.rule_key,
           label: r.is_preset ? (RULE_LABELS[r.rule_key] ?? r.name) : r.name,
         })));

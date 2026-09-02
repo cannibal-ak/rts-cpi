@@ -14,6 +14,7 @@ import {
 } from '@mui/material';
 import AddOutlined from '@mui/icons-material/AddOutlined';
 import PlayArrowOutlined from '@mui/icons-material/PlayArrowOutlined';
+import RestoreOutlined from '@mui/icons-material/RestoreOutlined';
 
 import { api } from '../../api';
 import PageHeader from '../../components/common/PageHeader';
@@ -32,11 +33,19 @@ export default function AlertPresetsPage() {
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<AlertRunSummary | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  // Open flag separate from the target: the target must survive the dialog's
+  // fade-out, or the conditional copy flashes to the wrong branch with an
+  // empty rule name while the modal is still closing.
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<AlertPreset | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  // `quiet` refreshes the list without collapsing the page into the loading
+  // spinner — used after create/delete, where the cards are already on screen
+  // and a full-page flash (behind a still-open dialog) reads as a hang.
+  const load = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       setPresets(await api.alerts.listPresets());
       setError(null);
@@ -66,8 +75,13 @@ export default function AlertPresetsPage() {
     setDeleting(true);
     try {
       await api.alerts.deleteRule(deleteTarget.rule_key);
-      setPresets(ps => ps.filter(p => p.rule_key !== deleteTarget.rule_key));
-      setDeleteTarget(null);
+      // Close first, reload quietly after: the delete succeeded, so the modal
+      // must not sit on top of a page-level spinner (or, if the reload then
+      // fails, on top of an error state that hides the success).
+      setDeleteOpen(false);
+      // A reload rather than a local splice: a deleted built-in comes back as
+      // a tombstone the restore strip renders, which only the server knows.
+      await load(true);
       // The rule's events went with it, so the badge and feed need a refetch.
       await refresh();
     } catch (err) {
@@ -76,6 +90,23 @@ export default function AlertPresetsPage() {
       setDeleting(false);
     }
   };
+
+  const restore = async (ruleKey: string) => {
+    if (restoring) return;
+    setRestoring(ruleKey);
+    try {
+      const restored = await api.alerts.restoreRule(ruleKey);
+      setPresets(ps => ps.map(p => (p.rule_key === ruleKey ? restored : p)));
+      setToast(`Restored “${restored.name}” — it is switched off until you enable it`);
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : 'Could not restore the rule');
+    } finally {
+      setRestoring(null);
+    }
+  };
+
+  const visible = presets.filter(p => !p.deleted_at);
+  const deletedBuiltins = presets.filter(p => p.deleted_at && p.is_preset);
 
   const runNow = async () => {
     setRunning(true);
@@ -158,12 +189,34 @@ export default function AlertPresetsPage() {
         </Alert>
       ) : (
         <Stack spacing={2}>
-          {presets.map(p => (
+          {visible.map(p => (
             <AlertPresetCard
               key={p.rule_key} preset={p} onSave={save} onError={setToast}
-              onDelete={setDeleteTarget}
+              onDelete={target => { setDeleteTarget(target); setDeleteOpen(true); }}
             />
           ))}
+          {deletedBuiltins.length > 0 && (
+            <Box sx={{ pt: 1 }}>
+              <Typography variant="caption" color="text.secondary">
+                Deleted built-in rules — restore brings one back switched off,
+                with the settings it had.
+              </Typography>
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 0.5 }}>
+                {deletedBuiltins.map(p => (
+                  <Button
+                    key={p.rule_key} size="small" variant="outlined"
+                    disabled={restoring !== null}
+                    startIcon={restoring === p.rule_key
+                      ? <CircularProgress size={14} />
+                      : <RestoreOutlined />}
+                    onClick={() => void restore(p.rule_key)}
+                  >
+                    {p.name}
+                  </Button>
+                ))}
+              </Stack>
+            </Box>
+          )}
         </Stack>
       )}
 
@@ -173,22 +226,28 @@ export default function AlertPresetsPage() {
         onClose={() => setCreateOpen(false)}
         onCreated={() => {
           // Reload rather than splice: the server owns the ordering (built-ins
-          // first, then instances grouped by family).
-          void load();
+          // first, then instances grouped by family). Quiet — the cards are
+          // already on screen.
+          void load(true);
           setToast('Rule created');
         }}
       />
 
-      <Dialog open={deleteTarget !== null} onClose={deleting ? undefined : () => setDeleteTarget(null)}>
+      <Dialog open={deleteOpen} onClose={deleting ? undefined : () => setDeleteOpen(false)}>
         <DialogTitle>Delete rule?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            This permanently deletes “{deleteTarget?.name}” and every alert it
-            has ever raised. Built-in rules are unaffected.
+            {deleteTarget?.is_preset
+              ? <>This deletes “{deleteTarget?.name}” and every alert it has
+                  ever raised. It is a built-in rule, so you can restore it
+                  later from this page — it comes back switched off, keeping
+                  its current settings, but its alert history will not.</>
+              : <>This permanently deletes “{deleteTarget?.name}” and every
+                  alert it has ever raised. Custom rules cannot be restored.</>}
           </DialogContentText>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setDeleteTarget(null)} disabled={deleting}>Cancel</Button>
+          <Button onClick={() => setDeleteOpen(false)} disabled={deleting}>Cancel</Button>
           <Button
             color="error" variant="contained" disabled={deleting}
             onClick={() => void confirmDelete()}

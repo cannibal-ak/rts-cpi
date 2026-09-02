@@ -55,7 +55,8 @@ def main():
         rules = db.execute(text(
             "SELECT t.slug AS tenant, r.rule_key, r.preset_key, r.is_active, "
             "       r.is_preset, r.severity_default, r.name, r.condition_json, "
-            "       r.updated_at::text AS updated_at "
+            "       r.updated_at::text AS updated_at, "
+            "       (r.deleted_at IS NOT NULL) AS deleted "
             "FROM alert_rule r JOIN tenant t ON t.id = r.tenant_id "
             "WHERE t.slug = ANY(:slugs) ORDER BY t.slug, r.rule_key"
         ), {"slugs": list(TENANT_SLUGS)}).mappings().all()
@@ -80,6 +81,10 @@ def main():
             "is_active": row["is_active"],
             "is_preset": row["is_preset"],
             "preset_key": row["preset_key"],
+            # A tenant admin deleting a built-in is legitimate per-tenant
+            # choice since the rule manager shipped; flagged so the parity
+            # report can tell it apart from a seeding failure.
+            "deleted": row["deleted"],
             "severity_default": row["severity_default"],
             "name": row["name"],
             "condition_structure": structure,

@@ -135,6 +135,7 @@ def load_active_rules(db: Session, tenant_id: str, rule_keys: list[str] | None =
               FROM alert_rule
              WHERE tenant_id = CAST(:tid AS uuid)
                AND is_active
+               AND deleted_at IS NULL
                AND preset_key IS NOT NULL
         """),
         {"tid": tenant_id},

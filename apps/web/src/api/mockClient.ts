@@ -240,6 +240,8 @@ export const mockClient: CpiApiClient = {
         condition: { ...family.condition, ...(body.condition ?? {}) },
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
+        // Never inherit a tombstone from a deleted family template.
+        deleted_at: null,
       };
       _mockPresets.push(instance);
       return delay({ ...instance });
@@ -248,11 +250,31 @@ export const mockClient: CpiApiClient = {
     deleteRule: (ruleKey) => {
       const i = _mockPresets.findIndex(x => x.rule_key === ruleKey);
       if (i < 0) return Promise.reject(new Error(`no rule ${ruleKey}`));
-      if (_mockPresets[i].is_preset) {
-        return Promise.reject(new Error('built-in rules cannot be deleted'));
+      // Mirror the real API on BOTH paths: the rule's alert history goes with
+      // it (cascade for instances, explicit purge for built-ins). Without
+      // this, the feed and the unread badge keep showing alerts for a rule
+      // the confirm dialog just said was deleted.
+      for (let e = _mockEvents.length - 1; e >= 0; e--) {
+        if (_mockEvents[e].rule_key === ruleKey) _mockEvents.splice(e, 1);
       }
-      _mockPresets.splice(i, 1);
+      if (_mockPresets[i].is_preset) {
+        // Built-ins tombstone (restorable); instances go for good.
+        _mockPresets[i].deleted_at = new Date().toISOString();
+        _mockPresets[i].is_active = false;
+      } else {
+        _mockPresets.splice(i, 1);
+      }
       return delay(undefined);
+    },
+
+    restoreRule: (ruleKey) => {
+      const p = _mockPresets.find(x => x.rule_key === ruleKey);
+      if (!p) return Promise.reject(new Error(`no rule ${ruleKey}`));
+      if (!p.is_preset) return Promise.reject(new Error('only built-in rules can be restored'));
+      p.deleted_at = null;
+      p.is_active = false;
+      p.updated_at = new Date().toISOString();
+      return delay({ ...p });
     },
 
     previewPreset: (ruleKey) => delay({
