@@ -353,48 +353,19 @@ def _is_protected_platform_admin(db: Session, user: AppUser) -> bool:
     return is_platform_admin(identity, _target_roles(db, user.id))
 
 
-def _active_admin_count(db: Session, tenant_id: UUID) -> int:
-    """Number of currently-active TENANT_ADMIN users in a tenant."""
-    return (
-        db.query(AppUser.id)
-        .join(RoleBinding, RoleBinding.user_id == AppUser.id)
-        .filter(
-            AppUser.tenant_id == tenant_id,
-            AppUser.is_active == True,  # noqa: E712
-            RoleBinding.role == "TENANT_ADMIN",
-        )
-        .distinct()
-        .count()
-    )
+# Tenant admin accounts are each tenant's primary login, so any account holding
+# TENANT_ADMIN can never be deactivated or deleted — regardless of whether the
+# tenant has another admin or the account is already inactive. Reactivate and
+# reset-MFA stay allowed. Mirrors isTenantAdminAccount() on the Password
+# Management page, which disables the Deactivate and Delete buttons.
+def _is_tenant_admin(db: Session, user: AppUser) -> bool:
+    return "TENANT_ADMIN" in _target_roles(db, user.id)
 
 
-def _is_sole_active_admin(db: Session, user: AppUser) -> bool:
-    """True if disabling/removing ``user`` would leave its tenant with no active
-    admin (user is active, is an admin, and is the only active admin)."""
-    if not user.is_active:
-        return False
-    if "TENANT_ADMIN" not in _target_roles(db, user.id):
-        return False
-    return _active_admin_count(db, user.tenant_id) <= 1
-
-
-def _tenant_name(db: Session, tenant_id: UUID) -> str:
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
-    return tenant.display_name if tenant else str(tenant_id)
-
-
-def _last_active_admin_409(db: Session, user: AppUser) -> HTTPException:
-    name = _tenant_name(db, user.tenant_id)
+def _tenant_admin_400(action: str) -> HTTPException:
     return HTTPException(
-        status_code=409,
-        detail={
-            "message": (
-                f"{user.email} is the only active admin for {name}; "
-                "add or reactivate another admin first."
-            ),
-            "code": "last_active_admin",
-            "details": {"tenant": name},
-        },
+        status_code=400,
+        detail=f"Tenant admin accounts cannot be {action}.",
     )
 
 
@@ -449,8 +420,8 @@ def deactivate_user(
     """Disable a user account (reversible). Blocks login + refresh immediately."""
     user = _load_target_guarded(db, user_id, current_user)
 
-    if _is_sole_active_admin(db, user):
-        raise _last_active_admin_409(db, user)
+    if _is_tenant_admin(db, user):
+        raise _tenant_admin_400("deactivated")
 
     user.is_active = False
     audit.record(
@@ -499,15 +470,15 @@ def delete_user(
 
     Guarded so the platform can never 500 or lock itself out. Guard order:
       404 missing -> 400 self -> 400 protected platform admin
-      -> 409 last_active_admin (target still active & its tenant's sole admin)
+      -> 400 tenant admin (any TENANT_ADMIN account, active or not)
       -> 409 has_history (referenced by any set-(B) activity/audit table)
       -> 204 clean delete: audit FIRST, then the user-owned auth rows and the
          app_user row are removed in a single transaction.
     """
     user = _load_target_guarded(db, user_id, current_user)
 
-    if _is_sole_active_admin(db, user):
-        raise _last_active_admin_409(db, user)
+    if _is_tenant_admin(db, user):
+        raise _tenant_admin_400("deleted")
 
     if _has_activity_history(db, user_id):
         raise HTTPException(

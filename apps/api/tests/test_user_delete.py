@@ -1,4 +1,4 @@
-"""Focused tests for the guarded hard-delete + last-active-admin guard (D1).
+"""Focused tests for the guarded hard-delete + tenant-admin guard (D1).
 
 Handlers are called directly against the transactional ``db_session`` fixture
 (all writes rolled back at test end), mirroring tests/test_user_deactivate.py.
@@ -24,7 +24,9 @@ from app.models.user import AppUser, RoleBinding
 from app.models.user_mfa import UserMfa
 from app.models.mfa_recovery_code import MfaRecoveryCode
 from app.models.password_reset_token import PasswordResetToken
-from app.routers.admin_password_management import delete_user, deactivate_user
+from app.routers.admin_password_management import (
+    delete_user, deactivate_user, reactivate_user,
+)
 
 from app.services.auth_service import hash_password
 
@@ -152,48 +154,59 @@ def test_delete_platform_admin_blocked(db_session, admin_user):
     assert "super" in str(ei.value.detail).lower()
 
 
-# 5) delete sole active admin of a tenant -> 409 last_active_admin -----------
-def test_delete_sole_active_admin_blocked(db_session, admin_jwt_payload):
+def _assert_tenant_admin_blocked(ei, action):
+    assert ei.value.status_code == 400
+    assert ei.value.detail == f"Tenant admin accounts cannot be {action}."
+
+
+# 5) delete an active tenant admin -> 400 ------------------------------------
+def test_delete_tenant_admin_blocked(db_session, admin_jwt_payload):
     tid, _ = _mk_tenant(db_session)
     u = _mk_user(db_session, tid, active=True, admin=True)
     with pytest.raises(HTTPException) as ei:
         delete_user(u.id, db=db_session, current_user=admin_jwt_payload)
-    assert ei.value.status_code == 409
-    assert ei.value.detail["code"] == "last_active_admin"
+    _assert_tenant_admin_blocked(ei, "deleted")
     assert _reload(db_session, u.id) is not None
 
 
-# 6) deactivate sole active admin -> 409 (new guard on existing endpoint) -----
-def test_deactivate_sole_active_admin_blocked(db_session, admin_jwt_payload):
+# 6) deactivate an active tenant admin -> 400 --------------------------------
+def test_deactivate_tenant_admin_blocked(db_session, admin_jwt_payload):
     tid, _ = _mk_tenant(db_session)
     u = _mk_user(db_session, tid, active=True, admin=True)
     with pytest.raises(HTTPException) as ei:
         deactivate_user(u.id, db=db_session, current_user=admin_jwt_payload)
-    assert ei.value.status_code == 409
-    assert ei.value.detail["code"] == "last_active_admin"
+    _assert_tenant_admin_blocked(ei, "deactivated")
     assert _reload(db_session, u.id).is_active is True
 
 
-# 7) guard correctness: an admin WITH an active peer can be deleted (204) -----
-# Proves the last-active-admin guard does not over-block.
-def test_delete_admin_with_active_peer_allowed(db_session, admin_jwt_payload):
+# 7) the guard is unconditional: an admin WITH an active peer is still -------
+# protected (both from deactivate and delete).
+def test_tenant_admin_with_active_peer_blocked(db_session, admin_jwt_payload):
     tid, _ = _mk_tenant(db_session)
     u1 = _mk_user(db_session, tid, active=True, admin=True)
-    u2 = _mk_user(db_session, tid, active=True, admin=True)
-    resp = delete_user(u1.id, db=db_session, current_user=admin_jwt_payload)
-    assert resp.status_code == 204
-    assert _reload(db_session, u1.id) is None
-    assert _reload(db_session, u2.id) is not None
+    _mk_user(db_session, tid, active=True, admin=True)
+    with pytest.raises(HTTPException) as ei:
+        deactivate_user(u1.id, db=db_session, current_user=admin_jwt_payload)
+    _assert_tenant_admin_blocked(ei, "deactivated")
+    with pytest.raises(HTTPException) as ei:
+        delete_user(u1.id, db=db_session, current_user=admin_jwt_payload)
+    _assert_tenant_admin_blocked(ei, "deleted")
+    assert _reload(db_session, u1.id).is_active is True
 
 
-# 8) an already-inactive (sole) admin can be deleted -> 204 ------------------
-# The last-active-admin guard only protects ACTIVE admins.
-def test_delete_inactive_admin_allowed(db_session, admin_jwt_payload):
+# 8) an already-inactive tenant admin can't be deleted, but CAN be -----------
+# reactivated (the guard does not over-block).
+def test_inactive_tenant_admin_delete_blocked_reactivate_allowed(
+    db_session, admin_jwt_payload,
+):
     tid, _ = _mk_tenant(db_session)
     u = _mk_user(db_session, tid, active=False, admin=True)
-    resp = delete_user(u.id, db=db_session, current_user=admin_jwt_payload)
+    with pytest.raises(HTTPException) as ei:
+        delete_user(u.id, db=db_session, current_user=admin_jwt_payload)
+    _assert_tenant_admin_blocked(ei, "deleted")
+    resp = reactivate_user(u.id, db=db_session, current_user=admin_jwt_payload)
     assert resp.status_code == 204
-    assert _reload(db_session, u.id) is None
+    assert _reload(db_session, u.id).is_active is True
 
 
 # 9) tenant user is forbidden by the router-level RBAC guard -----------------
