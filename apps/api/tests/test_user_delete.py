@@ -154,9 +154,9 @@ def test_delete_platform_admin_blocked(db_session, admin_user):
     assert "super" in str(ei.value.detail).lower()
 
 
-def _assert_tenant_admin_blocked(ei, action):
+def _assert_tenant_admin_delete_blocked(ei):
     assert ei.value.status_code == 400
-    assert ei.value.detail == f"Tenant admin accounts cannot be {action}."
+    assert ei.value.detail == "Tenant admin accounts cannot be deleted."
 
 
 # 5) delete an active tenant admin -> 400 ------------------------------------
@@ -165,33 +165,30 @@ def test_delete_tenant_admin_blocked(db_session, admin_jwt_payload):
     u = _mk_user(db_session, tid, active=True, admin=True)
     with pytest.raises(HTTPException) as ei:
         delete_user(u.id, db=db_session, current_user=admin_jwt_payload)
-    _assert_tenant_admin_blocked(ei, "deleted")
+    _assert_tenant_admin_delete_blocked(ei)
     assert _reload(db_session, u.id) is not None
 
 
-# 6) deactivate an active tenant admin -> 400 --------------------------------
-def test_deactivate_tenant_admin_blocked(db_session, admin_jwt_payload):
+# 6) deactivating a tenant admin is allowed (reversible) — even the tenant's --
+# only admin; only the RTS platform admin is protected from deactivation.
+def test_deactivate_tenant_admin_allowed(db_session, admin_jwt_payload):
     tid, _ = _mk_tenant(db_session)
     u = _mk_user(db_session, tid, active=True, admin=True)
-    with pytest.raises(HTTPException) as ei:
-        deactivate_user(u.id, db=db_session, current_user=admin_jwt_payload)
-    _assert_tenant_admin_blocked(ei, "deactivated")
-    assert _reload(db_session, u.id).is_active is True
+    resp = deactivate_user(u.id, db=db_session, current_user=admin_jwt_payload)
+    assert resp.status_code == 204
+    assert _reload(db_session, u.id).is_active is False
 
 
-# 7) the guard is unconditional: an admin WITH an active peer is still -------
-# protected (both from deactivate and delete).
-def test_tenant_admin_with_active_peer_blocked(db_session, admin_jwt_payload):
+# 7) the delete guard is unconditional: an admin WITH an active peer is ------
+# still protected.
+def test_delete_tenant_admin_with_active_peer_blocked(db_session, admin_jwt_payload):
     tid, _ = _mk_tenant(db_session)
     u1 = _mk_user(db_session, tid, active=True, admin=True)
     _mk_user(db_session, tid, active=True, admin=True)
     with pytest.raises(HTTPException) as ei:
-        deactivate_user(u1.id, db=db_session, current_user=admin_jwt_payload)
-    _assert_tenant_admin_blocked(ei, "deactivated")
-    with pytest.raises(HTTPException) as ei:
         delete_user(u1.id, db=db_session, current_user=admin_jwt_payload)
-    _assert_tenant_admin_blocked(ei, "deleted")
-    assert _reload(db_session, u1.id).is_active is True
+    _assert_tenant_admin_delete_blocked(ei)
+    assert _reload(db_session, u1.id) is not None
 
 
 # 8) an already-inactive tenant admin can't be deleted, but CAN be -----------
@@ -203,7 +200,7 @@ def test_inactive_tenant_admin_delete_blocked_reactivate_allowed(
     u = _mk_user(db_session, tid, active=False, admin=True)
     with pytest.raises(HTTPException) as ei:
         delete_user(u.id, db=db_session, current_user=admin_jwt_payload)
-    _assert_tenant_admin_blocked(ei, "deleted")
+    _assert_tenant_admin_delete_blocked(ei)
     resp = reactivate_user(u.id, db=db_session, current_user=admin_jwt_payload)
     assert resp.status_code == 204
     assert _reload(db_session, u.id).is_active is True
