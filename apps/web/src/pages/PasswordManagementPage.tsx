@@ -211,6 +211,15 @@ export default function PasswordManagementPage() {
   const [usersError, setUsersError] = useState('');
 
   const [tenants, setTenants] = useState<AdminTenantOption[]>([]);
+  // Invite dropdown labels use the same org names as the table's Tenant column
+  // (tenantConfig) — the tenant table's own display_name still holds old
+  // placeholder names such as "Skybound - PW".
+  const tenantOptions = useMemo(
+    () => tenants
+      .map(t => ({ ...t, label: `${getTenantDisplayName(t.slug, t.name)} (${t.slug.toUpperCase()})` }))
+      .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })),
+    [tenants],
+  );
   const [sendingResetEmail, setSendingResetEmail] = useState<string | null>(null);
 
   const [inviteDialog, setInviteDialog] = useState<InviteDialogState>({
@@ -720,8 +729,8 @@ export default function PasswordManagementPage() {
             <InputLabel id="invite-tenant-label">Tenant</InputLabel>
             <Select labelId="invite-tenant-label" label="Tenant" value={inviteDialog.tenantId}
               onChange={(e) => setInviteDialog(s => ({ ...s, tenantId: e.target.value as string }))}>
-              {tenants.map(t => (
-                <MenuItem key={t.tenant_id} value={t.tenant_id}>{t.name} ({t.slug.toUpperCase()})</MenuItem>
+              {tenantOptions.map(t => (
+                <MenuItem key={t.tenant_id} value={t.tenant_id}>{t.label}</MenuItem>
               ))}
             </Select>
           </FormControl>
