@@ -68,6 +68,14 @@ function isPlatformAdmin(user: AdminUserListItem): boolean {
   );
 }
 
+// Tenant admin accounts (stored role TENANT_ADMIN — including rows whose chip
+// is relabelled, e.g. Demo_Admin) are each tenant's primary login, so the
+// Deactivate and Delete buttons are disabled for them. Subtenant users stay
+// manageable, and an already-inactive tenant admin can still be reactivated.
+function isTenantAdminAccount(user: AdminUserListItem): boolean {
+  return user.role === 'TENANT_ADMIN';
+}
+
 const REFRESH_INTERVAL_MS = 30_000;
 
 interface SnackbarState {
@@ -613,10 +621,13 @@ export default function PasswordManagementPage() {
                         {user.is_active ? (() => {
                           const isOwn = user.email.toLowerCase() === adminEmail;
                           const isAdmin = isPlatformAdmin(user);
-                          const blocked = isOwn || isAdmin;
+                          const isTenantAdmin = isTenantAdminAccount(user);
+                          const blocked = isOwn || isAdmin || isTenantAdmin;
                           const reason = isOwn
                             ? 'You cannot deactivate your own account.'
-                            : 'Protected RTS platform admin accounts cannot be deactivated.';
+                            : isAdmin
+                              ? 'Protected RTS platform admin accounts cannot be deactivated.'
+                              : 'Tenant admin accounts cannot be deactivated.';
                           const btn = (
                             <Button
                               size="small"
@@ -647,12 +658,15 @@ export default function PasswordManagementPage() {
                         {(() => {
                           const isOwn = user.email.toLowerCase() === adminEmail;
                           const isAdmin = isPlatformAdmin(user);
-                          const blocked = isOwn || isAdmin;
+                          const isTenantAdmin = isTenantAdminAccount(user);
+                          const blocked = isOwn || isAdmin || isTenantAdmin;
                           const reason = isOwn
                             ? 'You cannot delete your own account.'
                             : isAdmin
                               ? 'Protected RTS platform admin accounts cannot be deleted.'
-                              : 'Permanently delete this user';
+                              : isTenantAdmin
+                                ? 'Tenant admin accounts cannot be deleted.'
+                                : 'Permanently delete this user';
                           return (
                             <Tooltip title={reason}>
                               <span>
