@@ -24,24 +24,31 @@ import type {
   AdminUserListItem, AdminResetTokenItem, AdminTenantOption,
 } from '../types';
 
-// Slug for the RTS platform tenant — its row shows orgName only (no " - SLUG"
-// suffix) because it doesn't represent an airline/cruise carrier code.
+// Slug for the RTS platform tenant — labelled "Admin" on this page
+// ("Admin - RTS" in the table, "Admin (RTS)" in the invite dropdown) rather
+// than its full org name.
 const PLATFORM_TENANT_SLUG = 'rts';
 
+// Tenant name shown on this page: tenantConfig's canonical org name, except
+// the platform tenant, which reads as "Admin".
+function pageTenantName(slug: string, fallback: string): string {
+  if (slug.toLowerCase() === PLATFORM_TENANT_SLUG) return 'Admin';
+  return getTenantDisplayName(slug, fallback);
+}
+
 function formatTenantCell(user: AdminUserListItem): string {
-  const orgName = getTenantDisplayName(user.tenant_slug, user.tenant_name);
-  if (user.tenant_slug === PLATFORM_TENANT_SLUG) return orgName;
-  return `${orgName} - ${user.tenant_slug.toUpperCase()}`;
+  return `${pageTenantName(user.tenant_slug, user.tenant_name)} - ${user.tenant_slug.toUpperCase()}`;
 }
 
 // Display-only role-label overrides for the Password Management table.
 // These do NOT change the stored role (still TENANT_ADMIN), the API response,
-// or any RBAC check — they only relabel the chip text for two specific
+// or any RBAC check — they only relabel the chip text for a few specific
 // accounts. Keyed on lowercased email; anything not listed falls through to
 // the real role value (TENANT_ADMIN).
 const ROLE_LABEL_OVERRIDES: Record<string, string> = {
   'admin@rts.com': 'RTS_SuperAdmin',
   'skyair@airline.com': 'Demo_Admin',
+  'da@airline.com': 'Demo_Admin',
 };
 
 function displayRole(user: AdminUserListItem): string {
@@ -211,18 +218,12 @@ export default function PasswordManagementPage() {
   const [usersError, setUsersError] = useState('');
 
   const [tenants, setTenants] = useState<AdminTenantOption[]>([]);
-  // Invite dropdown labels use the same org names as the table's Tenant column
-  // (tenantConfig) — the tenant table's own display_name still holds old
-  // placeholder names such as "Skybound - PW". The platform tenant reads as
-  // "Admin (RTS)" here only; the table keeps its full org name.
+  // Invite dropdown labels use the same names as the table's Tenant column —
+  // the tenant table's own display_name still holds old placeholder names
+  // such as "Skybound - PW".
   const tenantOptions = useMemo(
     () => tenants
-      .map(t => {
-        const name = t.slug.toLowerCase() === PLATFORM_TENANT_SLUG
-          ? 'Admin'
-          : getTenantDisplayName(t.slug, t.name);
-        return { ...t, label: `${name} (${t.slug.toUpperCase()})` };
-      })
+      .map(t => ({ ...t, label: `${pageTenantName(t.slug, t.name)} (${t.slug.toUpperCase()})` }))
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })),
     [tenants],
   );
