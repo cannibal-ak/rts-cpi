@@ -213,10 +213,16 @@ export default function PasswordManagementPage() {
   const [tenants, setTenants] = useState<AdminTenantOption[]>([]);
   // Invite dropdown labels use the same org names as the table's Tenant column
   // (tenantConfig) — the tenant table's own display_name still holds old
-  // placeholder names such as "Skybound - PW".
+  // placeholder names such as "Skybound - PW". The platform tenant reads as
+  // "Admin (RTS)" here only; the table keeps its full org name.
   const tenantOptions = useMemo(
     () => tenants
-      .map(t => ({ ...t, label: `${getTenantDisplayName(t.slug, t.name)} (${t.slug.toUpperCase()})` }))
+      .map(t => {
+        const name = t.slug.toLowerCase() === PLATFORM_TENANT_SLUG
+          ? 'Admin'
+          : getTenantDisplayName(t.slug, t.name);
+        return { ...t, label: `${name} (${t.slug.toUpperCase()})` };
+      })
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })),
     [tenants],
   );
