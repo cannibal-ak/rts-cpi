@@ -354,19 +354,13 @@ def _is_protected_platform_admin(db: Session, user: AppUser) -> bool:
 
 
 # Tenant admin accounts are each tenant's primary login, so any account holding
-# TENANT_ADMIN can never be deactivated or deleted — regardless of whether the
-# tenant has another admin or the account is already inactive. Reactivate and
-# reset-MFA stay allowed. Mirrors isTenantAdminAccount() on the Password
-# Management page, which disables the Deactivate and Delete buttons.
+# TENANT_ADMIN can never be deleted — regardless of whether the tenant has
+# another admin or the account is already inactive. Deactivation stays allowed
+# (it is reversible); only the RTS platform admin is protected from it, via
+# _load_target_guarded. Mirrors isTenantAdminAccount() on the Password
+# Management page, which disables the Delete button.
 def _is_tenant_admin(db: Session, user: AppUser) -> bool:
     return "TENANT_ADMIN" in _target_roles(db, user.id)
-
-
-def _tenant_admin_400(action: str) -> HTTPException:
-    return HTTPException(
-        status_code=400,
-        detail=f"Tenant admin accounts cannot be {action}.",
-    )
 
 
 # Set-(B) activity/audit references (see D0): presence means the user has real
@@ -419,9 +413,6 @@ def deactivate_user(
 ):
     """Disable a user account (reversible). Blocks login + refresh immediately."""
     user = _load_target_guarded(db, user_id, current_user)
-
-    if _is_tenant_admin(db, user):
-        raise _tenant_admin_400("deactivated")
 
     user.is_active = False
     audit.record(
@@ -478,7 +469,10 @@ def delete_user(
     user = _load_target_guarded(db, user_id, current_user)
 
     if _is_tenant_admin(db, user):
-        raise _tenant_admin_400("deleted")
+        raise HTTPException(
+            status_code=400,
+            detail="Tenant admin accounts cannot be deleted.",
+        )
 
     if _has_activity_history(db, user_id):
         raise HTTPException(
