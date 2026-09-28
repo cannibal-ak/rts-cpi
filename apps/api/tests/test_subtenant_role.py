@@ -9,7 +9,8 @@ Run ONLY this file (the full suite has known-unrelated failures):
 
 Covers:
   a/b/c) get_user_roles no longer silently upgrades; honours the filtered list.
-  d)     invite role validation accepts TENANT_USER & TENANT_ADMIN, rejects bogus.
+  d)     invite accepts TENANT_USER only; rejects TENANT_ADMIN, bogus roles and
+         the RTS platform tenant.
   e)     RequirePlatformAdmin now guards GET /user-roles and POST /update-roles
          (guard logic -> 403 for non-platform; wiring assertion on both routes).
 """
@@ -84,7 +85,7 @@ def _purge_email(db, email):
     db.flush()
 
 
-@pytest.mark.parametrize("role", ["TENANT_USER", "TENANT_ADMIN"])
+@pytest.mark.parametrize("role", ["TENANT_USER"])
 def test_invite_accepts_valid_roles(db_session, monkeypatch, role):
     """invite_user creates the user + a RoleBinding with the requested role."""
     # Don't actually send mail — keep the test offline/deterministic.
@@ -121,6 +122,48 @@ def test_invite_rejects_bogus_role(db_session):
         invite_user(body, db=db_session)
     assert ei.value.status_code == 400
     assert "Unsupported role" in str(ei.value.detail)
+
+
+def test_invite_rejects_tenant_admin_role(db_session, monkeypatch):
+    """Invites only create Subtenants: TENANT_ADMIN is a 400 and nothing is written."""
+    monkeypatch.setattr(
+        "app.routers.admin_password_management.send_invite_email",
+        lambda *a, **k: pytest.fail("invite email must not be sent"),
+    )
+    tid = _jy_tenant_id(db_session)
+    email = "subtest-admin-invite@airline.com"
+    _purge_email(db_session, email)
+    body = AdminInviteUserRequest(
+        email=email, display_name="Admin Invite", tenant_id=tid, role="TENANT_ADMIN",
+    )
+    with pytest.raises(HTTPException) as ei:
+        invite_user(body, db=db_session)
+    assert ei.value.status_code == 400
+    assert "Subtenant" in str(ei.value.detail)
+    assert db_session.query(AppUser).filter(AppUser.email == email).first() is None
+
+
+def test_invite_rejects_rts_platform_tenant(db_session, monkeypatch):
+    """No user of any role can be invited into the RTS platform tenant."""
+    monkeypatch.setattr(
+        "app.routers.admin_password_management.send_invite_email",
+        lambda *a, **k: pytest.fail("invite email must not be sent"),
+    )
+    rts_id = db_session.execute(
+        text("SELECT id FROM tenant WHERE upper(slug) = 'RTS'")
+    ).scalar()
+    if rts_id is None:
+        pytest.skip("RTS platform tenant not present")
+    email = "subtest-rts-invite@airline.com"
+    _purge_email(db_session, email)
+    body = AdminInviteUserRequest(
+        email=email, display_name="RTS Invite", tenant_id=rts_id, role="TENANT_USER",
+    )
+    with pytest.raises(HTTPException) as ei:
+        invite_user(body, db=db_session)
+    assert ei.value.status_code == 400
+    assert "RTS platform tenant" in str(ei.value.detail)
+    assert db_session.query(AppUser).filter(AppUser.email == email).first() is None
 
 
 def test_invite_schema_default_is_least_privilege():

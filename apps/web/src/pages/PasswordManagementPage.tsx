@@ -25,8 +25,8 @@ import type {
 } from '../types';
 
 // Slug for the RTS platform tenant — labelled "Admin" on this page
-// ("Admin - RTS" in the table, "Admin (RTS)" in the invite dropdown) rather
-// than its full org name.
+// ("Admin - RTS" in the table) rather than its full org name. It is left out
+// of the invite dropdown: invites only create airline/cruise subtenants.
 const PLATFORM_TENANT_SLUG = 'rts';
 
 // Tenant name shown on this page: tenantConfig's canonical org name, except
@@ -221,9 +221,11 @@ export default function PasswordManagementPage() {
   const [tenants, setTenants] = useState<AdminTenantOption[]>([]);
   // Invite dropdown labels use the same names as the table's Tenant column —
   // the tenant table's own display_name still holds old placeholder names
-  // such as "Skybound - PW".
+  // such as "Skybound - PW". Invites only create subtenants of an airline or
+  // cruise/ferry tenant, so the RTS platform tenant is not offered.
   const tenantOptions = useMemo(
     () => tenants
+      .filter(t => t.slug.toLowerCase() !== PLATFORM_TENANT_SLUG)
       .map(t => ({ ...t, label: `${pageTenantName(t.slug, t.name)} (${t.slug.toUpperCase()})` }))
       .sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: 'base' })),
     [tenants],
@@ -744,10 +746,9 @@ export default function PasswordManagementPage() {
             <Select labelId="invite-role-label" label="Role" value={inviteDialog.role}
               onChange={(e) => setInviteDialog(s => ({ ...s, role: e.target.value as string }))}>
               <MenuItem value="TENANT_USER">Subtenant</MenuItem>
-              <MenuItem value="TENANT_ADMIN">TENANT_ADMIN</MenuItem>
             </Select>
             <FormHelperText>
-              Subtenant: read-only access to this tenant's dashboards. TENANT_ADMIN: full tenant administration (invite/lifecycle).
+              Subtenant: read-only access to this tenant's dashboards.
             </FormHelperText>
           </FormControl>
         </DialogContent>
