@@ -557,7 +557,7 @@ export const httpClient: CpiApiClient = {
       listUsers: () => get<AdminUserListResponse>('/api/v1/admin/password-management/users'),
       listTenants: () => get<AdminTenantOption[]>('/api/v1/admin/password-management/tenants'),
       inviteUser: (body: { email: string; display_name: string; tenant_id: string; role?: string }) =>
-        post<AdminInviteUserResponse>('/api/v1/admin/password-management/invite-user', { role: 'TENANT_ADMIN', ...body }),
+        post<AdminInviteUserResponse>('/api/v1/admin/password-management/invite-user', { role: 'TENANT_USER', ...body }),
       resendInvite: (body: { email?: string; user_id?: string }) =>
         post<AdminResendInviteResponse>('/api/v1/admin/password-management/resend-invite', body),
       sendResetEmail: (body: { email: string }) =>

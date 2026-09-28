@@ -20,7 +20,7 @@ import secrets
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import RequirePlatformAdmin, VALID_ROLES, get_current_user, is_platform_admin
+from app.core.deps import PLATFORM_TENANT_SLUG, RequirePlatformAdmin, VALID_ROLES, get_current_user, is_platform_admin
 from app.core.security import hash_token
 from app.models.user import AppUser, RoleBinding
 from app.models.user_mfa import UserMfa
@@ -191,6 +191,13 @@ def invite_user(body: AdminInviteUserRequest, db: Session = Depends(get_db)):
     tenant = db.query(Tenant).filter(Tenant.id == body.tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found.")
+
+    # Invites only create subtenant users of an airline or cruise/ferry
+    # tenant: never another admin, and never a user of the RTS platform tenant.
+    if role != "TENANT_USER":
+        raise HTTPException(status_code=400, detail="Invites can only create Subtenant users.")
+    if tenant.slug.upper() == PLATFORM_TENANT_SLUG:
+        raise HTTPException(status_code=400, detail="Users cannot be invited to the RTS platform tenant.")
 
     # get_db is the superuser engine (bypasses RLS) — set tenant_id explicitly.
     user = AppUser(
