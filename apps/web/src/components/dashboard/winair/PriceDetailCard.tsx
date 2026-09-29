@@ -6,6 +6,7 @@ import { Close, ExpandLess, ExpandMore, ShowChart, FlightTakeoff } from '@mui/ic
 import { api } from '../../../api';
 import type { PricePoint, PriceHistoryPoint } from '../../../api/client';
 import { formatClock, formatDeparture, formatDuration, formatSeen } from './priceChartTheme';
+import { brandInk } from '../bannerTheme';
 
 interface PriceDetailCardProps {
   point: PricePoint;
@@ -207,7 +208,16 @@ export default function PriceDetailCard({
         }}
       >
         <FlightTakeoff sx={{ fontSize: 15, color }} />
-        <Typography sx={{ fontSize: 12.5, fontWeight: 700, flexGrow: 1 }}>
+        {/* The host carrier's code wears its series colour (brand red);
+            competitor codes stay theme ink. */}
+        <Typography
+          sx={{
+            fontSize: 12.5,
+            fontWeight: 700,
+            flexGrow: 1,
+            ...(point.role === 'reference' && { color }),
+          }}
+        >
           {point.airline}
           {point.role === 'reference' && (
             <Box component="span" sx={{ ml: 0.5, fontSize: 10, fontWeight: 500, color: 'text.secondary' }}>
@@ -305,7 +315,7 @@ export default function PriceDetailCard({
         <Collapse in={showHistory}>
           {historyLoading && (
             <Box sx={{ display: 'flex', justifyContent: 'center', py: 1 }}>
-              <CircularProgress size={16} />
+              <CircularProgress size={16} sx={{ color: brandInk }} />
             </Box>
           )}
           {historyError && (

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box, Chip, Popover, Tooltip, Typography } from '@mui/material';
+import { darken } from '@mui/material/styles';
 import type { PopoverActions } from '@mui/material/Popover';
 import { EventAvailable, ExpandMore } from '@mui/icons-material';
 import DateFilterToggle from './DateFilterToggle';
@@ -53,6 +54,14 @@ export interface CapDateChipProps {
   appliesToView?: boolean;
   /** Drop the "Cap date:" prefix when the header row is tight. */
   compact?: boolean;
+  /**
+   * Tenant-brand fill (WinAir red today) replacing the theme-primary surface,
+   * so the chip matches branded chrome elsewhere on the page. Must be a
+   * literal color (hex/rgb) — it feeds darken(), which throws on theme paths
+   * like 'primary.main'. Omitted, the chip stays theme primary like every
+   * other tenant.
+   */
+  accent?: string;
 }
 
 /**
@@ -71,7 +80,7 @@ export interface CapDateChipProps {
  */
 export default function CapDateChip({
   availableDates, value, onChange,
-  loading = false, appliesToView = true, compact = false,
+  loading = false, appliesToView = true, compact = false, accent,
 }: CapDateChipProps) {
   const [anchorEl, setAnchorEl] = useState<HTMLElement | null>(null);
   const open = Boolean(anchorEl);
@@ -131,7 +140,18 @@ export default function CapDateChip({
             aria-haspopup={disabled ? undefined : 'dialog'}
             aria-expanded={disabled ? undefined : open}
             aria-controls={open ? POPOVER_ID : undefined}
-            sx={{ fontWeight: 500, '& .MuiChip-label': { pr: 0.75 } }}
+            sx={{
+              fontWeight: 500,
+              '& .MuiChip-label': { pr: 0.75 },
+              ...(accent && {
+                bgcolor: accent,
+                color: '#ffffff',
+                '& .MuiChip-icon': { color: '#ffffff' },
+                '&:hover': { bgcolor: darken(accent, 0.2) },
+                // Keyboard focus would otherwise flash the theme-primary fill.
+                '&.Mui-focusVisible': { bgcolor: darken(accent, 0.2) },
+              }),
+            }}
           />
         </Box>
       </Tooltip>
@@ -174,6 +194,7 @@ export default function CapDateChip({
           onChange={onChange}
           disabled={disabled}
           bare
+          accent={accent}
         />
       </Popover>
     </>

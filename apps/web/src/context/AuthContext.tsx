@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useCallback, useMemo, useEffect, useRef, ReactNode } from 'react';
 import { setHttpClientAccessToken } from '../api/httpClient';
+import { clearDatasetCache } from '../api/datasetCache';
 import { authStorage } from '../utils/authStorage';
 import { mfaVerify, MfaApiError } from '../api/mfa';
 
@@ -243,6 +244,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
         authStorage.removeRefreshToken();
+        // Logout is SPA navigation, not a reload — the session dataset cache
+        // would survive it and outlive the user on a shared machine.
+        clearDatasetCache();
         setUser(null);
         setAccessToken(null);
         setMfaChallengeToken(null);

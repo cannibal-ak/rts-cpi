@@ -2,13 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Typography, CircularProgress, Alert, Chip, Tooltip, useTheme } from '@mui/material';
 import { TravelExplore } from '@mui/icons-material';
 import * as echarts from 'echarts/core';
-import { LineChart } from 'echarts/charts';
+import { LineChart, ScatterChart } from 'echarts/charts';
 import {
   GridComponent, TooltipComponent, LegendComponent, DataZoomComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { ComposeOption } from 'echarts/core';
-import type { LineSeriesOption } from 'echarts/charts';
+import type { LineSeriesOption, ScatterSeriesOption } from 'echarts/charts';
 import type {
   GridComponentOption, TooltipComponentOption, LegendComponentOption, DataZoomComponentOption,
 } from 'echarts/components';
@@ -18,19 +18,22 @@ import PriceDetailCard from './PriceDetailCard';
 import {
   buildAirlineColorMap, formatClock, clockToMinutes,
   ROUTE_STYLES, ROUTE_STYLE_COUNT, DAYS_LEFT_MAX,
+  SOLD_OUT_Y, NOT_ON_SALE_Y, AVAILABILITY_LABELS,
 } from './priceChartTheme';
 import { FULL_DEP_RANGE, FULL_DURATION_RANGE, isNarrowed, type Range } from './PriceChartFilters';
+import { brandInk } from '../bannerTheme';
 import { api } from '../../../api';
-import type { PricePoint } from '../../../api/client';
+import type { PricePoint, NoFareDay } from '../../../api/client';
 
 // Only the pieces this chart draws are registered — the full ECharts bundle
 // is roughly twice the size and everything else in it is unused here.
 echarts.use([
-  LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, CanvasRenderer,
+  LineChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent, CanvasRenderer,
 ]);
 
 type ChartOption = ComposeOption<
   | LineSeriesOption
+  | ScatterSeriesOption
   | GridComponentOption
   | TooltipComponentOption
   | LegendComponentOption
@@ -63,6 +66,17 @@ interface LatestPricesPanelProps {
   active: boolean;
 }
 
+/**
+ * One availability-marker datum: every airline and route sharing a no-fare
+ * date and class. Grouped so a busy day draws one marker carrying a list,
+ * not a stack of overlapping dots.
+ */
+interface NoFareGroup {
+  date: string;
+  status: NoFareDay['status'];
+  entries: NoFareDay[];
+}
+
 /** Identity of a plotted fare, for de-duplicating pinned cards. */
 function pointKey(p: PricePoint): string {
   // market is part of the identity: the same airline, flight, date and fare
@@ -92,6 +106,10 @@ export default function LatestPricesPanel({
   // header's Cap date chip already states it, and repeating it inside the
   // chart was one of the lines cluttering the route strip.
   const [truncatedRoutes, setTruncatedRoutes] = useState<string[]>([]);
+  const [noFareDays, setNoFareDays] = useState<NoFareDay[]>([]);
+  // The server's own suppression flag: set when a stops/flt_num param made it
+  // withhold no_fare_days. The client-side equivalent is derived below.
+  const [availabilitySuppressed, setAvailabilitySuppressed] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pinned, setPinned] = useState<PricePoint[]>([]);
@@ -123,6 +141,8 @@ export default function LatestPricesPanel({
       setFetched([]);
       setPinned([]);
       setTruncatedRoutes([]);
+      setNoFareDays([]);
+      setAvailabilitySuppressed(false);
       return;
     }
     const controller = new AbortController();
@@ -132,6 +152,7 @@ export default function LatestPricesPanel({
       .listPricePoints(
         {
           routes: routesKey,
+          include_availability: 1,
           ...(capDate ? { cap_date: capDate } : {}),
           ...(singleStop !== undefined ? { stops: singleStop } : {}),
           ...(singleFltNum ? { flt_num: singleFltNum } : {}),
@@ -142,6 +163,8 @@ export default function LatestPricesPanel({
         setFetched(res.points);
         setCurrency(res.currency);
         setTruncatedRoutes(res.truncated_routes ?? []);
+        setNoFareDays(res.no_fare_days ?? []);
+        setAvailabilitySuppressed(res.availability_suppressed ?? false);
         // A card describes a fare from the previous query; keeping it open
         // across a route or date change would annotate a point that is no
         // longer on the chart.
@@ -152,6 +175,8 @@ export default function LatestPricesPanel({
         console.error('[LatestPrices] price-points failed:', err);
         setError(err?.message ?? 'could not load prices');
         setFetched([]);
+        setNoFareDays([]);
+        setAvailabilitySuppressed(false);
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
@@ -204,6 +229,21 @@ export default function LatestPricesPanel({
     return fetched.filter(p => p.dbd !== null && p.dbd > DAYS_LEFT_MAX).length;
   }, [fetched, daysLeft]);
 
+  // A no-fare day carries no stops and no flight number, so it cannot honestly
+  // satisfy either filter — any stops/flight selection hides the markers,
+  // whether the server applied it (single value) or the client does (multi).
+  const markersSuppressed = availabilitySuppressed || stops.length > 0 || fltNums.length > 0;
+
+  const visibleNoFareDays = useMemo(() => {
+    if (markersSuppressed || noFareDays.length === 0) return [];
+    // Route and Days Left refine the markers the same way they refine the
+    // points. The time filters do not: a marker is a whole-day statement with
+    // no departure time to compare against, and the tooltip says so.
+    const marketSet = new Set(routesKey.split(','));
+    const dbdSet = daysLeft.length ? new Set(daysLeft) : null;
+    return noFareDays.filter(d => marketSet.has(d.market) && (!dbdSet || dbdSet.has(d.dbd)));
+  }, [noFareDays, markersSuppressed, routesKey, daysLeft]);
+
   // Pinned cards whose point is no longer drawn would annotate empty space.
   const visiblePinned = useMemo(() => {
     const live = new Set(points.map(pointKey));
@@ -234,7 +274,25 @@ export default function LatestPricesPanel({
     const muted = theme.palette.text.secondary;
     const line = theme.palette.divider;
 
-    const series: LineSeriesOption[] = [];
+    // Brand red, lightened in dark mode like the sidebar ink. Worn by the
+    // zoom sliders (otherwise stock ECharts blue) and by the host carrier's
+    // legend text below.
+    const accent = brandInk(theme);
+    const zoomSliderStyle = {
+      fillerColor: 'rgba(205, 31, 37, 0.12)',
+      handleStyle: { color: accent, borderColor: accent },
+      moveHandleStyle: { color: accent },
+      emphasis: {
+        handleStyle: { color: accent, borderColor: accent },
+        moveHandleStyle: { color: accent },
+      },
+      selectedDataBackground: {
+        lineStyle: { color: accent },
+        areaStyle: { color: 'rgba(205, 31, 37, 0.2)' },
+      },
+    };
+
+    const series: Array<LineSeriesOption | ScatterSeriesOption> = [];
     for (const code of airlines) {
       for (const market of markets) {
         const data = points
@@ -266,12 +324,76 @@ export default function LatestPricesPanel({
       }
     }
 
+    // Availability markers ride the hidden second y-axis so the fare axis's
+    // zoom and scale never move them. One datum per (date, class); the
+    // airline/route list travels with it for the tooltip.
+    const groups = new Map<string, NoFareGroup>();
+    for (const d of visibleNoFareDays) {
+      const key = `${d.status}|${d.dep_date}`;
+      const g = groups.get(key);
+      if (g) g.entries.push(d);
+      else groups.set(key, { date: d.dep_date, status: d.status, entries: [d] });
+    }
+    const markerData = (status: NoFareDay['status']) =>
+      [...groups.values()]
+        .filter(g => g.status === status)
+        .map(g => ({
+          value: [`${g.date}T00:00:00Z`, status === 'sold_out' ? SOLD_OUT_Y : NOT_ON_SALE_Y] as [string, number],
+          noFare: g,
+        }));
+    const soldOutData = markerData('sold_out');
+    const notOnSaleData = markerData('not_on_sale');
+    if (soldOutData.length) {
+      series.push({
+        name: AVAILABILITY_LABELS.sold_out,
+        type: 'scatter',
+        yAxisIndex: 1,
+        data: soldOutData,
+        symbol: 'triangle',
+        symbolSize: 8,
+        itemStyle: { color: theme.palette.warning.main },
+        emphasis: { scale: 1.6 },
+        // Above the fare lines — a marker hidden behind a line defeats itself.
+        z: 6,
+      });
+    }
+    if (notOnSaleData.length) {
+      series.push({
+        name: AVAILABILITY_LABELS.not_on_sale,
+        type: 'scatter',
+        yAxisIndex: 1,
+        data: notOnSaleData,
+        // Hollow, so "never went on sale" reads as an absence next to the
+        // filled sold-out triangle.
+        symbol: 'circle',
+        symbolSize: 7,
+        itemStyle: { color: 'transparent', borderColor: theme.palette.text.disabled, borderWidth: 1.5 },
+        emphasis: { scale: 1.6 },
+        z: 6,
+      });
+    }
+
+    // Explicit legend entries so the host carrier's TEXT wears the brand red
+    // too, not just its swatch. Every series name must be listed — an entry
+    // missing from legend.data simply vanishes from the legend.
+    const referenceCodes = new Set(
+      airlines.filter(code => points.some(p => p.airline === code && p.role === 'reference')),
+    );
+    const legendData = series.map(s => {
+      const name = String(s.name);
+      const code = name.includes(' · ') ? name.slice(0, name.indexOf(' · ')) : name;
+      return referenceCodes.has(code)
+        ? { name, textStyle: { color: accent, fontWeight: 'bold' as const } }
+        : name;
+    });
+
     return {
       animation: false,
       backgroundColor: 'transparent',
       legend: {
         top: 4,
         type: 'scroll',
+        data: legendData,
         textStyle: { color: ink, fontSize: 11 },
         inactiveColor: muted,
       },
@@ -284,11 +406,28 @@ export default function LatestPricesPanel({
         textStyle: { color: ink, fontSize: 11 },
         // Hover stays a one-line read; the full detail is what clicking is for.
         formatter: (params: any) => {
+          const nf: NoFareGroup | undefined = params.data?.noFare;
+          if (nf) {
+            const listed = nf.entries.slice(0, 8)
+              .map(e => `${e.airline} (${e.market.replace('-', ' → ')})`);
+            const rest = nf.entries.length - listed.length;
+            return [
+              `<b>${AVAILABILITY_LABELS[nf.status]}</b> — ${nf.date}`,
+              nf.status === 'sold_out'
+                ? 'Nothing left to buy this day on:'
+                : 'Not yet open for booking this day on:',
+              ...listed,
+              ...(rest > 0 ? [`…and ${rest} more`] : []),
+              '<i style="opacity:.7">whole-day status — time filters do not apply to it</i>',
+            ].join('<br/>');
+          }
           const p: PricePoint = params.data?.point;
           if (!p) return '';
           const clock = formatClock(p.dep_time);
           return [
-            `<b>${p.airline}</b> ${p.flt_num ?? ''}${multiRoute ? ` · ${p.market}` : ''}`,
+            // The code wears its series colour, so WM reads brand red and
+            // every carrier's tooltip echoes its line.
+            `<b><span style="color:${colorMap[p.airline]}">${p.airline}</span></b> ${p.flt_num ?? ''}${multiRoute ? ` · ${p.market}` : ''}`,
             `${p.dep_date}${clock ? ` ${clock}` : ''}`,
             `<b>${p.tot_fare.toFixed(2)}</b> ${p.curr ?? ''}`,
             '<i style="opacity:.7">click to pin details</i>',
@@ -305,29 +444,35 @@ export default function LatestPricesPanel({
         axisLine: { lineStyle: { color: line } },
         splitLine: { show: true, lineStyle: { color: line, opacity: 0.4 } },
       },
-      yAxis: {
-        type: 'value',
-        name: currency ? `Fare (${currency})` : 'Fare',
-        nameLocation: 'middle',
-        nameGap: 42,
-        nameTextStyle: { color: muted, fontSize: 11 },
-        axisLabel: { color: muted, fontSize: 10 },
-        axisLine: { lineStyle: { color: line } },
-        splitLine: { lineStyle: { color: line, opacity: 0.4 } },
-        scale: true,
-      },
+      yAxis: [
+        {
+          type: 'value',
+          name: currency ? `Fare (${currency})` : 'Fare',
+          nameLocation: 'middle',
+          nameGap: 42,
+          nameTextStyle: { color: muted, fontSize: 11 },
+          axisLabel: { color: muted, fontSize: 10 },
+          axisLine: { lineStyle: { color: line } },
+          splitLine: { lineStyle: { color: line, opacity: 0.4 } },
+          scale: true,
+        },
+        // Hidden 0–1 strip the availability markers plot on. The y dataZoom
+        // below pins yAxisIndex 0, so zooming the fares leaves this axis —
+        // and the markers — where they are.
+        { type: 'value', show: false, min: 0, max: 1 },
+      ],
       dataZoom: [
         // Drag inside the plot and a handle per axis. Wheel zoom is off on
         // purpose: this pane fills the page and hijacking the wheel would take
         // scrolling away from anyone using one.
         { type: 'inside', xAxisIndex: 0, filterMode: 'none', zoomOnMouseWheel: false, moveOnMouseWheel: false },
         { type: 'inside', yAxisIndex: 0, filterMode: 'none', zoomOnMouseWheel: false, moveOnMouseWheel: false },
-        { type: 'slider', xAxisIndex: 0, bottom: 6, height: 16, filterMode: 'none' },
-        { type: 'slider', yAxisIndex: 0, left: 4, width: 14, filterMode: 'none' },
+        { type: 'slider', xAxisIndex: 0, bottom: 6, height: 16, filterMode: 'none', ...zoomSliderStyle },
+        { type: 'slider', yAxisIndex: 0, left: 4, width: 14, filterMode: 'none', ...zoomSliderStyle },
       ],
       series,
     };
-  }, [airlines, markets, multiRoute, colorMap, points, currency, theme]);
+  }, [airlines, markets, multiRoute, colorMap, points, visibleNoFareDays, currency, theme]);
 
   // ── Chart lifecycle ─────────────────────────────────────────────────
   // Initialised on first activation, because ECharts binding to a display:none
@@ -344,6 +489,7 @@ export default function LatestPricesPanel({
     chartRef.current = chart;
 
     chart.on('click', (params: any) => {
+      // Marker datums carry .noFare, not .point — a no-fare day has no fare detail to pin.
       const p: PricePoint | undefined = params.data?.point;
       if (!p) return;
       // Functional update, so the handler never closes over a stale list and
@@ -434,6 +580,12 @@ export default function LatestPricesPanel({
           out cannot be matched by it and are not shown.
         </Alert>
       )}
+      {markersSuppressed && (noFareDays.length > 0 || availabilitySuppressed) && (
+        <Alert severity="info" sx={{ mb: 0.5, py: 0, fontSize: 11.5 }}>
+          Sold-out / not-on-sale markers are hidden while a Stops or Flight Number filter is
+          active — a day with no fare has no stops or flight number to match against them.
+        </Alert>
+      )}
       {markets.length > ROUTE_STYLE_COUNT && (
         <Alert severity="info" sx={{ mb: 0.5, py: 0, fontSize: 11.5 }}>
           Line styles repeat after {ROUTE_STYLE_COUNT} routes — colour still identifies the airline.
@@ -468,7 +620,7 @@ export default function LatestPricesPanel({
         )}
         {hasRoutes && loading && (
           <Box sx={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <CircularProgress size={28} />
+            <CircularProgress size={28} sx={{ color: brandInk }} />
           </Box>
         )}
         {hasRoutes && !loading && !error && points.length === 0 && (
@@ -503,7 +655,7 @@ export default function LatestPricesPanel({
               <PriceDetailCard
                 key={pointKey(p)}
                 point={p}
-                color={colorMap[p.airline] ?? theme.palette.primary.main}
+                color={colorMap[p.airline] ?? brandInk(theme)}
                 currency={currency}
                 showMarket={multiRoute}
                 onClose={() => setPinned(prev => prev.filter(x => pointKey(x) !== pointKey(p)))}

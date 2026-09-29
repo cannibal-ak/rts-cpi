@@ -10,9 +10,10 @@ import {
 } from '@mui/icons-material';
 import EmptyState from '../../components/common/EmptyState';
 import { api } from '../../api';
-import { fetchAllPages } from '../../api/fetchAllPages';
+import { fetchAllPagesCached } from '../../api/datasetCache';
 import { isAbortError } from '../../api/httpClient';
 import type { AirlineSnapshot, FilterMetadata } from '../../types';
+import { BANNER_BG, brandInk } from '../../components/dashboard/bannerTheme';
 
 interface AirlineCpiPricingTabProps {
   tenantCode: 'JY' | 'PW' | 'ALT' | 'WM';
@@ -349,15 +350,22 @@ const EXPORT_COLUMNS: Array<{ header: string; key: keyof AirlineSnapshot }> = [
 
 // ── Page walker (load all rows for selected file_date) ──────────────────
 // Shared with the velocity and cruise grids — see api/fetchAllPages.ts.
+// Wrapped in the session cache: a repeat view of the same (tenant, file_date,
+// airline) is served from memory after a 50-row freshness probe instead of
+// re-walking every page. See api/datasetCache.ts.
 function fetchAllRows(
   baseQuery: Record<string, string>,
   tenantCode: 'JY' | 'PW' | 'ALT' | 'WM',
   onProgress?: (loaded: number, total: number) => void,
   signal?: AbortSignal,
 ): Promise<AirlineSnapshot[]> {
-  return fetchAllPages<AirlineSnapshot>({
-    fetchPage: (page, pageSize, sig) => api.airline.listSnapshots(
-      { ...baseQuery, tenant: tenantCode, page, page_size: pageSize },
+  return fetchAllPagesCached<AirlineSnapshot>({
+    key: { endpoint: '/api/v1/airline/snapshots', tenant: tenantCode, query: baseQuery },
+    fetchPage: (page, pageSize, sig, withTotal) => api.airline.listSnapshots(
+      {
+        ...baseQuery, tenant: tenantCode, page, page_size: pageSize,
+        with_total: withTotal === false ? 'false' : 'true',
+      },
       { signal: sig },
     ),
     onProgress,
@@ -388,6 +396,8 @@ function downloadBlob(blob: Blob, filename: string) {
 
 // ────────────────────────────────────────────────────────────────────────
 export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersChange, exportRef }: AirlineCpiPricingTabProps) {
+  // WinAir accents follow the brand red; other tenants keep theme primary.
+  const isWm = tenantCode === 'WM';
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [allData, setAllData] = useState<AirlineSnapshot[]>([]);
@@ -632,7 +642,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
           startIcon={<RestartAlt sx={{ fontSize: 13 }} />}
           onClick={handleResetClientFilters}
           disabled={!hasClientFilters}
-          sx={{ fontSize: 11, textTransform: 'none', minHeight: 26, py: 0.25, px: 0.75 }}
+          sx={{ fontSize: 11, textTransform: 'none', minHeight: 26, py: 0.25, px: 0.75, ...(isWm && { color: brandInk }) }}
         >
           Reset
         </Button>
@@ -642,7 +652,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {loading && allData.length === 0 ? (
           <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <CircularProgress size={28} />
+            <CircularProgress size={28} sx={isWm ? { color: brandInk } : undefined} />
           </Box>
         ) : allData.length === 0 ? (
           <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -652,6 +662,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
               description={`Pick a file date to load ${tenantCode} airline CPI snapshots.`}
               actionLabel="Load All"
               onAction={() => fetchData(filters.file_date ? { file_date: filters.file_date } : {})}
+              accent={isWm ? BANNER_BG : undefined}
             />
           </Box>
         ) : (
@@ -693,6 +704,7 @@ export default function AirlineCpiPricingTab({ tenantCode, filters, onFiltersCha
                       row={row}
                       expanded={expandedId === row.id}
                       onToggle={() => handleRowToggle(row.id)}
+                      isWm={isWm}
                     />
                   ))}
                 </TableBody>
@@ -753,9 +765,11 @@ interface PricingRowProps {
   row: AirlineSnapshot;
   expanded: boolean;
   onToggle: () => void;
+  /** WinAir rows accent in brand red instead of theme primary. */
+  isWm?: boolean;
 }
 
-function PricingRow({ row, expanded, onToggle }: PricingRowProps) {
+function PricingRow({ row, expanded, onToggle, isWm = false }: PricingRowProps) {
   const isRT = row.trip_type === 'RT';
   return (
     <>
@@ -802,7 +816,7 @@ function PricingRow({ row, expanded, onToggle }: PricingRowProps) {
               bgcolor: 'action.hover',
               p: 1,
               borderLeft: 3,
-              borderColor: 'primary.main',
+              borderColor: isWm ? brandInk : 'primary.main',
               maxHeight: 150,
               overflowY: 'auto',
             }}>

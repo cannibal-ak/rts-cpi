@@ -2,8 +2,9 @@ import { Box, Tabs, Tab, Alert, Skeleton, CircularProgress } from '@mui/material
 import { ScatterPlot } from '@mui/icons-material';
 import type { DashboardTab } from '../../../api/client';
 import {
-  BANNER_HEADER_BG, LABEL_INK, MUTED_INK,
-  FIELD_BG, FIELD_BG_ACTIVE, FIELD_LINE, FIELD_LINE_ACTIVE,
+  BANNER_BG, BANNER_HEADER_BG,
+  FILTER_BG, FILTER_BORDER, FILTER_ERROR_BG, FILTER_ERROR_INK,
+  FILTER_FIELD_BG, FILTER_FIELD_LINE, FILTER_LABEL_INK, FILTER_SKELETON,
 } from '../bannerTheme';
 
 /**
@@ -58,9 +59,11 @@ export default function WinairTabBar({
   return (
     <Box
       sx={{
-        bgcolor: BANNER_HEADER_BG,
-        // Same radius/elevation spec as WinairTopFilterBar's card, so the two
-        // read as siblings; the margin is the gap between them.
+        // Same surface, radius and elevation as WinairTopFilterBar's card, so
+        // the two read as siblings; the margin is the gap between them.
+        bgcolor: FILTER_BG,
+        border: '1px solid',
+        borderColor: FILTER_BORDER,
         borderRadius: 1.5,
         boxShadow: 1,
         mb: 0.75,
@@ -73,7 +76,7 @@ export default function WinairTabBar({
         <Box sx={{ display: 'flex', gap: 1, py: 0.875, px: 1 }}>
           {Array.from({ length: 6 }, (_, i) => (
             <Skeleton key={i} variant="rounded" width={i === 0 ? 110 : 130} height={30}
-                      sx={{ bgcolor: 'rgba(255,255,255,0.13)', borderRadius: 999 }} />
+                      sx={{ bgcolor: FILTER_SKELETON, borderRadius: 999 }} />
           ))}
         </Box>
       ) : (
@@ -89,9 +92,16 @@ export default function WinairTabBar({
             py: 0.75,
             '& .MuiTabs-indicator': { display: 'none' },
             '& .MuiTabs-scrollButtons.Mui-disabled': { opacity: 0.25 },
-            '& .MuiTabs-scrollButtons': { color: LABEL_INK },
-            // Pills reuse the filter fields' idle/active tokens so the whole
-            // banner keeps one idle-vs-holding-a-selection language.
+            '& .MuiTabs-scrollButtons': { color: FILTER_LABEL_INK },
+            // Idle pills reuse the filter fields' tokens, so an untouched tab
+            // and an untouched field look the same. The current tab fills with
+            // brand red, NOT the filters' teal: the two say different things —
+            // red is where you are in the dashboard, teal is what you have
+            // filtered — and one accent for both would blur that.
+            //
+            // Both pill states carry their own text colour rather than
+            // inheriting, so each is legible on its own fill: white on the red
+            // measures 5.5:1, slate on the white 7.6:1.
             '& .MuiTab-root': {
               minHeight: 32,
               minWidth: 'auto',
@@ -100,18 +110,20 @@ export default function WinairTabBar({
               py: 0.5,
               px: 1.75,
               borderRadius: 999,
-              bgcolor: FIELD_BG,
-              border: `1px solid ${FIELD_LINE}`,
+              bgcolor: FILTER_FIELD_BG,
+              border: `1px solid ${FILTER_FIELD_LINE}`,
               fontSize: 12.5,
               fontWeight: 500,
               textTransform: 'none',
-              color: MUTED_INK,
+              color: FILTER_LABEL_INK,
               gap: 0.75,
+              '&:hover': { borderColor: BANNER_BG, color: BANNER_HEADER_BG },
               '&.Mui-selected': {
                 color: '#ffffff',
                 fontWeight: 600,
-                bgcolor: FIELD_BG_ACTIVE,
-                borderColor: FIELD_LINE_ACTIVE,
+                bgcolor: BANNER_BG,
+                borderColor: BANNER_BG,
+                '&:hover': { bgcolor: BANNER_HEADER_BG, borderColor: BANNER_HEADER_BG, color: '#ffffff' },
               },
             },
           }}
@@ -130,8 +142,10 @@ export default function WinairTabBar({
               // Progress sits on the tab being switched TO, so the wait is
               // attached to the thing the user just asked for.
               icon={
+                // The tab being switched to is the selected one, so the
+                // spinner sits on the filled pill and has to be white.
                 switching && value === tab.id
-                  ? <CircularProgress size={12} sx={{ color: LABEL_INK }} />
+                  ? <CircularProgress size={12} sx={{ color: '#ffffff' }} />
                   : undefined
               }
               iconPosition="start"
@@ -147,9 +161,9 @@ export default function WinairTabBar({
             py: 0,
             mb: 0.75,
             fontSize: 11.5,
-            bgcolor: 'rgba(255,255,255,0.10)',
-            color: '#ffd9d9',
-            '& .MuiAlert-icon': { color: '#ffd9d9', py: 0.5 },
+            bgcolor: FILTER_ERROR_BG,
+            color: FILTER_ERROR_INK,
+            '& .MuiAlert-icon': { color: FILTER_ERROR_INK, py: 0.5 },
           }}
         >
           {error}

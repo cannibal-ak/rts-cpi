@@ -1,13 +1,13 @@
 import { Autocomplete, TextField, Checkbox, Chip, Tooltip, Box, Typography } from '@mui/material';
 import { CheckBoxOutlineBlank, CheckBox as CheckBoxIcon, KeyboardArrowDown } from '@mui/icons-material';
 import {
-  BANNER_HEADER_BG,
-  FIELD_BG,
-  FIELD_BG_ACTIVE,
-  FIELD_LINE,
-  FIELD_LINE_ACTIVE,
-  LABEL_INK,
-  MUTED_INK,
+  FILTER_ACCENT,
+  FILTER_CHIP_BG,
+  FILTER_FIELD_BG,
+  FILTER_FIELD_LINE,
+  FILTER_INK,
+  FILTER_LABEL_INK,
+  FILTER_MUTED_INK,
 } from '../bannerTheme';
 
 export interface FilterSelectProps {
@@ -18,8 +18,11 @@ export interface FilterSelectProps {
   multiple?: boolean;
   disabled?: boolean;
   description?: string | null;
-  /** Rendered on a dark surface (the WinAir banner) — inverts text/borders. */
-  onDark?: boolean;
+  /**
+   * Rendered on the WinAir filter card — takes that card's fixed teal-grey
+   * palette instead of the app theme's. Off, the control is stock MUI.
+   */
+  onBanner?: boolean;
   /** Ties the label to the input. Native filter ids are unique per dashboard. */
   id?: string;
   minWidth?: number;
@@ -46,11 +49,11 @@ export default function FilterSelect({
   multiple = true,
   disabled = false,
   description,
-  onDark = false,
+  onBanner = false,
   id,
   minWidth = 0,
 }: FilterSelectProps) {
-  const ink = onDark ? '#ffffff' : undefined;
+  const ink = onBanner ? FILTER_INK : undefined;
   const active = value.length > 0;
   const fieldId = id ? `filter-${id}` : undefined;
 
@@ -68,7 +71,7 @@ export default function FilterSelect({
           fontWeight: 500,
           letterSpacing: '0.05em',
           textTransform: 'uppercase',
-          color: onDark ? (active ? '#ffffff' : LABEL_INK) : 'text.secondary',
+          color: onBanner ? (active ? FILTER_INK : FILTER_LABEL_INK) : 'text.secondary',
           mb: '5px',
         }}
       >
@@ -101,7 +104,14 @@ export default function FilterSelect({
                   checkedIcon={<CheckBoxIcon fontSize="small" />}
                   checked={selected}
                   size="small"
-                  sx={{ mr: 0.75, p: 0.25 }}
+                  // Teal check rides the onBanner gate so non-banner use stays
+                  // stock. It matches the accent the chosen values wear back in
+                  // the field; the popper itself follows the app theme.
+                  sx={{
+                    mr: 0.75,
+                    p: 0.25,
+                    ...(onBanner && { '&.Mui-checked': { color: FILTER_ACCENT } }),
+                  }}
                 />
               )}
               {option}
@@ -122,10 +132,10 @@ export default function FilterSelect({
                   maxWidth: 120,
                   fontSize: 11,
                   m: 0,
-                  bgcolor: onDark ? 'rgba(255,255,255,0.22)' : undefined,
+                  bgcolor: onBanner ? FILTER_CHIP_BG : undefined,
                   color: ink,
                   '& .MuiChip-label': { px: 0.75 },
-                  '& .MuiChip-deleteIcon': { color: onDark ? 'rgba(255,255,255,0.7)' : undefined },
+                  '& .MuiChip-deleteIcon': { color: onBanner ? FILTER_MUTED_INK : undefined },
                 }}
               />
             );
@@ -152,15 +162,18 @@ export default function FilterSelect({
             // taller than its neighbours and break the grid's baseline.
             flexWrap: 'nowrap',
             overflow: 'hidden',
-            bgcolor: onDark ? (active ? FIELD_BG_ACTIVE : FIELD_BG) : undefined,
+            // One fill for both states: on this surface the border and the
+            // value chips carry idle-vs-holding-a-selection, and a second
+            // white would have nowhere to go.
+            bgcolor: onBanner ? FILTER_FIELD_BG : undefined,
           },
           '& .MuiOutlinedInput-notchedOutline': {
-            borderColor: onDark ? (active ? FIELD_LINE_ACTIVE : FIELD_LINE) : undefined,
+            borderColor: onBanner ? (active ? FILTER_ACCENT : FILTER_FIELD_LINE) : undefined,
           },
-          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: onDark ? '#ffffff' : undefined },
-          '& .Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: onDark ? '#ffffff' : undefined },
-          '& .MuiSvgIcon-root': { color: onDark ? MUTED_INK : undefined },
-          '& input::placeholder': { color: onDark ? 'rgba(255,255,255,0.55)' : undefined, opacity: 1 },
+          '&:hover .MuiOutlinedInput-notchedOutline': { borderColor: onBanner ? FILTER_ACCENT : undefined },
+          '& .Mui-focused .MuiOutlinedInput-notchedOutline': { borderColor: onBanner ? FILTER_ACCENT : undefined },
+          '& .MuiSvgIcon-root': { color: onBanner ? FILTER_MUTED_INK : undefined },
+          '& input::placeholder': { color: onBanner ? FILTER_MUTED_INK : undefined, opacity: 1 },
           '& .MuiAutocomplete-input': { minWidth: '30px !important' },
           '& .MuiAutocomplete-endAdornment': { right: 6 },
           '& .MuiAutocomplete-tag': { m: 0 },
@@ -168,9 +181,9 @@ export default function FilterSelect({
           // the span: the class is on the chips as well, and a descendant
           // selector here outranks the chips' own sx.
           '& span.MuiAutocomplete-tag': {
-            ...(onDark && {
-              bgcolor: '#ffffff',
-              color: BANNER_HEADER_BG,
+            ...(onBanner && {
+              bgcolor: FILTER_ACCENT,
+              color: '#ffffff',
               fontSize: 11,
               fontWeight: 500,
               lineHeight: '18px',

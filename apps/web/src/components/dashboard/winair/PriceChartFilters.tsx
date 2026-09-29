@@ -3,7 +3,8 @@ import {
   formatDuration, DEP_TIME_MIN, DEP_TIME_MAX, DURATION_MIN, DURATION_MAX,
 } from './priceChartTheme';
 import {
-  FIELD_BG, FIELD_BG_ACTIVE, FIELD_LINE, FIELD_LINE_ACTIVE, LABEL_INK, MUTED_INK,
+  FILTER_ACCENT, FILTER_FIELD_BG, FILTER_FIELD_LINE, FILTER_INK,
+  FILTER_LABEL_INK, FILTER_MUTED_INK, FILTER_SLIDER_RAIL,
 } from '../bannerTheme';
 
 export type Range = [number, number];
@@ -49,7 +50,7 @@ export default function TimeRangeFilter({
           display: 'block',
           fontSize: 11,
           fontWeight: 500,
-          color: LABEL_INK,
+          color: active ? FILTER_INK : FILTER_LABEL_INK,
           textTransform: 'uppercase',
           letterSpacing: 0.3,
           mb: 0.25,
@@ -64,8 +65,8 @@ export default function TimeRangeFilter({
       <Box
         sx={{
           border: '1px solid',
-          borderColor: active ? FIELD_LINE_ACTIVE : FIELD_LINE,
-          bgcolor: active ? FIELD_BG_ACTIVE : FIELD_BG,
+          borderColor: active ? FILTER_ACCENT : FILTER_FIELD_LINE,
+          bgcolor: FILTER_FIELD_BG,
           borderRadius: '4px',
           px: 1,
           pt: 0.25,
@@ -91,14 +92,14 @@ export default function TimeRangeFilter({
           aria-label={label}
           getAriaValueText={(v: number) => formatDuration(v)}
           sx={{
-            color: '#ffffff',
+            color: FILTER_ACCENT,
             py: 0,
-            '& .MuiSlider-rail': { backgroundColor: MUTED_INK, opacity: 0.45 },
+            '& .MuiSlider-rail': { backgroundColor: FILTER_SLIDER_RAIL, opacity: 1 },
             '& .MuiSlider-track': { border: 'none' },
             '& .MuiSlider-thumb': {
               width: 11,
               height: 11,
-              '&:hover, &.Mui-focusVisible': { boxShadow: '0 0 0 6px rgba(255,255,255,0.16)' },
+              '&:hover, &.Mui-focusVisible': { boxShadow: '0 0 0 6px rgba(47,110,115,0.16)' },
             },
             '& .MuiSlider-valueLabel': { fontSize: 10, py: 0.25, px: 0.5 },
           }}
@@ -109,7 +110,7 @@ export default function TimeRangeFilter({
           component="span"
           sx={{
             fontSize: 10.5,
-            color: active ? '#ffffff' : MUTED_INK,
+            color: active ? FILTER_INK : FILTER_MUTED_INK,
             fontVariantNumeric: 'tabular-nums',
             whiteSpace: 'nowrap',
             flexShrink: 0,

@@ -62,6 +62,20 @@ def _sort_filter_values(values: list[str]) -> list[str]:
         return sorted(values)
 
 
+def _display_value(v: Any) -> Any:
+    """Collapse integral floats (1.0 -> 1) before a dropdown value is stringified.
+
+    Superset's chart-data API serialises an integer column as floats whenever
+    NULLs force the pandas column to float64 (stops, days_left). The float
+    string both reads wrong in the dropdown and fails Postgres's cast back to
+    integer when the value is applied as a filter ('1.0'::integer errors,
+    '1'::integer does not).
+    """
+    if isinstance(v, float) and v.is_integer():
+        return int(v)
+    return v
+
+
 def _validate_cap_date(value: str, field: str) -> str:
     """Validate YYYY-MM-DD strings before injecting into an RLS WHERE clause.
 
@@ -196,6 +210,7 @@ TENANT_CAPDATE_ONLY_TABLES = {
     ],
     "WM":  [
         "wm_all_airlines_fares",
+        "wm_all_airlines_fares_availability",
         "wm_pricing_recommendations",
         "wm_velocity_normalized",
     ],
@@ -453,7 +468,7 @@ class SupersetClient:
         }
         data = await self._session_post("/api/v1/chart/data", payload)
         rows = (data.get("result") or [{}])[0].get("data") or []
-        values = [r.get(column) for r in rows]
+        values = [_display_value(r.get(column)) for r in rows]
         return _sort_filter_values(
             [str(v) for v in values if v is not None and str(v) != ""]
         )

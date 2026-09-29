@@ -170,6 +170,32 @@ class PricePointOut(BaseModel):
     dbd: Optional[int] = None
 
 
+class NoFareDayOut(BaseModel):
+    """A day on which an airline had no purchasable fare, classified.
+
+    Such a day produces no PricePointOut at all — the chart shows a silent
+    gap. This row says which kind of gap it is. 'sold_out': flights were
+    offered but every fare arrived as 0, which is how the feed writes a
+    flight whose inventory is gone (a sold-out reference row still carries
+    its stops count; a sold-out competitor row still carries a flight
+    number). 'not_on_sale': the schedule showed nothing offerable, so the
+    source cells were blank and ingestion coerced them to 0 (no stops, no
+    flight number). A day where any flight still carried a real fare is
+    not listed here at all.
+    """
+
+    # The same "ORG-DST" string PricePointOut.market carries — markers join
+    # to their fare line on this key.
+    market: str
+    airline: str
+    dep_date: date
+    # 'sold_out' | 'not_on_sale'. One sold-out flight is enough to call the
+    # day sold out; only an entirely blank day counts as not on sale.
+    status: str
+    # Days before departure at capture, same convention as PricePointOut.dbd.
+    dbd: int
+
+
 class PricePointsResponse(BaseModel):
     cap_date: Optional[date] = None
     # Echoes the routes actually queried, as "ORG-DST" strings. A list
@@ -187,6 +213,14 @@ class PricePointsResponse(BaseModel):
     # the reader to guess which line is incomplete.
     truncated_routes: list[str] = []
     points: list[PricePointOut] = []
+    # Whole-day availability markers, populated only when the caller sends
+    # include_availability. Empty otherwise — a caller that never asks can
+    # ignore both availability fields entirely.
+    no_fare_days: list[NoFareDayOut] = []
+    # True when a stops/flt_num filter forced the markers off: a no-fare day
+    # carries NULL stops and a blank flight number, so it cannot honestly
+    # satisfy either filter. Lets the caller say why the markers vanished.
+    availability_suppressed: bool = False
 
 
 class PriceHistoryPointOut(BaseModel):

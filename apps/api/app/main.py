@@ -8,6 +8,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.core.config import settings
 from app.core.database import SessionLocal
@@ -63,6 +64,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Grid pages ship ~1-2 MB of JSON per request uncompressed; gzip cuts that
+# ~85-90%. Level 6 over the default 9: ~2-3x less CPU for ~1% less ratio.
+# minimum_size skips auth/metadata responses. The xlsx StreamingResponse
+# exports pass through harmlessly (gzip of already-deflated bytes).
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=6)
 
 # Public routers (no auth required)
 app.include_router(health.router)

@@ -30,7 +30,7 @@ class AirlineCpiSnapshot(Base):
     ref_tax = Column(Numeric(12, 2), nullable=False)
     ref_yq = Column(Numeric(12, 2), nullable=False)
     ref_seats = Column(Integer, nullable=False)
-    ref_curr = Column(String(4), nullable=True, server_default="USD")
+    ref_curr = Column(String(4), nullable=True, server_default="GBP")
     comp_al = Column(String(3), nullable=False)
     comp_flt_num = Column(String(64), nullable=False)
     comp_org = Column(String(4), nullable=False)
@@ -42,9 +42,7 @@ class AirlineCpiSnapshot(Base):
     comp_tax = Column(Numeric(12, 2), nullable=False)
     comp_yq = Column(Numeric(12, 2), nullable=False)
     comp_seats = Column(Integer, nullable=False)
-    comp_curr = Column(String(4), nullable=True, server_default="USD")
-    pos = Column(String(4), nullable=False)
-    poa = Column(String(4), nullable=False)
+    comp_curr = Column(String(4), nullable=True, server_default="GBP")
 
     # ── Reference flight — outbound additions (11) — Phase 2A migration 022 ──
     ref_dep_time = Column(String(8), nullable=True)
@@ -98,9 +96,12 @@ class AirlineCpiSnapshot(Base):
     comp_ret_seats = Column(Integer, nullable=True)
     comp_ret_equip_code = Column(String(128), nullable=True)
 
-    # ── Point-of-* (PW source carries pod/poc) (2) ──
-    pod = Column(String(4), nullable=True)
-    poc = Column(String(4), nullable=True)
+    # ── POS / channel (4) — dictionary v2026-05-09, migration 023
+    #    (replaced legacy pos/poa/pod/poc, dropped from the table in 023) ──
+    ref_pos = Column(String(4), nullable=True)
+    ref_channel = Column(String(20), nullable=True)
+    comp_pos = Column(String(4), nullable=True)
+    comp_channel = Column(String(20), nullable=True)
 
     # ── Provenance (1) — dictionary-required, currently absent from sources ──
     path = Column(String(50), nullable=True)

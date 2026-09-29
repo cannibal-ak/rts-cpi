@@ -10,9 +10,10 @@ import {
 } from '@mui/icons-material';
 import EmptyState from '../../components/common/EmptyState';
 import { api } from '../../api';
-import { fetchAllPages } from '../../api/fetchAllPages';
+import { fetchAllPagesCached } from '../../api/datasetCache';
 import { isAbortError } from '../../api/httpClient';
 import type { VelocitySnapshot, FilterMetadata } from '../../types';
+import { BANNER_BG, brandInk } from '../../components/dashboard/bannerTheme';
 
 interface AirlineCpiVelocityTabProps {
   /** Tenant code selects which airline's velocity snapshot to query. */
@@ -126,15 +127,21 @@ const EXPORT_COLUMNS: Array<{ header: string; key: keyof VelocitySnapshot }> = [
 
 // ── Page walker (load all rows for selected file_date) ──────────────────
 // Shared with the pricing and cruise grids — see api/fetchAllPages.ts.
+// Wrapped in the session cache (api/datasetCache.ts): repeat views are served
+// from memory after a 50-row freshness probe instead of re-walking every page.
 function fetchAllRows(
   baseQuery: Record<string, string>,
   tenantCode: 'JY' | 'PW' | 'ALT' | 'WM',
   onProgress?: (loaded: number, total: number) => void,
   signal?: AbortSignal,
 ): Promise<VelocitySnapshot[]> {
-  return fetchAllPages<VelocitySnapshot>({
-    fetchPage: (page, pageSize, sig) => api.airline.velocity.listSnapshots(
-      { ...baseQuery, tenant: tenantCode, page, page_size: pageSize },
+  return fetchAllPagesCached<VelocitySnapshot>({
+    key: { endpoint: '/api/v1/airline/velocity/snapshots', tenant: tenantCode, query: baseQuery },
+    fetchPage: (page, pageSize, sig, withTotal) => api.airline.velocity.listSnapshots(
+      {
+        ...baseQuery, tenant: tenantCode, page, page_size: pageSize,
+        with_total: withTotal === false ? 'false' : 'true',
+      },
       { signal: sig },
     ),
     onProgress,
@@ -165,6 +172,8 @@ function downloadBlob(blob: Blob, filename: string) {
 
 // ────────────────────────────────────────────────────────────────────────
 export default function AirlineCpiVelocityTab({ tenantCode, filters, onFiltersChange, exportRef }: AirlineCpiVelocityTabProps) {
+  // WinAir accents follow the brand red; other tenants keep theme primary.
+  const isWm = tenantCode === 'WM';
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState<{ loaded: number; total: number } | null>(null);
   const [allData, setAllData] = useState<VelocitySnapshot[]>([]);
@@ -395,7 +404,7 @@ export default function AirlineCpiVelocityTab({ tenantCode, filters, onFiltersCh
           startIcon={<RestartAlt sx={{ fontSize: 13 }} />}
           onClick={handleResetClientFilters}
           disabled={!hasClientFilters}
-          sx={{ fontSize: 11, textTransform: 'none', minHeight: 26, py: 0.25, px: 0.75 }}
+          sx={{ fontSize: 11, textTransform: 'none', minHeight: 26, py: 0.25, px: 0.75, ...(isWm && { color: brandInk }) }}
         >
           Reset
         </Button>
@@ -405,7 +414,7 @@ export default function AirlineCpiVelocityTab({ tenantCode, filters, onFiltersCh
       <Box sx={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {loading && allData.length === 0 ? (
           <Box sx={{ flex: 1, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <CircularProgress size={28} />
+            <CircularProgress size={28} sx={isWm ? { color: brandInk } : undefined} />
           </Box>
         ) : allData.length === 0 ? (
           <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -415,6 +424,7 @@ export default function AirlineCpiVelocityTab({ tenantCode, filters, onFiltersCh
               description={`Pick a file date to load ${tenantCode} velocity snapshots.`}
               actionLabel="Load All"
               onAction={() => fetchData(filters.file_date ? { file_date: filters.file_date } : {})}
+              accent={isWm ? BANNER_BG : undefined}
             />
           </Box>
         ) : (

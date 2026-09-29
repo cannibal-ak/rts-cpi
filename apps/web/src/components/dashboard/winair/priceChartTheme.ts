@@ -7,35 +7,42 @@
  * airline that changed colour between the two panes would read as two
  * different carriers.
  *
- * WM is deliberately first and the most saturated: on this dashboard it is
- * always the host carrier, and the whole point of the chart is comparing
- * everyone else against it.
+ * WM is the WinAir brand red (bannerTheme BANNER_BG): on this dashboard it
+ * is always the host carrier, and the whole point of the chart is comparing
+ * everyone else against it. The competitor hues are spaced for colourblind
+ * safety around that fixed anchor — the set passes the palette validator in
+ * light AND dark mode (worst adjacent CVD ΔE 12.9, normal-vision floor 23),
+ * with legend order host-first-then-alphabetical as the adjacency chain.
+ * BW is gold, not amber: the sold-out availability markers wear
+ * theme warning amber, and the two must not impersonate each other.
  */
 
 /** Airlines with a colour fixed by the Superset provisioning script. */
 const KNOWN_AIRLINE_COLORS: Record<string, string> = {
-  WM: '#C5981B',
-  '5L': '#2B6B2B',
-  BW: '#D4652F',
-  Exp: '#8B5CF6',
-  Expedia: '#8B5CF6',
-  JY: '#1A6B8A',
-  S6: '#E4049C',
+  WM: '#CD1F25',
+  '5L': '#1BAF7A',
+  '7Z': '#8B5CF6',
+  BW: '#C08A00',
+  DM: '#0891B2',
+  Exp: '#A05A2C',
+  Expedia: '#A05A2C',
+  JY: '#2A78D6',
+  S6: '#D6208F',
 };
 
 /**
- * Fallbacks for carriers the provisioning script never named — 7Z and DM
- * both appear in WinAir's live data. Assigned by first appearance rather
- * than hashing the code, so a route's legend reads in a stable order and
- * two carriers can never collide on the same colour within one chart.
+ * Fallbacks for carriers nobody has named yet (7Z and DM graduated to fixed
+ * colours above). Assigned by first appearance rather than hashing the code,
+ * so a route's legend reads in a stable order and two carriers can never
+ * collide on the same colour within one chart. No red-family entries — a
+ * fallback must never impersonate the host carrier.
  */
 const FALLBACK_COLORS = [
   '#64748B',
   '#0070C0',
-  '#B45309',
   '#0F766E',
+  '#B45309',
   '#7C3AED',
-  '#BE123C',
 ];
 
 /**
@@ -81,6 +88,29 @@ export const ROUTE_STYLES: Array<{ dash: 'solid' | 'dashed' | 'dotted' | number[
 
 /** How many distinct route styles exist before they start repeating. */
 export const ROUTE_STYLE_COUNT = ROUTE_STYLES.length;
+
+/**
+ * Marker heights for the two no-fare classes, on a hidden 0–1 axis.
+ *
+ * A no-fare marker states "this day had nothing to buy" — it is not a price,
+ * so it cannot sit on the fare axis, where zooming would move it and its
+ * height would read as a value. The chart gives the markers their own
+ * invisible 0–1 axis pinned to the plot floor; these are their positions on
+ * it. Two distinct heights, sold-out above not-on-sale, so a date carrying
+ * both classes shows two markers instead of one hiding the other.
+ */
+export const SOLD_OUT_Y = 0.06;
+export const NOT_ON_SALE_Y = 0.025;
+
+/**
+ * Legend and tooltip names for the availability markers. 'sold_out' is a day
+ * where fares were observed but every one was zero — the seats are gone.
+ * 'not_on_sale' is a day the feed carried no bookable inventory at all yet.
+ */
+export const AVAILABILITY_LABELS: Record<'sold_out' | 'not_on_sale', string> = {
+  sold_out: 'Sold out',
+  not_on_sale: 'Not on sale',
+};
 
 /**
  * Upper bound of the dashboard's "Days Left" filter.

@@ -30,6 +30,7 @@ import { NavItem } from '../../types';
 import { isSuperAdmin } from '../../utils/access';
 import SidebarDashboardCharts from './SidebarDashboardCharts';
 import { selectedRowSx, subItemSx, subItemTextProps } from './sidebarSubItem';
+import { BANNER_BG, BANNER_HEADER_BG, brandInk } from '../dashboard/bannerTheme';
 
 const DRAWER_WIDTH = 260;
 const RAIL_WIDTH = 68;
@@ -108,6 +109,12 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
   const location = useLocation();
   const { hasAccess, session } = useSession();
   const { logout } = useAuth();
+
+  // WinAir's chrome follows its brand red instead of the app navy. Undefined
+  // for every other tenant, and every use below falls back to theme primary.
+  const isWmTenant =
+    session.enabled_modules.length === 1 && session.enabled_modules[0] === 'airline_wm';
+  const accent = isWmTenant ? BANNER_BG : undefined;
 
   const filteredItems = navigationItems.filter(item => {
     if (item.requireSuperAdmin && !isSuperAdmin(session)) return false;
@@ -256,10 +263,10 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
                     justifyContent: 'center',
                     px: 0,
                     '&.Mui-selected': {
-                      bgcolor: 'primary.main',
+                      bgcolor: accent ?? 'primary.main',
                       color: 'primary.contrastText',
                       '& .MuiListItemIcon-root': { color: 'primary.contrastText' },
-                      '&:hover': { bgcolor: 'primary.dark' },
+                      '&:hover': { bgcolor: accent ? BANNER_HEADER_BG : 'primary.dark' },
                     },
                   }}
                 >
@@ -345,10 +352,14 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
                         px: 1.5,
                         minHeight: 40,
                         ...(hasSubItems && onPath && {
-                          color: 'primary.main',
-                          '& .MuiListItemIcon-root': { color: 'primary.main' },
+                          // brandInk lightens the red in dark mode (flat red
+                          // reads ~2.9:1 on dark paper); navy path unchanged.
+                          color: accent ? brandInk : 'primary.main',
+                          '& .MuiListItemIcon-root': {
+                            color: accent ? brandInk : 'primary.main',
+                          },
                         }),
-                        ...selectedRowSx,
+                        ...selectedRowSx(accent),
                       }}
                     >
                       <ListItemIcon sx={{ minWidth: 0, mr: 1.5, justifyContent: 'center' }}>
@@ -376,7 +387,7 @@ export default function Sidebar({ open, onOpen, onClose }: SidebarProps) {
                           key={child.path}
                           selected={childSelected}
                           onClick={() => handleNav(child.path)}
-                          sx={subItemSx}
+                          sx={subItemSx(accent)}
                         >
                           <ListItemIcon sx={{ minWidth: 0, mr: 1.5, justifyContent: 'center' }}>
                             {React.cloneElement(
