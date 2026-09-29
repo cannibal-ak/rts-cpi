@@ -232,6 +232,28 @@ native chart (its comment: BW is gold *because* the markers wear amber).
 | 105 Lowest Available Avg_Fare | `Lowest Available Fare, <carrier>` | Palette A |
 | 109 markers | `Sold out, <AL> (1)` / `Not on sale, <AL> (1)` | `#F39C12` / `#9E9E9E` |
 
+**The carrier loops were one carrier short** (fixed 2026-08-19, dev + prod).
+Palette A above lists eight carriers; the `CARRIERS` dict in
+`wm_dash6_palette_keys.py` and `wm_carrier_consistency.py` listed seven — Exp
+was missing from both. So `Lowest Available Fare, Exp`, `Sold out, Exp (1)` and
+`Not on sale, Exp (1)` were never written and those three series fell through to
+forest green. The bare `Exp`/`Expedia` keys and the `Max Fare, Exp` /
+`Min Fare, Exp` composites came from a different script that *did* carry Exp,
+which is why the omission did not look like one. Fixed additively by
+`scripts/superset/wm_dash6_exp_keys.py`; no new hex — Exp was already bound to
+`#A05A2C`, the markers to the existing availability pair.
+
+**Why dev's verifier passed while prod was broken.** A *missing* key is as
+silent as a mis-spelled one, and the verifier can only report a series it sees
+the API build. Dev's WinAir dataset (169k rows, 7 carriers on dash 6) has no Exp
+rows on slices 105/109, so dev builds no Exp series and reports ALL BOUND;
+prod (237k rows, 8 carriers) builds them. Dashboard 6's `label_colors` was
+byte-identical on both environments the whole time. **A green series on prod is
+therefore not automatically drift** — check whether prod's data simply reaches a
+series dev's does not before going looking for a diff. Corollary: run the
+verifier against the environment with the widest data, and treat a dev PASS as
+necessary, not sufficient.
+
 **Slice 111 replaced slice 97** (2026-08-18): the old chart was a legacy
 `dist_bar`, where per-carrier bars are structurally impossible (its one series
 is the metric). 111 is `echarts_timeseries_bar` with `x_axis=airline` +
@@ -247,10 +269,10 @@ discovered live from `position_json`.
 
 Scripts, in order applied: `scripts/superset/wm_recolor_velocity.py`,
 `wm_dash6_palette_keys.py`, `wm_carrier_consistency.py` (the 97→111 swap +
-marker recolour). Each carries an in-DB backup table and a `--revert`; the
-later two revert **key by key** rather than restoring whole payloads, because
-other sessions edit this dashboard concurrently and a payload restore would
-discard their work.
+marker recolour), `wm_dash6_exp_keys.py` (the missing Exp carrier). Each carries
+an in-DB backup table and a `--revert`; all but the first revert **key by key**
+rather than restoring whole payloads, because other sessions edit this dashboard
+concurrently and a payload restore would discard their work.
 
 ### Palette C — recommendation semantics (slice 112)
 
