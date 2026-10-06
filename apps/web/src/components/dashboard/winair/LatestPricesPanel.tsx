@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Box, Typography, CircularProgress, Alert, Chip, Tooltip, useTheme, alpha } from '@mui/material';
 import { TravelExplore, EventAvailable, EventBusy } from '@mui/icons-material';
 import * as echarts from 'echarts/core';
@@ -14,11 +14,11 @@ import type {
 } from 'echarts/components';
 
 import EmptyState from '../../common/EmptyState';
-import PriceDetailCard from './PriceDetailCard';
+import PriceDetailCard, { type DragHandleProps } from './PriceDetailCard';
 import {
   buildAirlineColorMap, formatClock, clockToMinutes,
   ROUTE_STYLES, ROUTE_STYLE_COUNT, DAYS_LEFT_MAX,
-  SOLD_OUT_Y, NOT_ON_SALE_Y, AVAILABILITY_LABELS,
+  SOLD_OUT_Y, NOT_ON_SALE_Y, AVAILABILITY_LABELS, PRICE_CARD_WIDTH,
 } from './priceChartTheme';
 import { useCarrierColorTable } from '../tenantCarrierColors';
 import { FULL_DEP_RANGE, FULL_DURATION_RANGE, isNarrowed, type Range } from './PriceChartFilters';
@@ -103,6 +103,118 @@ function pointKey(p: PricePoint): string {
   return [p.market, p.airline, p.flt_num ?? '', p.dep_date, p.dep_time ?? '', p.tot_fare, p.cab_code ?? ''].join('|');
 }
 
+/** Where a pinned card sits over the plot, in px from its top-left, and its stacking order. */
+interface CardPos {
+  x: number;
+  y: number;
+  z: number;
+}
+
+// Card placement. New cards open along the top edge, below the legend, from
+// the right; a full row cascades down and left so every header stays visible.
+const CARD_TOP = 28;
+const CARD_RIGHT = 8;
+// Clear of the fare axis and its zoom slider.
+const CARD_LEFT_LIMIT = 72;
+const CARD_GAP = 8;
+// At least the header height, so a cascaded card never covers the header
+// of the one beneath it.
+const CARD_CASCADE = 36;
+// A dragged card keeps its header inside the plot, so it can always be
+// grabbed back.
+const CARD_HEADER_H = 32;
+
+function clamp(value: number, lo: number, hi: number): number {
+  return Math.min(Math.max(value, lo), Math.max(lo, hi));
+}
+
+/** The first opening slot whose header no existing card sits on. */
+function spawnPosition(taken: CardPos[], width: number): { x: number; y: number } {
+  const slot = PRICE_CARD_WIDTH + CARD_GAP;
+  const perRow = Math.max(1, Math.floor((width - CARD_RIGHT - CARD_LEFT_LIMIT + CARD_GAP) / slot));
+  for (let i = 0; ; i += 1) {
+    const layer = Math.floor(i / perRow);
+    const x = Math.max(0, width - CARD_RIGHT - PRICE_CARD_WIDTH - (i % perRow) * slot - layer * CARD_CASCADE);
+    const y = CARD_TOP + layer * CARD_CASCADE;
+    const clash = taken.some(p => Math.abs(p.x - x) < PRICE_CARD_WIDTH && Math.abs(p.y - y) < CARD_HEADER_H);
+    // The cap only matters with dozens of cards open; past it they stack.
+    if (!clash || i >= 64) return { x, y };
+  }
+}
+
+/**
+ * One pinned card's place over the plot, and the drag that moves it.
+ *
+ * The position stays local while a drag is under way, so neither the panel
+ * nor the chart re-renders on every pointer move; the panel only hears where
+ * the card came to rest.
+ */
+function FloatingCard({ pos, boundsRef, onMoveEnd, onRaise, children }: {
+  pos: CardPos;
+  boundsRef: RefObject<HTMLDivElement>;
+  onMoveEnd: (x: number, y: number) => void;
+  onRaise: () => void;
+  children: (dragHandle: DragHandleProps) => ReactNode;
+}) {
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  // Where inside the card it was grabbed, so it moves with the pointer
+  // instead of jumping its corner under it.
+  const grabRef = useRef<{ dx: number; dy: number } | null>(null);
+  // Mirrors `live` for pointerup, which can arrive before the last move renders.
+  const liveRef = useRef<{ x: number; y: number } | null>(null);
+  const [live, setLive] = useState<{ x: number; y: number } | null>(null);
+
+  const endDrag = () => {
+    const last = liveRef.current;
+    grabRef.current = null;
+    liveRef.current = null;
+    setLive(null);
+    if (last) onMoveEnd(last.x, last.y);
+  };
+
+  const dragHandle: DragHandleProps = {
+    onPointerDown: e => {
+      if (e.button !== 0 || (e.target as HTMLElement).closest('button')) return;
+      const box = boxRef.current?.getBoundingClientRect();
+      if (!box) return;
+      grabRef.current = { dx: e.clientX - box.left, dy: e.clientY - box.top };
+      e.currentTarget.setPointerCapture(e.pointerId);
+      // No text selection while the pointer sweeps across the page.
+      e.preventDefault();
+    },
+    onPointerMove: e => {
+      const grab = grabRef.current;
+      const bounds = boundsRef.current?.getBoundingClientRect();
+      const box = boxRef.current;
+      if (!grab || !bounds || !box) return;
+      liveRef.current = {
+        x: clamp(e.clientX - bounds.left - grab.dx, 0, bounds.width - box.offsetWidth),
+        y: clamp(e.clientY - bounds.top - grab.dy, 0, bounds.height - CARD_HEADER_H),
+      };
+      setLive(liveRef.current);
+    },
+    onPointerUp: endDrag,
+    onPointerCancel: endDrag,
+  };
+
+  const { x, y } = live ?? pos;
+  return (
+    <Box
+      ref={boxRef}
+      onPointerDownCapture={onRaise}
+      sx={{ position: 'absolute', zIndex: pos.z }}
+      style={{
+        // Clamped here too, so a card parked against the right edge stays in
+        // view when the window narrows.
+        left: `max(0px, min(${x}px, calc(100% - ${PRICE_CARD_WIDTH}px)))`,
+        top: `max(0px, min(${y}px, calc(100% - ${CARD_HEADER_H}px)))`,
+      }}
+    >
+      {children(dragHandle)}
+    </Box>
+  );
+}
+
 /**
  * Every fare observed on the selected routes, one dot each — no averaging.
  *
@@ -135,6 +247,12 @@ export default function LatestPricesPanel({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pinned, setPinned] = useState<PricePoint[]>([]);
+  // Keyed by pointKey. Kept for cards the filters currently hide, so one
+  // comes back where it was left.
+  const [cardPos, setCardPos] = useState<Record<string, CardPos>>({});
+  const zTopRef = useRef(0);
+  // The plot area the cards float over and are kept inside.
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const [ready, setReady] = useState(false);
 
   // The chart cannot say anything useful about all 55 routes at once, and
@@ -163,6 +281,7 @@ export default function LatestPricesPanel({
     if (!routesKey || noCaptureInRange) {
       setFetched([]);
       setPinned([]);
+      setCardPos({});
       setTruncatedRoutes([]);
       setNoFareDays([]);
       setAvailabilitySuppressed(false);
@@ -199,6 +318,7 @@ export default function LatestPricesPanel({
         // across a route or date change would annotate a point that is no
         // longer on the chart.
         setPinned([]);
+        setCardPos({});
       })
       .catch(err => {
         if (controller.signal.aborted) return;
@@ -296,9 +416,14 @@ export default function LatestPricesPanel({
   const colorMap = useMemo(() => buildAirlineColorMap(airlines, carrierTable), [airlines, carrierTable]);
   // Style index follows the ORDER THE USER SELECTED, so a route keeps its dash
   // pattern as other routes are added or removed around it.
+  //
+  // Keyed on the joined string, never on effectiveRoutes: on the default
+  // route that array is rebuilt every render, and a new `markets` rebuilds
+  // the chart option — which threw away the zoom window whenever a click
+  // pinned a card.
   const markets = useMemo(
-    () => effectiveRoutes.filter(m => points.some(p => p.market === m)),
-    [effectiveRoutes, points], // eslint-disable-line react-hooks/exhaustive-deps
+    () => routesKey.split(',').filter(m => points.some(p => p.market === m)),
+    [routesKey, points],
   );
   const multiRoute = markets.length > 1;
 
@@ -525,11 +650,19 @@ export default function LatestPricesPanel({
       // Marker datums carry .noFare, not .point — a no-fare day has no fare detail to pin.
       const p: PricePoint | undefined = params.data?.point;
       if (!p) return;
-      // Functional update, so the handler never closes over a stale list and
+      const key = pointKey(p);
+      const width = overlayRef.current?.clientWidth ?? 0;
+      const z = ++zTopRef.current;
+      // Functional updates, so the handler never closes over a stale list and
       // can be bound once for the life of the instance.
       setPinned(prev =>
-        prev.some(existing => pointKey(existing) === pointKey(p)) ? prev : [...prev, p],
+        prev.some(existing => pointKey(existing) === key) ? prev : [...prev, p],
       );
+      // Clicking an already-pinned point brings its card to the front.
+      setCardPos(prev => ({
+        ...prev,
+        [key]: prev[key] ? { ...prev[key], z } : { ...spawnPosition(Object.values(prev), width), z },
+      }));
     });
 
     const observer = new ResizeObserver(() => chart.resize());
@@ -545,12 +678,55 @@ export default function LatestPricesPanel({
     chartRef.current = null;
   }, []);
 
+  // The zoom window and legend toggles belong to one query: a route set on one
+  // capture day. Within it, a rebuilt option (a filter, the theme) carries
+  // them over; a new query starts from the full range.
+  const viewScope = `${routesKey}|${capDate ?? ''}`;
+  const viewScopeRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!ready) return;
+    const chart = chartRef.current;
+    if (!ready || !chart) return;
+    let next = option;
+    if (viewScopeRef.current === viewScope) {
+      const prev = chart.getOption() as {
+        dataZoom?: Array<{ start?: number; end?: number; startValue?: number; endValue?: number }>;
+        legend?: Array<{ selected?: Record<string, boolean> }>;
+      };
+      const selected = prev.legend?.[0]?.selected;
+      next = {
+        ...option,
+        // Values, not percentages: a filter that changes the data's extent
+        // would otherwise slide the same percentages over different dates.
+        dataZoom: (option.dataZoom as DataZoomComponentOption[]).map((dz, i) => {
+          const old = prev.dataZoom?.[i];
+          const zoomed = old && ((old.start ?? 0) > 0 || (old.end ?? 100) < 100);
+          return zoomed ? { ...dz, startValue: old.startValue, endValue: old.endValue } : dz;
+        }),
+        ...(selected && { legend: { ...(option.legend as LegendComponentOption), selected } }),
+      };
+    }
+    viewScopeRef.current = viewScope;
     // notMerge, so a selection with fewer series than the last does not keep
     // the previous one's lines hanging around.
-    chartRef.current?.setOption(option as echarts.EChartsCoreOption, true);
-  }, [option, ready]);
+    chart.setOption(next as echarts.EChartsCoreOption, true);
+  }, [option, ready, viewScope]);
+
+  const moveCard = (key: string, x: number, y: number) =>
+    setCardPos(prev => (prev[key] ? { ...prev, [key]: { ...prev[key], x, y } } : prev));
+  const raiseCard = (key: string) => {
+    if (!cardPos[key] || cardPos[key].z === zTopRef.current) return;
+    const z = ++zTopRef.current;
+    setCardPos(prev => (prev[key] ? { ...prev, [key]: { ...prev[key], z } } : prev));
+  };
+  const closeCard = (key: string) => {
+    setPinned(prev => prev.filter(x => pointKey(x) !== key));
+    setCardPos(prev => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  };
 
   // Returning from a Superset section, the host was last laid out at
   // display:none; ECharts holds that stale size until told to measure again.
@@ -646,7 +822,9 @@ export default function LatestPricesPanel({
         <Alert severity="error" sx={{ mb: 0.5, py: 0, fontSize: 11.5 }}>{error}</Alert>
       )}
 
-      <Box sx={{ position: 'relative', flexGrow: 1, minHeight: 0 }}>
+      {/* isolation keeps the cards' climbing z-indexes from outranking
+          menus and popovers elsewhere on the page. */}
+      <Box ref={overlayRef} sx={{ position: 'relative', flexGrow: 1, minHeight: 0, isolation: 'isolate' }}>
         {/* The canvas host is always mounted: ECharts binds to this element
             once, and swapping it out for an empty state would dispose the
             instance on every route change. */}
@@ -686,37 +864,32 @@ export default function LatestPricesPanel({
           </Box>
         )}
 
-        {/* Pinned cards float over the plot and scroll horizontally once more
-            are open than fit. pointerEvents is released on the rail itself so
-            the chart underneath stays usable in the gaps between cards. */}
-        {visiblePinned.length > 0 && (
-          <Box
-            sx={{
-              position: 'absolute',
-              top: 28,
-              right: 8,
-              left: 72,
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 1,
-              overflowX: 'auto',
-              pb: 1,
-              pointerEvents: 'none',
-              '& > *': { pointerEvents: 'auto' },
-            }}
-          >
-            {visiblePinned.map(p => (
-              <PriceDetailCard
-                key={pointKey(p)}
-                point={p}
-                color={colorMap[p.airline] ?? brandInk(theme)}
-                currency={currency}
-                showMarket={multiRoute}
-                onClose={() => setPinned(prev => prev.filter(x => pointKey(x) !== pointKey(p)))}
-              />
-            ))}
-          </Box>
-        )}
+        {/* Pinned cards float over the plot, each placed on its own, so the
+            chart stays usable everywhere around them. A card drags by its
+            header to wherever it is not in the way. */}
+        {visiblePinned.map(p => {
+          const key = pointKey(p);
+          return (
+            <FloatingCard
+              key={key}
+              pos={cardPos[key] ?? { x: 0, y: CARD_TOP, z: 0 }}
+              boundsRef={overlayRef}
+              onMoveEnd={(x, y) => moveCard(key, x, y)}
+              onRaise={() => raiseCard(key)}
+            >
+              {dragHandle => (
+                <PriceDetailCard
+                  point={p}
+                  color={colorMap[p.airline] ?? brandInk(theme)}
+                  currency={currency}
+                  showMarket={multiRoute}
+                  onClose={() => closeCard(key)}
+                  dragHandle={dragHandle}
+                />
+              )}
+            </FloatingCard>
+          );
+        })}
       </Box>
     </Box>
   );
