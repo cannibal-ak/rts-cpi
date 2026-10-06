@@ -1,12 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type PointerEvent } from 'react';
 import {
   Box, Typography, IconButton, Collapse, Tooltip, CircularProgress,
 } from '@mui/material';
-import { Close, ExpandLess, ExpandMore, ShowChart, FlightTakeoff } from '@mui/icons-material';
+import { Close, ExpandLess, ExpandMore, ShowChart, FlightTakeoff, DragIndicator } from '@mui/icons-material';
 import { api } from '../../../api';
 import type { PricePoint, PriceHistoryPoint } from '../../../api/client';
-import { formatClock, formatDeparture, formatDuration, formatSeen } from './priceChartTheme';
+import {
+  formatClock, formatDeparture, formatDuration, formatSeen, PRICE_CARD_WIDTH,
+} from './priceChartTheme';
 import { useBrandedChrome } from '../tenantChrome';
+
+/** Pointer handlers the header wears when the card can be dragged by it. */
+export interface DragHandleProps {
+  onPointerDown: (e: PointerEvent<HTMLElement>) => void;
+  onPointerMove: (e: PointerEvent<HTMLElement>) => void;
+  onPointerUp: (e: PointerEvent<HTMLElement>) => void;
+  onPointerCancel: (e: PointerEvent<HTMLElement>) => void;
+}
 
 interface PriceDetailCardProps {
   point: PricePoint;
@@ -16,6 +26,8 @@ interface PriceDetailCardProps {
   /** Name the market when more than one route is plotted. */
   showMarket?: boolean;
   onClose: () => void;
+  /** Makes the header a drag handle. The parent owns where the card sits. */
+  dragHandle?: DragHandleProps;
 }
 
 /** One label/value line. Values that are absent render an em-dash, never a zero. */
@@ -28,18 +40,19 @@ function DetailRow({ label, value, tint }: { label: string; value: string; tint?
         alignItems: 'baseline',
         gap: 1,
         px: 1,
-        py: 0.4,
+        py: 0.15,
         // Alternating tint, as in the reference card — it keeps a long
         // label/value list scannable without drawing rules between rows.
         bgcolor: tint ? 'action.hover' : 'transparent',
       }}
     >
-      <Typography sx={{ fontSize: 11.5, color: 'text.secondary', whiteSpace: 'nowrap' }}>
+      <Typography sx={{ fontSize: 10.5, lineHeight: 1.4, color: 'text.secondary', whiteSpace: 'nowrap' }}>
         {label}
       </Typography>
       <Typography
         sx={{
-          fontSize: 11.5,
+          fontSize: 10.5,
+          lineHeight: 1.4,
           fontWeight: 500,
           color: 'text.primary',
           textAlign: 'right',
@@ -76,8 +89,9 @@ function Sparkline({ points, color }: { points: PriceHistoryPoint[]; color: stri
     );
   }
 
-  const width = 232;
-  const height = 40;
+  // Roughly the card's inner width, so the dots stay round when stretched.
+  const width = 200;
+  const height = 36;
   const fares = points.map(p => p.tot_fare);
   const min = Math.min(...fares);
   const max = Math.max(...fares);
@@ -136,7 +150,7 @@ function Sparkline({ points, color }: { points: PriceHistoryPoint[]; color: stri
  * only the fare history is fetched, and only when asked for.
  */
 export default function PriceDetailCard({
-  point, color, currency, showMarket, onClose,
+  point, color, currency, showMarket, onClose, dragHandle,
 }: PriceDetailCardProps) {
   const { brandInk } = useBrandedChrome();
 
@@ -185,7 +199,8 @@ export default function PriceDetailCard({
   return (
     <Box
       sx={{
-        width: 264,
+        width: PRICE_CARD_WIDTH,
+        boxSizing: 'border-box',
         flexShrink: 0,
         borderRadius: '12px',
         border: 1,
@@ -198,23 +213,33 @@ export default function PriceDetailCard({
         borderLeftColor: color,
       }}
     >
-      {/* Header — airline, and the two controls */}
+      {/* Header — airline, and the two controls. Also the drag handle when
+          the card is movable; its buttons keep their own clicks. */}
       <Box
+        {...dragHandle}
         sx={{
           display: 'flex',
           alignItems: 'center',
           gap: 0.5,
           px: 1,
-          py: 0.5,
+          py: 0.25,
           bgcolor: 'action.hover',
+          ...(dragHandle && {
+            cursor: 'grab',
+            '&:active': { cursor: 'grabbing' },
+            // Without this a touch drag scrolls the page instead of the card.
+            touchAction: 'none',
+            userSelect: 'none',
+          }),
         }}
       >
-        <FlightTakeoff sx={{ fontSize: 15, color }} />
+        {dragHandle && <DragIndicator sx={{ fontSize: 14, color: 'text.disabled', ml: -0.5, mr: -0.25 }} />}
+        <FlightTakeoff sx={{ fontSize: 14, color }} />
         {/* The host carrier's code wears its series colour (brand red);
             competitor codes stay theme ink. */}
         <Typography
           sx={{
-            fontSize: 12.5,
+            fontSize: 12,
             fontWeight: 700,
             flexGrow: 1,
             ...(point.role === 'reference' && { color }),
@@ -240,22 +265,28 @@ export default function PriceDetailCard({
       </Box>
 
       <Collapse in={expanded}>
-        <Typography
-          sx={{ fontSize: 11, fontWeight: 600, color: 'text.secondary', px: 1, pt: 0.75, pb: 0.25 }}
+        {/* Heading and route share a line — one row fewer on a card that
+            floats over the plot. */}
+        <Box
+          sx={{
+            display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 1, px: 1, pt: 0.5, pb: 0.25,
+          }}
         >
-          Outbound Sector
-        </Typography>
-        <Typography sx={{ fontSize: 13, fontWeight: 600, px: 1, pb: 0.5 }}>
-          {point.origin} › {point.destination}
-          {/* A competitor's own stations can differ from the market it was
-              compared in, so name the market when several are plotted and
-              this card could otherwise be attributed to the wrong line. */}
-          {showMarket && point.market !== `${point.origin}-${point.destination}` && (
-            <Box component="span" sx={{ ml: 0.75, fontSize: 10.5, fontWeight: 500, color: 'text.secondary' }}>
-              in {point.market.replace('-', ' › ')}
-            </Box>
-          )}
-        </Typography>
+          <Typography sx={{ fontSize: 10.5, fontWeight: 600, color: 'text.secondary', whiteSpace: 'nowrap' }}>
+            Outbound Sector
+          </Typography>
+          <Typography sx={{ fontSize: 12, fontWeight: 600, textAlign: 'right' }}>
+            {point.origin} › {point.destination}
+            {/* A competitor's own stations can differ from the market it was
+                compared in, so name the market when several are plotted and
+                this card could otherwise be attributed to the wrong line. */}
+            {showMarket && point.market !== `${point.origin}-${point.destination}` && (
+              <Box component="span" sx={{ display: 'block', fontSize: 10, fontWeight: 500, color: 'text.secondary' }}>
+                in {point.market.replace('-', ' › ')}
+              </Box>
+            )}
+          </Typography>
+        </Box>
 
         <DetailRow label="Departing" value={formatDeparture(point.dep_date, point.dep_time)} tint />
         <DetailRow label="Arriving" value={formatClock(point.arr_time)} />
@@ -271,13 +302,13 @@ export default function PriceDetailCard({
         {seatsLabel && <DetailRow label="Seats" value={seatsLabel} tint />}
 
         {/* Price block */}
-        <Box sx={{ borderTop: 1, borderColor: 'divider', mt: 0.5, pt: 0.5 }}>
-          <Typography sx={{ fontSize: 11, fontWeight: 600, color: 'text.secondary', px: 1, pb: 0.25 }}>
+        <Box sx={{ borderTop: 1, borderColor: 'divider', mt: 0.25, pt: 0.25 }}>
+          <Typography sx={{ fontSize: 10.5, fontWeight: 600, color: 'text.secondary', px: 1 }}>
             Outbound Price {(point.curr || currency) && `(${point.curr || currency})`}
           </Typography>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', px: 1 }}>
-            <Typography sx={{ fontSize: 11.5, color: 'text.secondary' }}>Total</Typography>
-            <Typography sx={{ fontSize: 18, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+            <Typography sx={{ fontSize: 10.5, color: 'text.secondary' }}>Total</Typography>
+            <Typography sx={{ fontSize: 15, lineHeight: 1.3, fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
               {money(point.tot_fare)}
             </Typography>
           </Box>
@@ -295,10 +326,10 @@ export default function PriceDetailCard({
             alignItems: 'center',
             gap: 0.5,
             px: 1,
-            py: 0.4,
+            py: 0.15,
           }}
         >
-          <Typography sx={{ fontSize: 10.5, color: 'text.secondary', flexGrow: 1 }}>
+          <Typography sx={{ fontSize: 10, color: 'text.secondary', flexGrow: 1 }}>
             Seen: {formatSeen(point.cap_date)}
             {point.dbd !== null && ` (${point.dbd} DBD)`}
           </Typography>

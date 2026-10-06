@@ -146,6 +146,13 @@ export const AVAILABILITY_LABELS: Record<'sold_out' | 'not_on_sale', string> = {
  */
 export const DAYS_LEFT_MAX = 45;
 
+/**
+ * Outer width of a pinned fare card, its 5px of borders included. Shared
+ * because the chart lays the cards out over the plot and keeps them inside
+ * it, which needs the width up front.
+ */
+export const PRICE_CARD_WIDTH = 224;
+
 /** Two-letter day label used in the card's "Departing" line, e.g. "Th". */
 const DAY_LABELS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
