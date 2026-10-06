@@ -122,6 +122,8 @@ export default function FilterSelect({
               <Chip
                 key={key}
                 label={option}
+                // A narrow cell can still ellipsize a long value; hover reads it.
+                title={option}
                 size="small"
                 {...rest}
                 sx={{
@@ -172,7 +174,35 @@ export default function FilterSelect({
           '& .MuiSvgIcon-root': { color: onBanner ? FILTER_MUTED_INK : undefined },
           '& input::placeholder': { color: onBanner ? FILTER_MUTED_INK : undefined, opacity: 1 },
           '& .MuiAutocomplete-input': { minWidth: '30px !important' },
-          '& .MuiAutocomplete-endAdornment': { right: 6 },
+          // Idle with a selection (MUI's summary view: one chip + "+N"), there
+          // is nothing to type, so the empty input gives up its 30px, the chip
+          // drops its delete cross and may shrink to an ellipsis, and the clear
+          // button — invisible here until hover anyway — hands its gutter back
+          // to the chip. Otherwise, on a narrow cell, the chip kept its full
+          // width and pushed the "+N" count out under the clear / arrow icons,
+          // and the cross plus that gutter left "S…" of "SXM-ANU". Focus the
+          // field and it is exactly as before, crosses and clear included;
+          // Clear all and the checkboxes work regardless.
+          // Multi-select only: a single-select shows its value IN the input,
+          // so collapsing that would hide the selection itself.
+          ...(onBanner && multiple && {
+            '&.MuiAutocomplete-hasClearIcon:not(.Mui-focused)': {
+              '& .MuiInputBase-root': { pr: '30px !important' },
+              '& .MuiAutocomplete-clearIndicator': { display: 'none' },
+              '& .MuiAutocomplete-input': {
+                minWidth: '0 !important',
+                width: 0,
+                paddingLeft: '0 !important',
+                paddingRight: '0 !important',
+              },
+              '& .MuiChip-root': { minWidth: 0 },
+              '& .MuiChip-deleteIcon': { display: 'none' },
+            },
+          }),
+          // Three classes deep to outrank MUI's own `right: 9`, which silently
+          // won before and sat the 48px icon pair 5px inside the 52px gutter
+          // reserved for it above — onto the "+N" count in a narrow cell.
+          '& .MuiOutlinedInput-root .MuiAutocomplete-endAdornment': { right: 6 },
           '& .MuiAutocomplete-tag': { m: 0 },
           // MUI's own "+N" overflow marker, restyled as a count pill. Scoped to
           // the span: the class is on the chips as well, and a descendant
