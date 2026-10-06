@@ -345,6 +345,12 @@ export default function DashboardViewerPage() {
   // that would have forced a re-embed just marks it stale instead.
   const embedStaleRef = useRef(false);
   const embeddedOnceRef = useRef(false);
+  // An embed is owed: the landing gate skipped it, or the last attempt
+  // failed, and none has started since. The Dashboard fallback tab pays it.
+  // Not `!embeddedOnceRef` — that is also true while the first embed is still
+  // in flight, so landing straight on ?tab=dashboard started a second embed
+  // that raced the first.
+  const embedOwedRef = useRef(false);
 
   // Mint a fresh permalink whenever the pinned tab changes, then re-embed.
   // Filter changes do NOT come through here - applyWinairFilters re-mints with
@@ -401,13 +407,13 @@ export default function DashboardViewerPage() {
 
   // The Dashboard fallback tab shows the iframe WITHOUT pinning a section, so
   // the permalink effect above never re-embeds for it — arriving there still
-  // has to pay for anything deferred while Latest Prices was up, or for the
-  // very first embed, which the landing gate skipped. Ordered after that
-  // effect on purpose: it clears permalinkKeyRef first, so the embed this
+  // has to pay for anything deferred while Latest Prices was up, or for an
+  // embed still owed (skipped by the landing gate, or failed). Ordered after
+  // that effect on purpose: it clears permalinkKeyRef first, so the embed this
   // triggers opens Superset's own default section rather than a stale pin.
   useEffect(() => {
     if (!isWinair || activeTab !== DASHBOARD_TAB) return;
-    if (embedStaleRef.current || !embeddedOnceRef.current) setRefreshKey(k => k + 1);
+    if (embedStaleRef.current || embedOwedRef.current) setRefreshKey(k => k + 1);
   }, [isWinair, activeTab]);
 
   /** Move the WinAir bar. `?tab=` is the single source of truth for the selection. */
@@ -678,7 +684,8 @@ export default function DashboardViewerPage() {
   }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!id || !mountRef.current || !meta) return;
+    const mountEl = mountRef.current;
+    if (!id || !mountEl || !meta) return;
 
     // WinAir lands on Latest Prices, which is CPI-rendered. Embedding the
     // dashboard behind it would spend a guest token and every chart query on
@@ -688,9 +695,26 @@ export default function DashboardViewerPage() {
     // ever cleared inside this effect, so returning early without it leaves
     // the Refresh button disabled for good.
     if (isWinair && activeTab === PRICES_TAB && !embeddedOnceRef.current) {
+      embedOwedRef.current = true;
       setIsLoading(false);
       return;
     }
+    embedOwedRef.current = false;
+    // Nothing else ever clears it, so a retry that succeeds would otherwise
+    // sit under the previous attempt's message.
+    setError(null);
+
+    // Each embed draws into its own child of the mount Box, removed again on
+    // cleanup. Embeds can overlap: a refreshKey bump while one is in flight (a
+    // section picked, or a deep link's permalink arriving, before the first
+    // embed lands; the Box remounts, and a late read of mountRef found the
+    // NEW box), a switch to another dashboard (same Box), StrictMode's double
+    // effect in dev. The SDK's mount and unmount both replaceChildren on the
+    // element they are given, so a shared one let a superseded embed wipe the
+    // live iframe and leave the loading overlay up for good.
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;inset:0';
+    mountEl.appendChild(host);
 
     let unmount: (() => void) | undefined;
     // `unmount` is only assigned after two awaits. If refreshKey bumps again
@@ -699,11 +723,13 @@ export default function DashboardViewerPage() {
     // refresh timer keeps polling forever. This flag lets the late assignment
     // tear itself down instead.
     let disposed = false;
+    let loadedTimer: ReturnType<typeof setTimeout> | undefined;
 
     const embed = async () => {
       try {
         // ── 1. Frontend access guard ──
         if (!canAccessDashboard(session, id)) {
+          embedOwedRef.current = true;
           setError('Access Denied: You do not have permission to view this dashboard.');
           setIsLoading(false);
           return;
@@ -718,6 +744,8 @@ export default function DashboardViewerPage() {
         if (!window.supersetEmbeddedSdk) {
           throw new Error('Superset Embedded SDK did not load. Check the <script> tag in index.html.');
         }
+        // Superseded while waiting: a newer embed owns the pane and its state.
+        if (disposed) return;
 
         // ── 3. Fetch embedded_uuid + initial guest token from backend ──
         //   Pass the current date filter so the very first token carries
@@ -728,6 +756,9 @@ export default function DashboardViewerPage() {
           id, dateFilterRef.current,
           meta.tenant === 'FJL' ? fjlCurrencyRef.current : undefined,
         );
+        // Same again: stop before the SDK spends a second guest token on a
+        // host that is already detached.
+        if (disposed) return;
 
         // ── 4. Embed the dashboard ──
         //   SDK creates an iframe to: {SUPERSET_URL}/embedded/{embedded_uuid}
@@ -761,7 +792,7 @@ export default function DashboardViewerPage() {
         const result = await window.supersetEmbeddedSdk.embedDashboard({
           id: metadata.embedded_uuid,
           supersetDomain: SUPERSET_URL,
-          mountPoint: mountRef.current!,
+          mountPoint: host,
           fetchGuestToken: async () => {
             const { token } = await api.superset.getGuestToken(
               id, dateFilterRef.current,
@@ -793,9 +824,16 @@ export default function DashboardViewerPage() {
         embeddedOnceRef.current = true;
         embedStaleRef.current = false;
 
-        // Give Superset a moment to render inside the iframe
-        setTimeout(() => setIsLoading(false), 1500);
+        // Give Superset a moment to render inside the iframe. Cleared on
+        // cleanup, so it cannot drop the overlay in the middle of a newer
+        // embed's load.
+        loadedTimer = setTimeout(() => setIsLoading(false), 1500);
       } catch (err: any) {
+        // A superseded embed's failure is not the page's: the newer embed
+        // owns the error and loading state, and has cleared the owed flag.
+        if (disposed) return;
+        // Owed again, so the Dashboard fallback tab retries it.
+        embedOwedRef.current = true;
         console.error('Dashboard embed failed:', err);
         const msg = err?.message || 'Failed to load dashboard';
         setError(msg.startsWith('API ') || msg.startsWith('Network Error')
@@ -807,7 +845,7 @@ export default function DashboardViewerPage() {
 
     embed();
 
-    return () => { disposed = true; unmount?.(); };
+    return () => { disposed = true; clearTimeout(loadedTimer); unmount?.(); host.remove(); };
   }, [id, refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const LoadingIcon = meta?.isAirline ? Flight : DirectionsBoat;
@@ -1164,7 +1202,8 @@ export default function DashboardViewerPage() {
               position: 'absolute',
               inset: 0,
               visibility: isLoading ? 'hidden' : 'visible',
-              '& > iframe': { width: '100%', height: '100% !important', border: 'none' },
+              // Not `& > iframe`: each embed's iframe sits inside its own host div.
+              '& iframe': { width: '100%', height: '100% !important', border: 'none' },
             }}
           />
         </Paper>
