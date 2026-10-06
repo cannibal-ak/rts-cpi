@@ -190,6 +190,8 @@ services:
       # Airplane fly-across loading spinner replaces loading.gif (see superset-patches/README)
       - ./superset-patches/loading_airplane.gif:/app/superset/static/assets/images/loading.gif:ro
       - ./superset-patches/loading_airplane.gif:/app/superset/static/assets/loading.cff8a5da..gif:ro
+      # Hides the tab/header permalink (anchor link) icon on every Superset page (see superset-patches/README)
+      - ./superset-patches/tail_js_custom_extra.html:/app/superset/templates/tail_js_custom_extra.html:ro
     depends_on:
       postgres:
         condition: service_healthy

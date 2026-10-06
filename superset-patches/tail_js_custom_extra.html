@@ -1,0 +1,15 @@
+{#
+  CPI override of Superset's empty tail_js_custom_extra.html hook, which
+  superset/spa.html and superset/basic.html include on every page, embedded
+  dashboards included. Bind-mounted read-only from superset-patches/ (see
+  superset-patches/README.md).
+#}
+<style id="cpi-hide-anchor-links">
+  /* Hide the link icon Superset 3.1.0 puts next to dashboard tab and header
+     titles (its popover shows the dashboard permalink URL). Only the children
+     are hidden: the empty .anchor-link-container span keeps the component id
+     that Superset scrolls to for permalink anchors. */
+  .anchor-link-container > * {
+    display: none !important;
+  }
+</style>
