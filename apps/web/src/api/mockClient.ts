@@ -24,6 +24,7 @@ import type {
   IngestionRunListQuery,
   IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionDeleteDataResult, IngestionAuditLog, IngestionPreview,
   AdminUserListItem,
+  LoginActivityResponse,
 } from '../types';
 import {
   mockAirlineSnapshots, mockCflSnapshots,
@@ -645,6 +646,22 @@ export const mockClient: CpiApiClient = {
       resetMfa: (userId: string) => {
         const u = mockPwUsers.find(x => x.id === userId);
         return delay({ user_id: userId, email: u ? u.email : '', mfa_reset: true });
+      },
+    },
+    // Login activity isn't tracked offline; show the seed users as not signed in.
+    loginActivity: {
+      list: (date?: string) => {
+        const today = new Date().toISOString().slice(0, 10);
+        const items = mockPwUsers.map(u => ({
+          user_id: u.id, email: u.email, tenant_name: u.tenant_name, tenant_slug: u.tenant_slug,
+          role: u.role, is_active: u.is_active,
+          first_login_at: null, last_login_at: null, login_count: 0,
+          last_logout_at: null, last_seen_at: null, status: 'not_signed_in' as const,
+        }));
+        return delay<LoginActivityResponse>({
+          date: date || today, retention_days: 30, oldest_date: today,
+          items, signed_in_count: 0, total_users: items.length,
+        });
       },
     },
     // SMTP settings aren't exercised offline; stubs keep the interface satisfied.

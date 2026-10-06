@@ -153,6 +153,14 @@ export const navigationItems: NavItem[] = [
     requireSuperAdmin: true,
     category: 'Admin',
   },
+  {
+    label: 'Login Activity',
+    path: '/admin/login-activity',
+    icon: 'History',
+    requiredRoles: ['TENANT_ADMIN'],
+    requireSuperAdmin: true,
+    category: 'Admin',
+  },
 
   // ── Platform Settings (peer of ADMIN; renders as its own section) ─
   {

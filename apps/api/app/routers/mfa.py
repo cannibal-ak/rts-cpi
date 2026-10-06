@@ -32,7 +32,7 @@ from app.models.mfa_recovery_code import MfaRecoveryCode
 from app.models.tenant import Tenant
 from app.models.user import AppUser, RoleBinding
 from app.models.user_mfa import UserMfa
-from app.services import audit, mfa_service
+from app.services import audit, login_activity, mfa_service
 from app.services.auth_service import (
     TokenError,
     TokenExpiredError,
@@ -251,6 +251,9 @@ def verify(body: VerifyRequest, db: Session = Depends(get_db_rls)):
     # Success — reset throttle, advance replay guard, stamp login.
     mfa_service.register_success(mfa, step)
     user.last_login_at = datetime.now(timezone.utc)
+    # Login Activity row for this (second-step) login; rides the commit below.
+    # RLS context is the user's own tenant, so the insert passes WITH CHECK.
+    login_activity.record_login(db, user)
 
     role_bindings = db.query(RoleBinding).filter(
         RoleBinding.user_id == user.id,

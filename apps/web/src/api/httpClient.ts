@@ -14,7 +14,7 @@ import type {
   IngestionSchedule, IngestionScheduleCreate, IngestionScheduleUpdate,
   IngestionScheduleListQuery, RunNowRequest, RunNowResult,
   IngestionRun, IngestionRunDetail, IngestionRunListQuery,
-  AdminUserListResponse, AdminResetTokenListResponse,
+  AdminUserListResponse, AdminResetTokenListResponse, LoginActivityResponse,
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
   PlatformHealthResponse, TenantSummaryResponse,
   IngestionJob, IngestionUploadResponse, IngestionValidationResult, IngestionCommitResult, IngestionDeleteDataResult, IngestionAuditLog, IngestionPreview,
@@ -581,6 +581,10 @@ export const httpClient: CpiApiClient = {
       resetMfa: (userId: string) =>
         post<{ user_id: string; email: string; mfa_reset: boolean }>(
           `/api/v1/admin/password-management/users/${userId}/reset-mfa`, {}),
+    },
+    loginActivity: {
+      list: (date?: string) =>
+        get<LoginActivityResponse>('/api/v1/admin/login-activity', { date }),
     },
     dashboard: {
       getHealth: () => get<PlatformHealthResponse>('/api/v1/admin/dashboard/health'),

@@ -19,51 +19,15 @@ import PageHeader from '../components/common/PageHeader';
 import { api } from '../api';
 import type { ApiErrorShape } from '../api/httpClient';
 import { useSession } from '../context/SessionContext';
-import { getTenantDisplayName } from '../utils/tenantConfig';
+import {
+  PLATFORM_TENANT_SLUG, pageTenantName, formatTenantCell, displayRole, roleChipColor,
+} from '../utils/adminUserLabels';
 import type {
   AdminUserListItem, AdminResetTokenItem, AdminTenantOption,
 } from '../types';
 
-// Slug for the RTS platform tenant — labelled "Admin" on this page
-// ("Admin - RTS" in the table) rather than its full org name. It is left out
-// of the invite dropdown: invites only create airline/cruise subtenants.
-const PLATFORM_TENANT_SLUG = 'rts';
-
-// Tenant name shown on this page: tenantConfig's canonical org name, except
-// the platform tenant, which reads as "Admin".
-function pageTenantName(slug: string, fallback: string): string {
-  if (slug.toLowerCase() === PLATFORM_TENANT_SLUG) return 'Admin';
-  return getTenantDisplayName(slug, fallback);
-}
-
-function formatTenantCell(user: AdminUserListItem): string {
-  return `${pageTenantName(user.tenant_slug, user.tenant_name)} - ${user.tenant_slug.toUpperCase()}`;
-}
-
-// Display-only role-label overrides for the Password Management table.
-// These do NOT change the stored role (still TENANT_ADMIN), the API response,
-// or any RBAC check — they only relabel the chip text for a few specific
-// accounts. Keyed on lowercased email; anything not listed falls through to
-// the real role value (TENANT_ADMIN).
-const ROLE_LABEL_OVERRIDES: Record<string, string> = {
-  'admin@rts.com': 'RTS_SuperAdmin',
-  'skyair@airline.com': 'Demo_Admin',
-  'da@airline.com': 'Demo_Admin',
-};
-
-function displayRole(user: AdminUserListItem): string {
-  const override = ROLE_LABEL_OVERRIDES[user.email.toLowerCase()];
-  if (override) return override;
-  if (user.role === 'TENANT_USER') return 'Subtenant';
-  return user.role || '—';
-}
-
-// Subtenant chips use the info color to read as a distinct, lower-privilege
-// role; email-overridden chips and TENANT_ADMIN keep the neutral chip.
-function roleChipColor(user: AdminUserListItem): 'info' | 'default' {
-  if (ROLE_LABEL_OVERRIDES[user.email.toLowerCase()]) return 'default';
-  return user.role === 'TENANT_USER' ? 'info' : 'default';
-}
+// Tenant/role labels (pageTenantName, displayRole, ...) live in
+// utils/adminUserLabels.ts, shared with the Login Activity page.
 
 // Mirrors the backend privilege guard: an account that is itself an RTS
 // platform admin (RTS tenant + TENANT_ADMIN) can never be deactivated or

@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # Platform tenant slug (the internal RTS tenant, excluded from customer-tenant lists).
     platform_tenant_slug: str = os.environ.get("CPI_PLATFORM_TENANT_SLUG", "rts")
 
+    # Login Activity page: days of per-user sign-in rows kept (today included).
+    # Older rows are pruned on each login.
+    login_activity_retention_days: int = int(os.environ.get("LOGIN_ACTIVITY_RETENTION_DAYS", "30"))
+
     # Public base URL of the web app — used to build links emailed to users
     # (e.g. the accept-invite link). Prod overrides via env APP_BASE_URL.
     APP_BASE_URL: str = os.environ.get("APP_BASE_URL", "http://192.168.101.10:9090")

@@ -686,6 +686,37 @@ export interface AdminUserListResponse {
   total: number;
 }
 
+// ──────── Admin Login Activity ────────
+// One row per user per IST day (kept for retention_days). status is derived
+// server-side: logged_out = a logout after the last login; online = no logout
+// and a heartbeat in the last ~12 min; session_ended = no logout, heartbeat
+// stale (tab closed); not_signed_in = no activity that day.
+export type LoginSessionStatus = 'online' | 'logged_out' | 'session_ended' | 'not_signed_in';
+
+export interface LoginActivityItem {
+  user_id: string;
+  email: string;
+  tenant_name: string;
+  tenant_slug: string;
+  role: string;
+  is_active: boolean;
+  first_login_at: string | null;
+  last_login_at: string | null;
+  login_count: number;
+  last_logout_at: string | null;
+  last_seen_at: string | null;
+  status: LoginSessionStatus;
+}
+
+export interface LoginActivityResponse {
+  date: string;          // YYYY-MM-DD (IST day)
+  retention_days: number;
+  oldest_date: string;   // YYYY-MM-DD, first selectable day
+  items: LoginActivityItem[];
+  signed_in_count: number;
+  total_users: number;
+}
+
 export interface AdminResetTokenItem {
   id: string;
   email: string;

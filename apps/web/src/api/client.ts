@@ -13,7 +13,7 @@ import type {
   IngestionSchedule, IngestionScheduleCreate, IngestionScheduleUpdate,
   IngestionScheduleListQuery, RunNowRequest, RunNowResult,
   IngestionRun, IngestionRunDetail, IngestionRunListQuery,
-  AdminUserListResponse, AdminResetTokenListResponse,
+  AdminUserListResponse, AdminResetTokenListResponse, LoginActivityResponse,
   AdminGenerateResetCodeResponse, AdminForceResetResponse,
   PlatformHealthResponse, TenantSummaryResponse,
   IngestionJob, IngestionUploadResponse, IngestionValidationResult,
@@ -469,6 +469,12 @@ export interface CpiApiClient {
       reactivateUser(userId: string): Promise<void>;
       deleteUser(userId: string): Promise<void>;
       resetMfa(userId: string): Promise<{ user_id: string; email: string; mfa_reset: boolean }>;
+    };
+
+    // ── Login Activity ──
+    loginActivity: {
+      // date = YYYY-MM-DD (IST day); omitted -> today.
+      list(date?: string): Promise<LoginActivityResponse>;
     };
 
     // ── Admin Dashboard (Home page) ──
