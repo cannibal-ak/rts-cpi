@@ -28,7 +28,7 @@ interface TimeRangeFilterProps {
 /**
  * One labelled range slider with its two end readouts.
  *
- * Sized and labelled to sit as a single cell in WinairTopFilterBar's grid,
+ * Sized and labelled to sit as a single cell in WinairTopFilterBar's row,
  * beside the dashboard's own dropdowns, so the whole row reads as one set of
  * filters rather than two systems bolted together.
  *
@@ -46,17 +46,23 @@ export default function TimeRangeFilter({
   const active = value[0] > min || value[1] < max;
 
   const body = (
-    <Box>
+    // One cell of the bar's extra-controls group (WinairTopFilterBar
+    // EXTRA_GROUP_SX, which assumes two of these). Wider basis than a dropdown
+    // because the readout shares the field and the slider still needs room
+    // to drag.
+    <Box sx={{ flex: '1 1 160px', minWidth: 0, maxWidth: 340 }}>
       <Typography
         component="span"
         sx={{
+          // Same label as FilterSelect's, to the pixel — any difference in
+          // spacing drops these two labels below the dropdowns' in the row.
           display: 'block',
           fontSize: 11,
           fontWeight: 500,
           color: active ? FILTER_INK : FILTER_LABEL_INK,
           textTransform: 'uppercase',
-          letterSpacing: 0.3,
-          mb: 0.25,
+          letterSpacing: '0.05em',
+          mb: '5px',
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -70,7 +76,7 @@ export default function TimeRangeFilter({
           border: '1px solid',
           borderColor: active ? FILTER_ACCENT : FILTER_FIELD_LINE,
           bgcolor: FILTER_FIELD_BG,
-          borderRadius: '4px',
+          borderRadius: '8px',
           px: 1,
           pt: 0.25,
           pb: 0.5,
