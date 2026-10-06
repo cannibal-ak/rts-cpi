@@ -1,8 +1,12 @@
 """Per-user daily sign-in tracking for the admin Login Activity page.
 
-One user_login_day row per user per IST calendar day. Login upserts today's
-row; logout, /auth/refresh and the browser heartbeat stamp the user's LATEST
-row, so a session that runs past midnight still closes the day it started.
+One user_login_day row per IST calendar day on which the user was active.
+Login upserts today's row. Logout, /auth/refresh and the browser heartbeat
+stamp today's row too: when the session began on an earlier day (tabs are
+often left open overnight — refresh tokens live 7 days), the first such
+signal carries it over into a row for today with login_count = 0 and
+first/last login copied from the day it started. So every day's list shows
+everyone who was active that day, not only those who logged in afresh.
 
 Nothing here commits — the caller's commit carries the write. Every write
 runs inside a SAVEPOINT and swallows its own errors, so tracking can never
@@ -79,38 +83,52 @@ def record_login(db: Session, user: AppUser, now: Optional[datetime] = None) -> 
         logger.exception("login_activity: record_login failed for user %s", user.id)
 
 
-def _stamp_latest(db: Session, user_id, *, logout: bool, now: datetime) -> None:
-    set_clause = "last_seen_at = GREATEST(last_seen_at, :now)"
-    if logout:
-        set_clause += ", last_logout_at = :now"
-    db.execute(
-        text(f"""
-            UPDATE user_login_day SET {set_clause}
-             WHERE id = (SELECT id FROM user_login_day
-                          WHERE user_id = :uid
-                          ORDER BY activity_date DESC
-                          LIMIT 1)
-        """),
-        {"uid": str(user_id), "now": now},
-    )
+# Bump last_seen on today's row, creating it from the user's latest earlier
+# row when the session started on a previous day. No row at all (a session
+# from before this feature) -> nothing to carry over, nothing written.
+_TOUCH_SQL = text("""
+    INSERT INTO user_login_day
+           (tenant_id, user_id, activity_date,
+            first_login_at, last_login_at, login_count, last_seen_at)
+    SELECT tenant_id, user_id, :today,
+           last_login_at, last_login_at, 0, :now
+      FROM user_login_day
+     WHERE user_id = :uid
+     ORDER BY activity_date DESC
+     LIMIT 1
+    ON CONFLICT (user_id, activity_date) DO UPDATE
+       SET last_seen_at = GREATEST(user_login_day.last_seen_at, EXCLUDED.last_seen_at)
+""")
+
+_LOGOUT_SQL = text("""
+    UPDATE user_login_day
+       SET last_logout_at = :now,
+           last_seen_at = GREATEST(last_seen_at, :now)
+     WHERE user_id = :uid AND activity_date = :today
+""")
+
+
+def _touch_today(db: Session, user_id, now: datetime) -> None:
+    db.execute(_TOUCH_SQL, {"uid": str(user_id), "today": ist_day(now), "now": now})
 
 
 def record_logout(db: Session, user_id, now: Optional[datetime] = None) -> None:
-    """Explicit logout: stamp last_logout_at on the user's latest day row."""
+    """Explicit logout: stamp last_logout_at on today's row (carried over if needed)."""
     now = now or _utcnow()
     try:
         with db.begin_nested():
-            _stamp_latest(db, user_id, logout=True, now=now)
+            _touch_today(db, user_id, now)
+            db.execute(_LOGOUT_SQL, {"uid": str(user_id), "today": ist_day(now), "now": now})
     except Exception:
         logger.exception("login_activity: record_logout failed for user %s", user_id)
 
 
 def touch(db: Session, user_id, now: Optional[datetime] = None) -> None:
-    """Still-signed-in signal (refresh / heartbeat): bump last_seen_at."""
+    """Still-signed-in signal (refresh / heartbeat): bump today's last_seen_at."""
     now = now or _utcnow()
     try:
         with db.begin_nested():
-            _stamp_latest(db, user_id, logout=False, now=now)
+            _touch_today(db, user_id, now)
     except Exception:
         logger.exception("login_activity: touch failed for user %s", user_id)
 
