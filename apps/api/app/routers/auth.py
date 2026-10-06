@@ -3,7 +3,7 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import BaseModel, EmailStr
@@ -11,11 +11,11 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import mfa_required_for
+from app.core.deps import get_current_user, mfa_required_for
 from app.models.user import AppUser, RoleBinding
 from app.models.user_mfa import UserMfa
 from app.models.tenant import Tenant
-from app.services import audit
+from app.services import audit, login_activity
 from app.services.auth_service import (
     verify_password,
     hash_password,
@@ -173,6 +173,11 @@ def login(body: LoginRequest, db: Session = Depends(get_db)):
             },
         )
 
+    # Login Activity: counted only here, where tokens are issued — a login
+    # that stops at the MFA challenge is recorded by /mfa/verify instead.
+    login_activity.record_login(db, user)
+    db.commit()
+
     subject = _build_token_subject(user, tenant.slug, roles)
     access_token = create_access_token(subject)
     refresh_token = create_refresh_token(subject)
@@ -215,13 +220,18 @@ def refresh(body: RefreshRequest, db: Session = Depends(get_db)):
     subject = _build_token_subject(user, tenant.slug if tenant else "", roles)
     new_access_token = create_access_token(subject)
 
+    # Refresh fires on page load and ~every 29 min while a tab is open, so it
+    # doubles as a Login Activity "last seen" heartbeat.
+    login_activity.touch(db, user.id)
+    db.commit()
+
     return {"access_token": new_access_token, "token_type": "bearer"}
 
 
 # ── POST /logout ─────────────────────────────────
 
 @router.post("/logout")
-def logout(token: str = Depends(oauth2_scheme)):
+def logout(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
@@ -233,7 +243,20 @@ def logout(token: str = Depends(oauth2_scheme)):
     if payload.get("token_type") != "access":
         raise HTTPException(status_code=401, detail="Not an access token")
     logger.info("User %s logged out (jti: %s)", payload.get("email"), payload.get("jti"))
+    login_activity.record_logout(db, payload.get("sub"))
+    db.commit()
     return {"detail": "Logged out"}
+
+
+# ── POST /heartbeat ──────────────────────────────
+
+@router.post("/heartbeat", status_code=204)
+def heartbeat(current_user: dict = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Still-signed-in ping from an open tab (every 5 min). Feeds the Login
+    Activity page's "last seen" for sessions that end by closing the tab."""
+    login_activity.touch(db, current_user["sub"])
+    db.commit()
+    return Response(status_code=204)
 
 
 # ── POST /change-password ────────────────────────

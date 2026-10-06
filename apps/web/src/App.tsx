@@ -15,6 +15,7 @@ import SftpConnectionsPage from './pages/admin/SftpConnectionsPage';
 import IngestionSchedulesPage from './pages/admin/IngestionSchedulesPage';
 import IngestionRunsPage from './pages/admin/IngestionRunsPage';
 import PasswordManagementPage from './pages/PasswordManagementPage';
+import LoginActivityPage from './pages/admin/LoginActivityPage';
 import EmailSettingsPage from './pages/admin/settings/EmailSettingsPage';
 import IngestionJobsPage from './pages/ingestion/IngestionJobsPage';
 import UploadPage from './pages/ingestion/UploadPage';
@@ -186,6 +187,11 @@ export default function App() {
                 <Route path="/admin/password-management" element={
                   <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
                     <PasswordManagementPage />
+                  </ProtectedRoute>
+                } />
+                <Route path="/admin/login-activity" element={
+                  <ProtectedRoute requiredRoles={['TENANT_ADMIN']} requireSuperAdmin>
+                    <LoginActivityPage />
                   </ProtectedRoute>
                 } />
                 <Route path="/admin/settings/email" element={

@@ -6,6 +6,10 @@ import { mfaVerify, MfaApiError } from '../api/mfa';
 
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
+// "Still signed in" ping for the admin Login Activity page. Most sessions end
+// by closing the tab (no /logout call), so the last heartbeat is what dates it.
+const HEARTBEAT_MS = 5 * 60_000;
+
 /* ─── Types ─── */
 interface AuthUser {
     id: string;
@@ -282,6 +286,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     useEffect(() => {
         setHttpClientAccessToken(accessToken);
     }, [accessToken]);
+
+    // Presence heartbeat while signed in. Fire-and-forget: every failure is
+    // ignored (an expired token just skips a beat until the next refresh).
+    // Keeps running in background tabs — browsers throttle it, not stop it.
+    const accessTokenRef = useRef<string | null>(null);
+    accessTokenRef.current = accessToken;
+    const signedIn = !!user;
+    useEffect(() => {
+        if (!signedIn) return;
+        const id = setInterval(() => {
+            const token = accessTokenRef.current;
+            if (!token) return;
+            fetch(`${BASE}/api/v1/auth/heartbeat`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}` },
+            }).catch(() => { /* ignore */ });
+        }, HEARTBEAT_MS);
+        return () => clearInterval(id);
+    }, [signedIn]);
 
     const value = useMemo(() => ({
         user,

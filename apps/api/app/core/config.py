@@ -57,6 +57,10 @@ class Settings(BaseSettings):
     # are inert (unreachable) until this is flipped to true.
     mfa_enforced: bool = os.environ.get("MFA_ENFORCED", "false").lower() == "true"
 
+    # Login Activity page: days of per-user sign-in rows kept (today included).
+    # Older rows are pruned on each login.
+    login_activity_retention_days: int = int(os.environ.get("LOGIN_ACTIVITY_RETENTION_DAYS", "30"))
+
     # CORS
     cors_origins: list[str] = [
         "http://localhost:5173",

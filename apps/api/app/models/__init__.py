@@ -12,6 +12,7 @@ from app.models.airline import AirlineCpiSnapshot  # noqa: F401
 from app.models.cfl import CflCpiSnapshot  # noqa: F401
 from app.models.alerts import AlertRule, AlertEvent  # noqa: F401
 from app.models.audit import AuditEvent  # noqa: F401
+from app.models.login_activity import UserLoginDay  # noqa: F401
 from app.models.admin import ProviderContract, SavedView, ExportJob  # noqa: F401
 from app.models.sftp import (  # noqa: F401
     SftpConnection,

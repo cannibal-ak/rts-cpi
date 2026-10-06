@@ -19,6 +19,7 @@ from app.routers import (
     admin_ingestion_schedules,
     admin_sftp_connections,
     admin_password_management,
+    admin_login_activity,
     admin_dashboard,
     admin_smtp_config,
     admin_alerts,
@@ -113,6 +114,10 @@ app.include_router(admin_ingestion_runs.router, dependencies=_protected)
 # force reset. Router-level RequirePlatformAdmin + the _protected
 # password-change gate mirror the other admin routers above.
 app.include_router(admin_password_management.router, dependencies=_protected)
+
+# Admin Login Activity — per-user daily login/logout times (30-day window).
+# Router-level RequirePlatformAdmin + _protected, like Password Management.
+app.include_router(admin_login_activity.router, dependencies=_protected)
 
 # Admin Dashboard — platform health + per-tenant data summary for the
 # admin Home page. Router-level RequirePlatformAdmin + _protected gate
