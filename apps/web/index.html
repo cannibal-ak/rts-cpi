@@ -5,6 +5,13 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/png" href="/favicon.png" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- PWA install: Android/Chrome read the manifest; iPad/iOS read apple-touch-icon. -->
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <meta name="theme-color" content="#0070C0" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Altitude AI" />
   <title>Competitor Pricing Intelligence</title>
   <!--
     Superset Embedded SDK. PINNED: this was previously unversioned, so every
