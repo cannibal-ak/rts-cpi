@@ -373,7 +373,16 @@ def _is_tenant_admin(db: Session, user: AppUser) -> bool:
 # Set-(B) activity/audit references (see D0): presence means the user has real
 # history and must be deactivated, not hard-deleted. The first four are
 # RESTRICT-style FKs (a raw delete would 500); audit_event.actor has no FK but
-# records audited admin actions the user performed.
+# records audited admin actions the user performed. The user's own sign-in /
+# MFA / password-reset events are NOT history: every MFA login writes them, so
+# counting them made any user who had ever signed in undeletable. Admin actions
+# on others (mfa.admin_reset, user.*) and ingestion/SFTP actions still count.
+_SELF_AUTH_ACTIONS = (
+    "mfa.verified", "mfa.failed", "mfa.enroll_started",
+    "mfa.enroll_confirmed", "mfa.disabled",
+)
+
+
 def _has_activity_history(db: Session, user_id: UUID) -> bool:
     found = db.execute(
         text(
@@ -382,9 +391,12 @@ def _has_activity_history(db: Session, user_id: UUID) -> bool:
             "  OR EXISTS(SELECT 1 FROM ingestion_jobs WHERE uploaded_by_user_id = CAST(:uid AS uuid)) "
             "  OR EXISTS(SELECT 1 FROM ingestion_schedule WHERE created_by_user_id = CAST(:uid AS uuid)) "
             "  OR EXISTS(SELECT 1 FROM sftp_connection WHERE created_by_user_id = CAST(:uid AS uuid)) "
-            "  OR EXISTS(SELECT 1 FROM audit_event WHERE actor = :uid)"
+            "  OR EXISTS(SELECT 1 FROM audit_event WHERE actor = :uid "
+            "    AND action NOT LIKE 'login.%' "
+            "    AND action NOT LIKE 'password_reset.%' "
+            "    AND action <> ALL(CAST(:self_auth AS text[])))"
         ),
-        {"uid": str(user_id)},
+        {"uid": str(user_id), "self_auth": list(_SELF_AUTH_ACTIONS)},
     ).scalar()
     return bool(found)
 
