@@ -135,6 +135,52 @@ def test_delete_with_history_blocked(db_session, admin_jwt_payload):
     assert _reload(db_session, u.id) is not None
 
 
+# 2b) only the user's own sign-in / MFA / reset events -> NOT history, 204 ----
+def test_delete_with_only_self_auth_events_allowed(db_session, admin_jwt_payload):
+    tid, _ = _mk_tenant(db_session)
+    u = _mk_user(db_session, tid, active=True, admin=False)
+    for action in (
+        "login.mfa_challenge_issued", "mfa.verified", "mfa.failed",
+        "mfa.enroll_started", "mfa.enroll_confirmed", "mfa.disabled",
+        "password_reset.mfa_init",
+    ):
+        db_session.execute(
+            text(
+                "INSERT INTO audit_event "
+                "(tenant_id, actor, action, target_type, target_id, outcome) "
+                "VALUES (:t, :a, :act, 'app_user', :tid, 'success')"
+            ),
+            {"t": str(tid), "a": str(u.id), "act": action, "tid": str(u.id)},
+        )
+    db_session.flush()
+
+    resp = delete_user(u.id, db=db_session, current_user=admin_jwt_payload)
+    assert resp.status_code == 204
+    assert _reload(db_session, u.id) is None
+
+
+# 2c) an admin action on someone else (mfa.admin_reset) is still history ----
+def test_delete_with_admin_action_history_blocked(db_session, admin_jwt_payload):
+    tid, _ = _mk_tenant(db_session)
+    u = _mk_user(db_session, tid, active=True, admin=False)
+    db_session.execute(
+        text(
+            "INSERT INTO audit_event "
+            "(tenant_id, actor, action, target_type, target_id, outcome) "
+            "VALUES (:t, :a, 'mfa.verified', 'app_user', :tid, 'success'), "
+            "       (:t, :a, 'mfa.admin_reset', 'app_user', 'someone', 'success')"
+        ),
+        {"t": str(tid), "a": str(u.id), "tid": str(u.id)},
+    )
+    db_session.flush()
+
+    with pytest.raises(HTTPException) as ei:
+        delete_user(u.id, db=db_session, current_user=admin_jwt_payload)
+    assert ei.value.status_code == 409
+    assert ei.value.detail["code"] == "has_history"
+    assert _reload(db_session, u.id) is not None
+
+
 # 3) delete self -> 400 -------------------------------------------------------
 def test_delete_self_blocked(db_session, admin_jwt_payload):
     with pytest.raises(HTTPException) as ei:
